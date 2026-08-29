@@ -103,7 +103,12 @@ static void moe_vec_q4_0_q8_1_cuda(
 // selection, reducing grid work while preserving FreeToken's existing packed
 // bank layout, route indexing, and BF16 output contract.
 template <typename scalar_t>
-__launch_bounds__(WARP_SIZE, 1)
+// The GEMMA Q4_0 expert kernel has exactly one wave32 workgroup.  Eight
+// resident workgroups per compute unit give gfx1151 enough independent memory
+// operations to cover the packed-weight and activation-read latency without
+// changing the arithmetic, route layout, or output type.  Keep this HIP-only:
+// CUDA continues to use the established generic MMVQ launcher below.
+__launch_bounds__(WARP_SIZE, 8)
 static __global__ void moe_vec_q4_0_hip_two_rows(
     const void* __restrict__ vx,
     const void* __restrict__ vy,
