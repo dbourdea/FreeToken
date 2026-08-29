@@ -47,6 +47,20 @@ static __global__ void mul_mat_vec_q(
   }
 }
 
+#if defined(USE_ROCM)
+// The HIP-only declaration keeps the shared CUDA wrapper in its original
+// position while allowing gfx1151 to test a four-wave dense Q4_0 schedule.
+template <typename scalar_t>
+static void mul_mat_vec_q4_0_q8_1_hip_four_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream);
+#endif
+
 template <typename scalar_t>
 static void mul_mat_vec_q4_0_q8_1_cuda(
     const void* vx,
@@ -56,12 +70,43 @@ static void mul_mat_vec_q4_0_q8_1_cuda(
     const int nrows,
     const int nvecs,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Test four independent wave32 rows per workgroup on the gfx1151 HIP path.
+  // CUDA and every other quantization format retain their existing launcher.
+  mul_mat_vec_q4_0_q8_1_hip_four_waves_cuda<scalar_t>(
+      vx, vy, dst, ncols, nrows, nvecs, stream);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, nvecs, 1);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#endif
 }
+
+#if defined(USE_ROCM)
+// This candidate preserves the generic Q4_0 vector-dot arithmetic exactly.
+// Only the workgroup Y dimension changes: four independent output rows share
+// a HIP workgroup, increasing occupancy without the regression seen at eight
+// waves.  The generic row calculation and bounds check handle partial groups.
+template <typename scalar_t>
+static void mul_mat_vec_q4_0_q8_1_hip_four_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream) {
+  constexpr int kGfx1151Q40WavesPerBlock = 4;
+  const int blocks_per_grid_x = (nrows + kGfx1151Q40WavesPerBlock - 1) /
+                                kGfx1151Q40WavesPerBlock;
+  const dim3 block_nums(blocks_per_grid_x, nvecs, 1);
+  const dim3 block_dims(WARP_SIZE, kGfx1151Q40WavesPerBlock, 1);
+  mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+}
+#endif
 
 template <typename scalar_t>
 static void mul_mat_vec_q4_1_q8_1_cuda(
