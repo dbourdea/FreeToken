@@ -191,6 +191,20 @@ static void mul_mat_vec_q5_K_q8_1_cuda(
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
 }
 
+#if defined(USE_ROCM)
+// Keep the candidate launcher declaration adjacent to the Q6_K wrapper.  This
+// makes its HIP-only scope obvious and leaves the shared CUDA path untouched.
+template <typename scalar_t>
+static void mul_mat_vec_q6_K_q8_1_hip_rdna4_eight_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream);
+#endif
+
 template <typename scalar_t>
 static void mul_mat_vec_q6_K_q8_1_cuda(
     const void* vx,
@@ -200,12 +214,51 @@ static void mul_mat_vec_q6_K_q8_1_cuda(
     const int nrows,
     const int nvecs,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Match llama.cpp's current RDNA4 schedule only for the dense Q6_K path.
+  // Gemma uses this path for the tied token embedding and LM head.  CUDA,
+  // Q4_0 dense work, and every routed MoE kernel retain their validated paths.
+  mul_mat_vec_q6_K_q8_1_hip_rdna4_eight_waves_cuda<scalar_t>(
+      vx, vy, dst, ncols, nrows, nvecs, stream);
+#else
+  // Preserve the original generic CUDA Q6_K implementation exactly.
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, nvecs, 1);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK_K, QI6_K, block_q6_K, VDR_Q6_K_Q8_1_MMVQ, vec_dot_q6_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#endif
 }
+
+#if defined(USE_ROCM)
+// Reuse FreeToken's exact Q6_K vector-dot implementation while scheduling
+// eight independent row waves in one HIP workgroup.  The generic kernel
+// calculates row indexes from `blockIdx.x * blockDim.y + threadIdx.y`, so no
+// weight, activation, output, or reduction arithmetic needs to change.
+template <typename scalar_t>
+static void mul_mat_vec_q6_K_q8_1_hip_rdna4_eight_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream) {
+  // RDNA4's current llama.cpp policy uses eight waves for Q6_K one-vector
+  // matvec.  The rounded grid preserves the existing bounds check for a
+  // partial final group and keeps the public [nvecs, nrows] layout unchanged.
+  constexpr int kRdna4Q6KWavesPerBlock = 8;
+  const int blocks_per_grid_x = (nrows + kRdna4Q6KWavesPerBlock - 1) /
+                                kRdna4Q6KWavesPerBlock;
+  const dim3 block_nums(blocks_per_grid_x, nvecs, 1);
+  const dim3 block_dims(WARP_SIZE, kRdna4Q6KWavesPerBlock, 1);
+
+  // Preserve Q6_K packing, Q8_1 activation layout, per-lane DP arithmetic,
+  // and the BF16 destination contract.  Workgroup Y is the sole experiment.
+  mul_mat_vec_q<scalar_t, QK_K, QI6_K, block_q6_K, VDR_Q6_K_Q8_1_MMVQ, vec_dot_q6_K_q8_1>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+}
+#endif
 
 template <typename scalar_t>
 static void mul_mat_vec_iq2_xxs_q8_1_cuda(
