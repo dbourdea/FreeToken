@@ -55,7 +55,7 @@ static __global__ void moe_vec_q(
 // The HIP launcher is defined after the CUDA-compatible wrapper so the
 // generic wrappers remain grouped by quantization format below.
 template <typename scalar_t>
-static void moe_vec_q4_0_q8_1_hip_two_rows_cuda(
+static void moe_vec_q4_0_q8_1_hip_four_rows_cuda(
     const void* vx,
     const void* vy,
     scalar_t* dst,
@@ -81,10 +81,10 @@ static void moe_vec_q4_0_q8_1_cuda(
     const int token_stride,
     cudaStream_t stream) {
 #if defined(USE_ROCM)
-  // Route AMD builds through the one-wave/two-row specialization above.  CUDA
+  // Route AMD builds through the one-wave/four-row specialization above. CUDA
   // retains the established generic implementation until it has independent
   // NVIDIA evidence, so this HIP experiment cannot alter CUDA behavior.
-  moe_vec_q4_0_q8_1_hip_two_rows_cuda<scalar_t>(
+  moe_vec_q4_0_q8_1_hip_four_rows_cuda<scalar_t>(
       vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
 #else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
@@ -96,15 +96,14 @@ static void moe_vec_q4_0_q8_1_cuda(
 }
 
 #if defined(USE_ROCM)
-// HIP Q4_0 MoE specialization derived from the current llama.cpp MMVQ row
-// structure.  Unlike the older GGML_CUDA_MMV_Y=2 experiment, this launch uses
-// one 32-lane wave for two rows, rather than two independent waves.  The two
-// float accumulators share the same packed Q4_0 activation block and expert
-// selection, reducing grid work while preserving FreeToken's existing packed
-// bank layout, route indexing, and BF16 output contract.
+// HIP Q4_0 MoE candidate derived from the current llama.cpp MMVQ row
+// structure.  One 32-lane wave calculates four rows from the same route.  The
+// four accumulators reuse each packed Q8_1 activation block and expert lookup,
+// reducing route work while preserving FreeToken's packed-bank layout, route
+// indexing, and BF16 output contract.  CUDA retains its generic implementation.
 template <typename scalar_t>
 __launch_bounds__(WARP_SIZE, 1)
-static __global__ void moe_vec_q4_0_hip_two_rows(
+static __global__ void moe_vec_q4_0_hip_four_rows(
     const void* __restrict__ vx,
     const void* __restrict__ vy,
     scalar_t* __restrict__ dst,
@@ -113,9 +112,9 @@ static __global__ void moe_vec_q4_0_hip_two_rows(
     const int ncols,
     const int nrows,
     const int token_stride) {
-  // X indexes adjacent pairs of output rows.  Y is the flattened
+  // X indexes adjacent groups of four output rows.  Y is the flattened
   // token/top-k route index, matching the former Z dimension exactly.
-  const int row0 = 2 * blockIdx.x;
+  const int row0 = 4 * blockIdx.x;
   const int route = blockIdx.y;
   if (row0 >= nrows) {
     return;
@@ -128,10 +127,12 @@ static __global__ void moe_vec_q4_0_hip_two_rows(
   const block_q4_0* x = ((const block_q4_0*)vx) + expert * nrows * blocks_per_row;
   const block_q8_1* y = (const block_q8_1*)(((const int*)vy) + token * token_stride);
 
-  // Each lane owns the same packed-Q4 range for both rows.  Keeping the
+  // Each lane owns the same packed-Q4 range for all four rows.  Keeping the
   // reductions separate preserves the original arithmetic for each result.
   float tmp0 = 0.0f;
   float tmp1 = 0.0f;
+  float tmp2 = 0.0f;
+  float tmp3 = 0.0f;
   for (int i = threadIdx.x / (QI4_0 / VDR_Q4_0_Q8_1_MMVQ); i < blocks_per_row;
        i += blocks_per_wave) {
     const int iby = i * (QK4_0 / QK8_1);
@@ -140,14 +141,22 @@ static __global__ void moe_vec_q4_0_hip_two_rows(
     if (row0 + 1 < nrows) {
       tmp1 += vec_dot_q4_0_q8_1(&x[(row0 + 1) * blocks_per_row + i], &y[iby], iqs);
     }
+    if (row0 + 2 < nrows) {
+      tmp2 += vec_dot_q4_0_q8_1(&x[(row0 + 2) * blocks_per_row + i], &y[iby], iqs);
+    }
+    if (row0 + 3 < nrows) {
+      tmp3 += vec_dot_q4_0_q8_1(&x[(row0 + 3) * blocks_per_row + i], &y[iby], iqs);
+    }
   }
 
-  // A wave-level XOR reduction leaves the same sum in every lane.  Lane zero
-  // writes row zero and lane one writes row one, avoiding shared memory.
+  // A wave-level XOR reduction leaves each independent sum in every lane.
+  // Lanes zero through three write the four rows without shared memory.
 #pragma unroll
   for (int mask = WARP_SIZE / 2; mask > 0; mask >>= 1) {
     tmp0 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp0, mask);
     tmp1 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp1, mask);
+    tmp2 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp2, mask);
+    tmp3 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp3, mask);
   }
   if (threadIdx.x == 0) {
     dst[route * nrows + row0] = tmp0;
@@ -155,10 +164,16 @@ static __global__ void moe_vec_q4_0_hip_two_rows(
   if (threadIdx.x == 1 && row0 + 1 < nrows) {
     dst[route * nrows + row0 + 1] = tmp1;
   }
+  if (threadIdx.x == 2 && row0 + 2 < nrows) {
+    dst[route * nrows + row0 + 2] = tmp2;
+  }
+  if (threadIdx.x == 3 && row0 + 3 < nrows) {
+    dst[route * nrows + row0 + 3] = tmp3;
+  }
 }
 
 template <typename scalar_t>
-static void moe_vec_q4_0_q8_1_hip_two_rows_cuda(
+static void moe_vec_q4_0_q8_1_hip_four_rows_cuda(
     const void* vx,
     const void* vy,
     scalar_t* dst,
@@ -169,11 +184,11 @@ static void moe_vec_q4_0_q8_1_hip_two_rows_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
-  // One block now covers two rows and one route.  ``tokens * top_k`` remains
+  // One block now covers four rows and one route.  ``tokens * top_k`` remains
   // the complete flattened routing domain used by the original launcher.
-  const dim3 block_nums((nrows + 1) / 2, tokens * top_k, 1);
+  const dim3 block_nums((nrows + 3) / 4, tokens * top_k, 1);
   const dim3 block_dims(WARP_SIZE, 1, 1);
-  moe_vec_q4_0_hip_two_rows<scalar_t>
+  moe_vec_q4_0_hip_four_rows<scalar_t>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
 #endif
