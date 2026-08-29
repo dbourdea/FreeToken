@@ -47,6 +47,20 @@ static __global__ void mul_mat_vec_q(
   }
 }
 
+#if defined(USE_ROCM)
+// Declare the ROCm-only launcher before the shared public wrapper.  The
+// definition remains below so the CUDA path retains its original source order.
+template <typename scalar_t>
+static void mul_mat_vec_q4_0_q8_1_hip_rdna4_eight_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream);
+#endif
+
 template <typename scalar_t>
 static void mul_mat_vec_q4_0_q8_1_cuda(
     const void* vx,
@@ -56,12 +70,54 @@ static void mul_mat_vec_q4_0_q8_1_cuda(
     const int nrows,
     const int nvecs,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // RDNA4 llama.cpp selects eight independent waves for one-vector Q4_0
+  // matvecs.  Keep that policy strictly local to HIP Q4_0 dense projections:
+  // CUDA, other quantization types, and FreeToken's routed MoE specialization
+  // retain their previously validated launch geometry.
+  mul_mat_vec_q4_0_q8_1_hip_rdna4_eight_waves_cuda<scalar_t>(
+      vx, vy, dst, ncols, nrows, nvecs, stream);
+#else
+  // Preserve the original generic CUDA implementation exactly.
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, nvecs, 1);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#endif
 }
+
+#if defined(USE_ROCM)
+// Launch the established generic Q4_0 arithmetic with eight independent
+// waves per workgroup.  Each wave owns one output row because the generic
+// kernel derives the row from `blockIdx.x * blockDim.y + threadIdx.y`.
+// This mirrors the current llama.cpp RDNA4 schedule without changing packed
+// Q4_0 weights, packed Q8_1 activations, reduction order, or BF16 output.
+template <typename scalar_t>
+static void mul_mat_vec_q4_0_q8_1_hip_rdna4_eight_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream) {
+  // Eight waves is an RDNA4-specific tuning candidate.  Rounding the grid up
+  // protects non-multiple-of-eight row counts; the generic kernel's existing
+  // bounds check safely discards the final partial workgroup.
+  constexpr int kRdna4Q40WavesPerBlock = 8;
+  const int blocks_per_grid_x = (nrows + kRdna4Q40WavesPerBlock - 1) /
+                                kRdna4Q40WavesPerBlock;
+  const dim3 block_nums(blocks_per_grid_x, nvecs, 1);
+  const dim3 block_dims(WARP_SIZE, kRdna4Q40WavesPerBlock, 1);
+
+  // Instantiate the exact generic Q4_0 dot-product kernel.  The only changed
+  // property is workgroup Y, which exposes eight independent row waves to the
+  // RDNA4 scheduler while retaining deterministic per-wave arithmetic.
+  mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+}
+#endif
 
 template <typename scalar_t>
 static void mul_mat_vec_q4_1_q8_1_cuda(
