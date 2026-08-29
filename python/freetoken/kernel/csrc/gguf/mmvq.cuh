@@ -47,6 +47,31 @@ static __global__ void mul_mat_vec_q(
   }
 }
 
+#if defined(USE_ROCM)
+// Keep CUDA on the original single-wave launcher.  The Strix Halo HIP path
+// gets a separate wrapper so a two-wave workgroup can be measured without
+// changing any other quantization format or NVIDIA build behavior.
+template <typename scalar_t>
+static void mul_mat_vec_q4_0_q8_1_hip_two_waves_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs,
+    cudaStream_t stream) {
+  constexpr int kGfx1151Q40WavesPerBlock = 2;
+  const int blocks_per_grid_x = (nrows + kGfx1151Q40WavesPerBlock - 1) /
+                                kGfx1151Q40WavesPerBlock;
+  const dim3 block_nums(blocks_per_grid_x, nvecs, 1);
+  const dim3 block_dims(WARP_SIZE, kGfx1151Q40WavesPerBlock, 1);
+  // The generic kernel still gives each wave a distinct threadIdx.y and row.
+  // It therefore preserves the original arithmetic and partial-row check.
+  mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+}
+#endif
+
 template <typename scalar_t>
 static void mul_mat_vec_q4_0_q8_1_cuda(
     const void* vx,
@@ -56,11 +81,18 @@ static void mul_mat_vec_q4_0_q8_1_cuda(
     const int nrows,
     const int nvecs,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Two waves is the remaining small scheduling point between the accepted
+  // one-wave path and the rejected four-wave and eight-wave experiments.
+  mul_mat_vec_q4_0_q8_1_hip_two_waves_cuda<scalar_t>(
+      vx, vy, dst, ncols, nrows, nvecs, stream);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, nvecs, 1);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK4_0, QI4_0, block_q4_0, VDR_Q4_0_Q8_1_MMVQ, vec_dot_q4_0_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#endif
 }
 
 template <typename scalar_t>
