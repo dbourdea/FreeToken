@@ -919,3 +919,26 @@ three-sample scheduler matrix inside the same swap-drained controller, followed
 by its independent repeat and normal-service recovery verification.  Preserve
 `q4-c36-mmv-y4-swapdrain-20260901T231519Z`, including the quality response,
 per-process swap telemetry, temporary swap policy evidence, and recovery log.
+
+### C37: four-row MMV first zero-swap scheduler matrix
+
+The extended swap-drain controller passed the deterministic quality suite and
+then ran the fixed warm three-sample scheduler matrix before restoring swap,
+the swappiness policy, and the normal NVFP4 service.  The candidate measured
+48.248, 48.514, and 47.871 decode tokens/s, for a 48.211 mean and 48.248
+median.  Client-visible prefill throughput averaged 2,759.522 prompt tokens/s.
+Warm TTFT averaged 0.439 seconds and token-gap p99 was 24.45 ms.
+
+Against the accepted 47.960-token/s Q4 decode baseline, the first four-row
+matrix is a 0.52 percent mean increase.  The controller recorded zero active
+swap during candidate execution, restored the swap device and swappiness value
+of 60, and verified the normal NVFP4 API afterward.
+
+**Decision: do not promote four rows.** The quality and residency gates pass,
+but the first throughput result is below the campaign's one-percent promotion
+floor and far below the requested performance target.  An independent repeat
+may still distinguish a small stable effect from ordinary host variation, but
+no default, upstream-facing branch, or public performance claim may change on
+this evidence alone.  Preserve
+`q4-c37-mmv-y4-swapdrain-tps-20260901T231926Z`, including the raw scheduler
+samples, client-prefill fields, quality suite, and automatic recovery evidence.
