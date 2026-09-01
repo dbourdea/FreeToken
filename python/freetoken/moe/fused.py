@@ -6,11 +6,7 @@ from typing import Dict, Tuple
 
 import torch
 from freetoken.moe import BaseMoeBackend
-from freetoken.utils import div_ceil, init_logger
-
-logger = init_logger(__name__)
-
-_warned_torch_topk = False
+from freetoken.utils import div_ceil
 
 
 def _torch_fused_topk(
@@ -19,7 +15,7 @@ def _torch_fused_topk(
     renormalize: bool,
     num_token_non_padded: torch.Tensor | None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Pure-torch softmax router matching triton_kernels.topk (Windows fallback).
+    """Pure-torch reference for the fused softmax router; tests compare the kernel against it.
 
     Softmax over all experts, select the top-k, and (when ``renormalize``) rescale the
     selected weights to sum to 1 -- the standard fused-MoE routing convention.
@@ -44,73 +40,9 @@ def fused_topk(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert hidden_states.shape[0] == gating_output.shape[0], "Number of tokens mismatch"
 
-    from freetoken.kernel.backend import is_rocm_runtime, is_triton_kernels_installed
+    from freetoken.kernel.triton.moe_router import fused_topk_softmax
 
-    # The in-tree HIP router is independently parity-tested and has passed the
-    # GMKtec EVO-X2 end-to-end Qwen quality control at least as fast as the matching
-    # ROCm llama.cpp control.  Make it the native ROCm default.  An operator can
-    # still set this to ``0`` to reproduce the PyTorch reference route during a
-    # diagnosis without changing model weights or server configuration.
-    use_rocm_triton_router = is_rocm_runtime() and os.environ.get(
-        "FREETOKEN_ROCM_TRITON_ROUTER", "1"
-    ) == "1"
-    if use_rocm_triton_router:
-        from freetoken.kernel.triton.moe_router import fused_topk_softmax
-
-        return fused_topk_softmax(gating_output, topk, renormalize, num_token_non_padded)
-
-    # OpenAI's triton_kernels package distributes CUDA-only binaries. The
-    # in-tree Triton router is useful for research on HIP, but it changed a
-    # deterministic Qwen AIME output on GMKtec EVO-X2 despite matching router values
-    # in isolation. Production ROCm therefore retains this exact PyTorch route
-    # until an end-to-end quality-equivalent replacement is demonstrated.
-    if not is_triton_kernels_installed():
-        global _warned_torch_topk
-        if not _warned_torch_topk:
-            _warned_torch_topk = True
-            # Once, not per call: this runs every MoE forward. ROCm has no
-            # supported triton_kernels package, while CUDA Linux may restore
-            # the optimized package by installing it. Keep the distinction
-            # explicit so an AMD operator is not told to install CUDA binaries.
-            reason = (
-                "ROCm keeps the reference pure-torch router"
-                if is_rocm_runtime()
-                else "triton_kernels is not installed"
-            )
-            logger.warning_rank0(
-                f"fused_topk: {reason} -> pure-torch router fallback "
-                "(numerically equivalent, slower)."
-            )
-        return _torch_fused_topk(gating_output, topk, renormalize, num_token_non_padded)
-
-    if topk & (topk - 1):
-        # triton_kernels.topk builds tl.arange(0, k), which must be a power of 2; a
-        # top-10 router (qwen4_exp) takes the equivalent vendored triton router instead.
-        from freetoken.kernel.triton.moe_router import fused_topk_softmax
-
-        return fused_topk_softmax(gating_output, topk, renormalize, num_token_non_padded)
-
-    from triton_kernels.topk import topk as triton_kernels_topk
-
-    logits = gating_output.float()
-    softmax_first = not renormalize
-    if softmax_first:
-        logits = torch.softmax(logits, dim=-1)
-    sparse_topk = triton_kernels_topk(
-        logits,
-        topk,
-        apply_softmax=not softmax_first,
-    )
-    if hasattr(sparse_topk, "vals"):
-        topk_weights = sparse_topk.vals
-        topk_ids = sparse_topk.indx
-    else:
-        topk_weights, topk_ids = sparse_topk[:2]
-    topk_ids = topk_ids.to(torch.int32)
-    if num_token_non_padded is not None:
-        indices = torch.arange(0, topk_ids.shape[0], device=topk_ids.device)
-        topk_ids[indices >= num_token_non_padded, :] = -1
-    return topk_weights, topk_ids
+    return fused_topk_softmax(gating_output, topk, renormalize, num_token_non_padded)
 
 
 def moe_align_block_size(
