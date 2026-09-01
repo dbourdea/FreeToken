@@ -18,6 +18,10 @@ readonly LAUNCHER="${ROOT_DIR}/source-qwen-bench-metrics-f1baf13/scripts/gmk-evo
 readonly NORMAL_STARTER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"
 readonly NORMAL_STOPPER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"
 readonly QUALITY_RUNNER="${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_gguf_endurance_battery.sh"
+# Use the reviewed benchmark harness checkout so its client-visible prefill
+# metric and fixed scheduler prompt remain independent of the candidate source.
+readonly BENCHMARK_SOURCE_DIR="${ROOT_DIR}/source-qwen-bench-metrics-f1baf13"
+readonly SCHEDULER_RUNNER="${BENCHMARK_SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh"
 readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-mmv-y4-05751ef"
 
 # Remember which reversible host changes this controller owns.
@@ -74,3 +78,12 @@ rg -Fq 'API server is ready to serve' "${ARTIFACT_DIR}/server.log"
 
 # Run the canonical deterministic state suite and its process-scoped swap gate.
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" bash "${QUALITY_RUNNER}" "${ARTIFACT_DIR}/quality" 1 0
+
+# Measure the fixed three-sample scheduler matrix only after quality and zero
+# swap pass.  These explicit child-only overrides preserve the normal service
+# defaults while directing the reviewed harness to the isolated Q4 endpoint.
+GMK_EVO_X2_QWEN_BENCHMARK_SOURCE_DIR="${BENCHMARK_SOURCE_DIR}" \
+GMK_EVO_X2_QWEN_TOKENIZER_DIR="${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4" \
+GMK_EVO_X2_QWEN_MODEL_NAME="qwen36-35b-a3b-q4km-gguf-amd" \
+GMK_EVO_X2_QWEN_BASE_URL="http://127.0.0.1:1922/v1" \
+    bash "${SCHEDULER_RUNNER}" "${ARTIFACT_DIR}/scheduler-tps"
