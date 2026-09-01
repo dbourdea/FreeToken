@@ -247,9 +247,19 @@ static void moe_vec_q8_0_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Q8_0 was the largest measured decode-kernel family in the representative
+  // trace.  The HIP-only RDNA4 geometry follows current llama.cpp while
+  // retaining FreeToken's existing activation packing and vector-dot code.
+  constexpr int kHipRdna4Waves = 8;
+  const int block_num_y = (nrows + kHipRdna4Waves - 1) / kHipRdna4Waves;
+  const dim3 block_nums(block_num_y, 1, tokens * top_k);
+  const dim3 block_dims(WARP_SIZE, kHipRdna4Waves, 1);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
+#endif
   moe_vec_q<scalar_t, QK8_0, QI8_0, block_q8_0, VDR_Q8_0_Q8_1_MMVQ, vec_dot_q8_0_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
@@ -304,9 +314,20 @@ static void moe_vec_q4_K_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Current llama.cpp schedules these simple RDNA4 single-vector K-quant
+  // helpers with eight independent 32-lane waves.  Keep the policy local to
+  // the traced Q4_K decode path: the packed bank, vector-dot helper, row
+  // mapping, and CUDA launch all retain their established behavior.
+  constexpr int kHipRdna4Waves = 8;
+  const int block_num_y = (nrows + kHipRdna4Waves - 1) / kHipRdna4Waves;
+  const dim3 block_nums(block_num_y, 1, tokens * top_k);
+  const dim3 block_dims(WARP_SIZE, kHipRdna4Waves, 1);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
+#endif
   moe_vec_q<scalar_t, QK_K, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
@@ -323,9 +344,19 @@ static void moe_vec_q5_K_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Qwen's routed down projection is Q5_K.  Use the same HIP-only RDNA4
+  // eight-wave geometry as Q4_K while preserving its distinct quantization
+  // helper and exact per-row reduction order.
+  constexpr int kHipRdna4Waves = 8;
+  const int block_num_y = (nrows + kHipRdna4Waves - 1) / kHipRdna4Waves;
+  const dim3 block_nums(block_num_y, 1, tokens * top_k);
+  const dim3 block_dims(WARP_SIZE, kHipRdna4Waves, 1);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
+#endif
   moe_vec_q<scalar_t, QK_K, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
@@ -342,9 +373,18 @@ static void moe_vec_q6_K_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM)
+  // Keep Q6_K ready for the same architecture-aware screen without affecting
+  // CUDA or the Q4_0 two-row specialization.
+  constexpr int kHipRdna4Waves = 8;
+  const int block_num_y = (nrows + kHipRdna4Waves - 1) / kHipRdna4Waves;
+  const dim3 block_nums(block_num_y, 1, tokens * top_k);
+  const dim3 block_dims(WARP_SIZE, kHipRdna4Waves, 1);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
+#endif
   moe_vec_q<scalar_t, QK_K, QI6_K, block_q6_K, VDR_Q6_K_Q8_1_MMVQ, vec_dot_q6_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
