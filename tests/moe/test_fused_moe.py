@@ -2,19 +2,18 @@ import pytest
 import torch
 
 
-def test_fused_topk_keeps_reference_router_on_rocm(monkeypatch):
-    """HIP retains the exact PyTorch router until end-to-end parity is proven."""
-    from freetoken.kernel import backend
+def test_fused_topk_routes_to_in_tree_triton_router(monkeypatch):
+    """All backends dispatch through the in-tree router before launching a GPU kernel."""
     from freetoken.moe import fused
+    from freetoken.kernel.triton import moe_router
 
     weights = torch.tensor([[0.7, 0.3]], dtype=torch.float32)
     ids = torch.tensor([[4, 9]], dtype=torch.int32)
     calls = []
 
-    monkeypatch.setattr(backend, "is_rocm_runtime", lambda: True)
     monkeypatch.setattr(
-        fused,
-        "_torch_fused_topk",
+        moe_router,
+        "fused_topk_softmax",
         lambda logits, topk, renormalize, limit: (
             calls.append((logits, topk, renormalize, limit)) or (weights, ids)
         ),
