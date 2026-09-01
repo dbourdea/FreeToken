@@ -30,13 +30,19 @@ def test_hip_gguf_flags_keep_the_one_row_default(monkeypatch: pytest.MonkeyPatch
     assert gguf.os.environ["PYTORCH_ROCM_ARCH"] == "gfx1151"
 
 
-def test_hip_gguf_flags_allow_only_the_reviewed_two_row_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Allow the documented two-row experiment without widening accepted inputs."""
+def test_hip_gguf_flags_allow_the_reviewed_row_grouping_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow only the documented two-row and RDNA4 eight-wave candidate builds."""
 
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "2")
     monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1151")
 
     assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=2"]
+
+    # Current llama.cpp selects eight Wave32 rows for simple MMVQ formats on
+    # RDNA4.  Keep that choice explicit and scoped to the isolated candidate.
+    monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "8")
+
+    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=8"]
 
 
 def test_hip_gguf_flags_reject_an_unreviewed_row_grouping(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,5 +50,5 @@ def test_hip_gguf_flags_reject_an_unreviewed_row_grouping(monkeypatch: pytest.Mo
 
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "4")
 
-    with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_MMV_Y must be 1 or 2"):
+    with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_MMV_Y must be 1, 2, or 8"):
         gguf._hip_gguf_cflags()
