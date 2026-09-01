@@ -492,3 +492,127 @@ artifact `qwen-router-c07-20260901T180707Z` on GMKtec EVO-X2 as a diagnostic,
 but retain the reference route for the exact-Q4 quality baseline.  The normal
 GMKtec EVO-X2 service remained on its existing configuration and returned
 `status: ok` after the diagnostic.
+
+#### C07 correction and C08-C09 quality requalification
+
+The C07 dispatch conclusion was superseded by a source and deployment audit.
+The active service source was older than the branch under test, while the
+current branch's router policy selects the in-tree HIP Triton router by
+default.  The upstream router-policy change is therefore not an untested new
+kernel, but it does expose a branch-versus-deployment qualification gap that
+had to be closed before making a performance claim.
+
+First, a quality-only isolated Q4 window using the current branch's router
+path passed all three deterministic controls.  A second isolated window used a
+clean router-only checkout, excluding the rejected decode-wave modification,
+and expanded the test scope:
+
+| Control | Result | Key evidence |
+| --- | --- | --- |
+| Exact response, arithmetic, structured JSON | 3 of 3 pass | deterministic visible outputs |
+| Multi-turn state retention | 3 of 3 pass | maximum TTFT 0.846 s; p99 token gap 24.20 ms |
+| Fresh-prefix retrieval | 1 of 1 pass | 1,556 reported prompt tokens; TTFT 5.344 s |
+| Higher-context fresh-prefix retrieval | 1 of 1 pass | 5,656 reported prompt tokens; TTFT 22.594 s |
+
+The higher-context control is below the 8,192-token serving limit because its
+single request must also reserve output capacity.  A 16K control is outside
+this qualified server configuration and is not represented as a passed test.
+
+The C09 window also discovered that an older recovery launcher had created a
+healthy but non-dedicated process group.  The controller refused to stop it,
+as designed.  After verifying that the group contained only the FreeToken
+frontend and its own worker children, it was replaced using the dedicated
+`setsid` launcher.  The restored service reported `status: ok`, and its server
+PID, process-group ID, and session ID were all identical.  This repair is a
+reliability prerequisite for later time-share tests, not a throughput result.
+
+**Decision: performance eligible, not yet accepted.** The current HIP Triton
+router configuration has cleared the available deterministic, state, long-
+context, and recovery gates.  It must still complete the fixed five-sample API
+matrix and concurrent workload with a fresh exact-Q4 reference before it can
+replace the 47.960-TPS baseline.  Preserve the quality artifacts
+`qwen-router-c08-quality-20260901T181143Z` and
+`qwen-router-c09-full-quality-20260901T183253Z` on GMKtec EVO-X2.
+
+### C10: router-only exact-Q4 API and concurrency matrix
+
+The clean router-only checkout then completed the fixed five-sample API matrix
+and the three-round concurrency controls.  This is the same checkout that
+passed C09 quality, with the rejected decode-wave experiment excluded.  The
+benchmark used the exact Q4 model, a fixed 48-line prompt, a 256-token single
+decode, and the model's valid tokenizer.  It was served only on the isolated
+loopback candidate port while the ordinary NVFP4 API was stopped by the
+recovery controller.
+
+| Workload | Mean throughput | p99 TTFT | p99 token gap |
+| --- | ---: | ---: | ---: |
+| Single request, five samples | 48.282 decode tokens/s | 0.432 s | 24.26 ms |
+| Concurrent 1, three rounds | 40.138 aggregate tokens/s | 0.436 s | 40.67 ms |
+| Concurrent 2, three rounds | 57.913 aggregate tokens/s | 0.854 s | 53.63 ms |
+| Concurrent 4, three rounds | 81.456 aggregate tokens/s | 1.174 s | 76.45 ms |
+
+The single-request result is 0.67 percent above the accepted 47.960-token/s
+baseline.  That is within normal run-to-run variation and below the campaign's
+minimum promotion gate of a repeatable one percent gain.  The candidate is
+therefore quality-qualified and load-stable, but it is not a new performance
+baseline and must not be promoted on this evidence alone.
+
+The controller stopped the candidate, restarted the ordinary NVFP4 API, and
+verified `status: ok`.  The recovered server PID, process-group ID, and session
+ID were identical, and no listener remained on the candidate port.  Preserve
+the complete artifact `qwen-router-c10-api-20260901T185412Z` on GMKtec EVO-X2.
+
+**Decision: do not promote.** Retain the current HIP Triton router as a
+quality-qualified route, but focus the next iteration on data movement and
+expert-cache work, where an end-to-end gain remains plausible.
+
+### C11: upstream expert-cache copy-plan audit
+
+Upstream's newer expert-cache copy-plan changes were merged only into a
+disposable source checkout.  The candidate preserves the qualified in-tree
+router path and adds the upstream copy-plan and AOT-catalog corrections.  Two
+stale test expectations were found and corrected in that disposable checkout:
+the router test expected a retired reference dispatch policy, and the AOT test
+expected two unsupported legacy copy shapes to be compiled even though the
+upstream code intentionally filters them out.
+
+The corrected CPU-side controls passed: three host-residency and locked-layer
+copy tests, plus two strict AOT-grid selection tests.  The normal NVFP4 API
+reported `status: ok` after the checks.  The saved CPU evidence is
+`upstream-cache-c11-retry-20260901T191217Z` on GMKtec EVO-X2.
+
+However, the focused ROCm fused-MoE suite also produced an illegal-memory-
+access fault in `fused_moe_kernel` while testing the disposable candidate.
+The failed test process was a separate one-process group and was terminated;
+GPU utilization returned from 100 percent to 5 percent, and the ordinary API
+remained healthy.  This failure cannot be attributed to the copy-plan change
+because that fused-expert test path was not changed by the upstream copy-plan
+commit.  It is nevertheless a real safety failure on the target ROCm stack.
+
+**Decision: safety-blocked.** Do not merge or benchmark the upstream cache
+candidate yet.  The next iteration must stop the normal service, reproduce the
+fused-expert fault with serialized kernel dispatch and a minimal shape, compare
+the candidate with the accepted source, then repair or replace the failing
+kernel before any cache-copy throughput claim is considered.
+
+### C12: accepted-source fused-MoE fault reproduction
+
+The mandatory isolated reproduction was run against the accepted source,
+not the upstream cache candidate.  The ordinary NVFP4 API was stopped through
+the recovery controller, and the smallest failing test was launched in its own
+session with serialized ROCm dispatch.  The test failed in 3.42 seconds with a
+HIP illegal-memory-access fault in `fused_moe_kernel` on the float16 grouped
+MoE shape: 4 tokens, 37 experts, hidden size 32, intermediate size 24, and
+top-k 4.  The exact source revision, test output, exit status, stop log, and
+recovery log are saved in `fused-moe-c12-baseline-20260901T191320Z` on GMKtec
+EVO-X2.
+
+This establishes that the failure predates the upstream cache-copy candidate.
+It also rules out a simple test-runner race because serialized dispatch reports
+the same faulting `fused_moe_kernel`.  The normal NVFP4 API was restored by the
+controller and again returned `status: ok` after its normal cold load.
+
+**Decision: repair prerequisite confirmed.** The next code change must add a
+ROCm-safe grouped-MoE selection or correct the kernel bounds issue for this
+shape, backed by the isolated reproducer.  The upstream cache candidate remains
+on hold until that repair passes and no longer faults the target ROCm runtime.
