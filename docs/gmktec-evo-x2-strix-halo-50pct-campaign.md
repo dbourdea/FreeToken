@@ -942,3 +942,42 @@ no default, upstream-facing branch, or public performance claim may change on
 this evidence alone.  Preserve
 `q4-c37-mmv-y4-swapdrain-tps-20260901T231926Z`, including the raw scheduler
 samples, client-prefill fields, quality suite, and automatic recovery evidence.
+
+### C38: four-row MMV independent zero-swap repeat
+
+The required independent repeat again passed the deterministic quality suite,
+the zero-swap residency gate, and automatic restoration of the normal NVFP4
+service.  Its three scheduler samples were 48.396, 48.544, and 48.540 decode
+tokens/s, for a 48.493 mean and 48.540 median.  Client-visible prefill
+throughput averaged 2,784.517 prompt tokens/s, warm TTFT averaged 0.435
+seconds, and token-gap p99 was 26.10 ms.
+
+This individual repeat is 1.11 percent above the accepted Q4 baseline, but the
+combined six-sample mean of C37 and C38 is 48.352 decode tokens/s, only a 0.82
+percent increase.  C37 also missed the one-percent promotion floor on its own.
+
+**Decision: reject four-row MMV grouping for promotion.** The effect is too
+small and not repeatably above the campaign gate, so it does not justify a
+default change, an upstream-facing claim, or a performance claim.  Preserve
+`q4-c38-mmv-y4-swapdrain-repeat-20260901T232251Z` with its raw quality,
+scheduler, swap, and recovery evidence.
+
+### C39: client-observable timing-breakdown baseline
+
+The fixed normal NVFP4 scheduler workload was rerun after adding timestamped
+client API boundaries to each immutable sample.  All three scored samples
+passed.  Decode throughput averaged 28.132 tokens/s, client-visible prefill
+throughput averaged 2,936.537 prompt tokens/s, and warm TTFT averaged 0.413
+seconds.
+
+The new boundaries show that response headers arrived in 2.31 to 2.94 ms and
+the remaining header-to-first-text interval was 405.57 to 418.31 ms.  The
+last-text-to-stream-close interval was below 0.56 ms in all three samples.
+These are client-observable API boundaries only.  They must not be interpreted
+as isolated scheduler, tokenization, prefill-kernel, or GPU execution times.
+
+The capture also repaired a reproducibility defect in the scheduler wrapper:
+it now derives its active source checkout from its own location rather than a
+deleted disposable checkout.  Preserve
+`nvfp4-c39-api-timing-baseline-20260901T233228Z` and the corresponding
+`candidate/mmv-y4` commits `5cdb7a5` and `a0d59ca`.
