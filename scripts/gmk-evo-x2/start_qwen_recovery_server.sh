@@ -11,7 +11,11 @@ set -euo pipefail
 # Keep every recovery run separate from previous logs and benchmark artifacts.
 readonly RUN_ID="qwen-reboot-recovery-$(date -u +%Y%m%dT%H%M%SZ)"
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
+# Resolve the active checkout from this tracked launcher.  Experiment sources
+# are intentionally disposable, so binding recovery to a historical checkout
+# would turn a valid service restoration into a stale-path failure.
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly MODEL_DIR="${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4"
 # Pair a strict native cache with the exact source revision that built it.

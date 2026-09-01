@@ -191,6 +191,17 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('readonly KV_RESERVE_TOKENS="${FREETOKEN_KV_RESERVE_TOKENS:-8192}"', contents)
         self.assertIn('--kv-reserve-tokens "${KV_RESERVE_TOKENS}"', contents)
 
+    def test_recovery_resolves_its_active_checkout_instead_of_a_retired_path(self) -> None:
+        """A future test cleanup can restart the normal service after worktree rotation."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        recovery = repository_root / "scripts" / "gmk-evo-x2" / "start_qwen_recovery_server.sh"
+        contents = recovery.read_text(encoding="utf-8")
+
+        self.assertIn('readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', contents)
+        self.assertIn('readonly SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"', contents)
+        self.assertNotIn('source-qwen-harness-d6ee8ce', contents)
+
     def test_recovery_uses_a_dedicated_group_and_checked_stop_helper(self) -> None:
         """Recovery must make later GPU handoff safe for isolated ROCm candidates."""
 
