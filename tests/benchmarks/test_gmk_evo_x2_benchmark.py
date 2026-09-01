@@ -232,6 +232,19 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('wait_for_serving 1919 "${RECOVERY_ARTIFACT}"', contents)
         self.assertIn('wait_for_serving 1922 "${ARTIFACT_ROOT}/q4-health.json"', contents)
 
+    def test_dense_q8_timeshare_controller_owns_detached_recovery(self) -> None:
+        """A lost SSH parent must not leave the normal service stopped after Q8 screening."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        controller = repository_root / "scripts" / "gmk-evo-x2" / "run_qwen_q8_dense_timeshare.sh"
+        contents = controller.read_text(encoding="utf-8")
+
+        self.assertIn('FREETOKEN_RECOVERY_SOURCE_DIR:?set FREETOKEN_RECOVERY_SOURCE_DIR', contents)
+        self.assertIn('wait_for_normal_completion()', contents)
+        self.assertIn('trap cleanup EXIT INT TERM', contents)
+        self.assertIn('FREETOKEN_DISABLE_JIT=1', contents)
+        self.assertIn('normal_recovery_completion=passed', contents)
+
     def test_q4_cleanup_accepts_an_already_exited_failed_frontend(self) -> None:
         """A failed candidate must not prevent the normal service from recovering."""
 
