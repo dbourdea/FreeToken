@@ -166,6 +166,17 @@ class DpmPolicyWrapperTests(unittest.TestCase):
         self.assertIn('bash "${HARNESS}" "${BENCHMARK_DIR}"', contents)
         self.assertNotIn('mkdir -p "${BENCHMARK_DIR}"', contents)
 
+    def test_scheduler_wrapper_resolves_its_checkout_instead_of_a_retired_path(self) -> None:
+        """A normal baseline must survive rotation of disposable source checkouts."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        wrapper = repository_root / "scripts" / "gmk-evo-x2" / "run_qwen_scheduler_baseline.sh"
+        contents = wrapper.read_text(encoding="utf-8")
+
+        self.assertIn('readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', contents)
+        self.assertIn('readonly SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"', contents)
+        self.assertNotIn('source-qwen-harness-d6ee8ce', contents)
+
 
 class QwenRecoveryContextTests(unittest.TestCase):
     """Protect the recovery server's validated long-context cache allocation."""

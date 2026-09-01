@@ -11,7 +11,12 @@ set -euo pipefail
 # Accept a caller-supplied artifact root so each run has immutable evidence.
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_scheduler_baseline.sh ARTIFACT_DIR}"
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
+# Resolve the source checkout from this checked-in wrapper rather than naming a
+# disposable checkout.  Candidate worktrees are deliberately short-lived, so a
+# hard-coded source directory would make an otherwise valid normal-service
+# benchmark fail before opening its first API request.
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # Keep benchmark code independent from the source checkout serving the normal
 # API. A deployed server checkout can intentionally stay frozen while a newer
 # isolated checkout supplies the reviewed benchmark harness. This override
