@@ -45,3 +45,12 @@ Each passed sample records both decode TPS and `client_prefill_tps`.  The latter
 is prompt tokens divided by warm TTFT, so it represents the client-visible
 request-to-first-text boundary.  It is intentionally reported separately from
 any server log's internal input-throughput line, whose timing boundary differs.
+
+The per-sample `timing` object also records an auditable API timing breakdown:
+`response_headers_seconds`, `headers_to_first_text_seconds`,
+`first_text_to_stream_close_seconds`, and `last_text_to_stream_close_seconds`.
+These values identify client-observable request phases only.  They do not claim
+to separate tokenization, queueing, scheduler execution, model prefill, or GPU
+kernel work, which the OpenAI-compatible streaming API does not expose as
+independent timestamped events.  ROCm profiler evidence remains the source for
+kernel-level attribution.

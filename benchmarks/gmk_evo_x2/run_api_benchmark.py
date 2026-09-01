@@ -82,6 +82,20 @@ def client_prefill_tps(prompt_tokens: int | None, warm_ttft_seconds: float | Non
     return prompt_tokens / warm_ttft_seconds
 
 
+def elapsed_seconds(later: float | None, earlier: float | None) -> float | None:
+    """Return a nonnegative elapsed interval or preserve an unavailable boundary.
+
+    The benchmark measures monotonic clock values around client-observable
+    boundaries.  A missing boundary must remain ``None`` rather than becoming a
+    made-up zero-duration phase.  The nonnegative check also keeps a malformed
+    or mocked timestamp from becoming a misleading performance result.
+    """
+
+    if later is None or earlier is None or later < earlier:
+        return None
+    return later - earlier
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse explicit inputs so every performance-affecting choice is recorded."""
 
@@ -147,8 +161,16 @@ def iter_sse_events(response: Any, started_at: float) -> Iterable[tuple[float, s
 
 def stream_completion(
     args: argparse.Namespace,
-) -> tuple[list[StreamObservation], str, float, float, list[str], dict[str, Any] | None]:
-    """Execute one fixed greedy request and collect content plus protocol errors."""
+) -> tuple[list[StreamObservation], str, float, float, float | None, list[str], dict[str, Any] | None]:
+    """Execute one request and retain every client-observable timing boundary.
+
+    ``response_headers_at`` is measured when the HTTP client receives the
+    response headers.  It is a transport and server-acceptance boundary, not a
+    claim that model prefill completed there.  The interval from that boundary
+    to first visible text remains useful because it distinguishes the complete
+    request-to-first-token result from the post-header waiting interval without
+    pretending to expose a private server scheduler or GPU kernel timeline.
+    """
 
     request_body = {
         "model": args.model,
@@ -179,9 +201,11 @@ def stream_completion(
     protocol_errors: list[str] = []
     usage: dict[str, Any] | None = None
     completed = False
+    response_headers_at: float | None = None
     started_at = time.perf_counter()
     try:
         with urllib.request.urlopen(request, timeout=args.timeout_seconds) as response:
+            response_headers_at = time.perf_counter()
             for offset, event_data in iter_sse_events(response, started_at):
                 if event_data == "[DONE]":
                     completed = True
@@ -220,6 +244,7 @@ def stream_completion(
         "".join(item.content for item in observations),
         started_at,
         finished_at,
+        response_headers_at,
         protocol_errors,
         usage,
     )
@@ -236,7 +261,7 @@ def load_tokenizer(path: Path) -> Any:
 def make_sample_artifact(args: argparse.Namespace, tokenizer: Any, sample_index: int) -> dict[str, Any]:
     """Run one request and return a self-contained, JSON-serializable evidence record."""
 
-    observations, text, started_at, finished_at, protocol_errors, usage = stream_completion(args)
+    observations, text, started_at, finished_at, response_headers_at, protocol_errors, usage = stream_completion(args)
     generated_tokens = len(tokenizer.encode(text, add_special_tokens=False))
     first_offset = observations[0].offset_seconds if observations else None
     last_offset = observations[-1].offset_seconds if observations else None
@@ -249,6 +274,10 @@ def make_sample_artifact(args: argparse.Namespace, tokenizer: Any, sample_index:
     # token count and the same first-text timestamp used for warm TTFT.
     # ``input_tps`` remains as a compatibility alias for older artifact readers.
     observed_prefill_tps = client_prefill_tps(prompt_tokens, first_offset)
+    response_headers_offset = elapsed_seconds(response_headers_at, started_at)
+    headers_to_first_text_seconds = elapsed_seconds(first_offset, response_headers_offset)
+    first_text_to_stream_close_seconds = elapsed_seconds(finished_at - started_at, first_offset)
+    last_text_to_stream_close_seconds = elapsed_seconds(finished_at - started_at, last_offset)
     if args.mode == "quality" and args.expected_text and text.strip() != args.expected_text:
         protocol_errors.append(
             f"quality canary mismatch: expected {args.expected_text!r}, got {text.strip()!r}"
@@ -279,8 +308,12 @@ def make_sample_artifact(args: argparse.Namespace, tokenizer: Any, sample_index:
         },
         "timing": {
             "wall_seconds": finished_at - started_at,
+            "response_headers_seconds": response_headers_offset,
             "warm_ttft_seconds": first_offset,
+            "headers_to_first_text_seconds": headers_to_first_text_seconds,
             "decode_seconds": decode_seconds,
+            "first_text_to_stream_close_seconds": first_text_to_stream_close_seconds,
+            "last_text_to_stream_close_seconds": last_text_to_stream_close_seconds,
             "decode_tps": decode_tps,
             "client_prefill_tps": observed_prefill_tps,
             "input_tps": observed_prefill_tps,

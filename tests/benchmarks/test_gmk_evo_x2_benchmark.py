@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from benchmarks.gmk_evo_x2.run_api_benchmark import (
     client_prefill_tps,
+    elapsed_seconds,
     nearest_rank_percentile,
     numeric_summary,
     parse_args,
@@ -88,6 +89,14 @@ class TailMetricTests(unittest.TestCase):
         self.assertIsNone(client_prefill_tps(None, 0.5))
         self.assertIsNone(client_prefill_tps(120, None))
         self.assertIsNone(client_prefill_tps(120, 0.0))
+
+    def test_timing_phase_preserves_missing_or_invalid_boundaries(self) -> None:
+        """A partial stream cannot manufacture a valid internal timing phase."""
+
+        self.assertEqual(elapsed_seconds(0.75, 0.25), 0.5)
+        self.assertIsNone(elapsed_seconds(None, 0.25))
+        self.assertIsNone(elapsed_seconds(0.25, None))
+        self.assertIsNone(elapsed_seconds(0.25, 0.75))
 
 
 class QualitySuiteCheckTests(unittest.TestCase):
