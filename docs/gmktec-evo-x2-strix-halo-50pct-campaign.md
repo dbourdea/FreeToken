@@ -870,3 +870,52 @@ two independent throughput matrices before promotion.  Preserve
 `q4-c32-rocprof-controller-ready-20260901T225400Z`, including the raw SQLite
 database, workload response, controller logs, and normal-service recovery
 evidence.
+
+### C33-C34: four-row MMV screen admission and residency gate
+
+The trace-driven intermediate four-row screen was initially rejected before
+inference because the experimental source allowed only one, two, or eight rows.
+That fail-closed behavior was correct.  A separate candidate branch then added
+four rows as an explicit default-off HIP compile option while retaining the
+prior eight-row option and the one-row default.  The AMD host-side validation
+tests passed 3 of 3.  This candidate branch is intentionally separate from the
+upstream-facing AMD branch and has no promotion claim.
+
+The corrected candidate reached Q4 scheduler-ready state with a four-row build,
+but its deterministic endurance wrapper stopped before inference.  The
+process-scoped swap gate measured 3,145,728 KiB swapped by the Q4 candidate,
+even though the system retained approximately 23.5 GiB of available memory.
+After the candidate was stopped, a fresh process inventory showed no remaining
+material swap consumer and the normal NVFP4 API recovered successfully.
+
+**Decision: do not compare four-row TPS yet.** The candidate has passed only
+host-side configuration validation.  It has not passed deterministic output
+quality, latency, or throughput qualification, so it cannot be compared to the
+baseline or promoted.  The next retry must first eliminate or explain the
+candidate-specific swap behavior, then run the normal quality suite and both
+throughput matrices.  Preserve `q4-c33-mmv-y4-20260901T230056Z` and
+`q4-c34-mmv-y4-qualified-20260901T230756Z`, including the process-scoped swap
+telemetry and normal-service recovery evidence.
+
+### C36: four-row MMV quality with swap-drained residency
+
+The Q4 candidate-specific swap condition persisted with swappiness reduced from
+60 to 10.  A reversible controller therefore stopped the normal API, drained
+the existing swap file, started the isolated four-row candidate, and restored
+swap plus the normal API in its cleanup path.  With swap disabled, the
+candidate's process-scoped zero-swap gate passed and all three deterministic
+state controls passed: exact acknowledgement, conversation recall, and numeric
+transformation.
+
+The first request had a 46.989-second TTFT because it built the isolated HIP
+GGUF extension.  That startup event is preserved as build evidence only and is
+excluded from every steady-state latency or TPS comparison.  The subsequent
+two quality turns had 0.426 and 0.514 second TTFT, and the measured p99 token
+gap was 24.72 ms.
+
+**Decision: four rows are quality-admissible only in a swap-drained window.**
+No four-row TPS claim exists yet.  The next required gate is a warm fixed
+three-sample scheduler matrix inside the same swap-drained controller, followed
+by its independent repeat and normal-service recovery verification.  Preserve
+`q4-c36-mmv-y4-swapdrain-20260901T231519Z`, including the quality response,
+per-process swap telemetry, temporary swap policy evidence, and recovery log.
