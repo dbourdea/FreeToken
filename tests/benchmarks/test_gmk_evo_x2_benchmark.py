@@ -287,6 +287,7 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('cd "${SOURCE_DIR}"', contents)
         self.assertIn('setup.py build_ext --inplace', contents)
         self.assertIn('native-extension-import.txt', contents)
+        self.assertLess(contents.index('native-extension-import.txt'), contents.index('normal-stop.txt'))
 
     def test_grouped_differential_exposes_single_expert_route_isolation(self) -> None:
         """The numerical gate must be able to remove mixed-expert sorting from its diagnosis."""

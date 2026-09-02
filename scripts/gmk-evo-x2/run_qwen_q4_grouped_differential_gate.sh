@@ -90,13 +90,13 @@ trap recover_normal_service EXIT
 # Do not take GPU ownership from an unhealthy protected service.
 normal_completion "${ARTIFACT_DIR}/preflight.json" \
     || { echo "normal API did not complete before differential gate" >&2; exit 1; }
-"${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
-    >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 mkdir -p "${EXTENSION_CACHE}" "${TRITON_CACHE}"
 
 # A clean candidate checkout has no generated HIP extension. Build it in that
 # checkout, with the candidate's Python package first on the import path, and
-# preserve both build and import evidence before executing the GPU diagnostic.
+# preserve both build and import evidence before taking GPU ownership away
+# from the protected service. A compiler or source-layout failure is therefore
+# contained to the candidate and cannot trigger an unnecessary model reload.
 if ! PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
     'import freetoken.kernel._pinned_tensor' >/dev/null 2>&1; then
     (
@@ -112,6 +112,11 @@ fi
 PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
     'import freetoken.kernel._pinned_tensor as pinned; print(pinned.__file__)' \
     >"${NATIVE_IMPORT_LOG}"
+
+# The candidate can now import every required native module, so it is safe to
+# hand GPU ownership over for the direct numerical computation.
+"${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
+    >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 
 # The direct process sees only its own source checkout and caches. Its output
 # JSON is the sole numerical evidence emitted by this controller.
