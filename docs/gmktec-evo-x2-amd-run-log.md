@@ -71,7 +71,7 @@ restoration result. Do not replace a failed entry with a later passing entry.
 
 | ID | Required evidence | State |
 | --- | --- | --- |
-| P0 | Complete paper protocol fields or explicit unresolved record | In progress |
+| P0 | Complete paper protocol fields or explicit unresolved record | Completed: `gmktec-evo-x2-paper-protocol-gap.md` separates the hardware and workload facts published by the paper from the missing strict-replication fixtures, traces, configuration, and raw-sample details. |
 | P1 | Harness manifest and tail-summary validation | Completed: tail summaries and clean runtime manifest validated |
 | P2 | Five-sample Qwen NVFP4 warm and cold baseline | Completed: warm short and medium baselines, long-context cache-hit and forced-cold-prefill controls, time-shared llama.cpp control, recovered FreeToken repeat, and real restart-to-first-completion timing are all recorded. Cold restart health readiness was 5.849 seconds and true completion readiness was 396.407 seconds. |
 | P3 | Versioned Qwen and Gemma quality suite | Completed: Qwen three-case suite plus Gemma text, extended seven-fixture vision, and bounded visual-description quality controls passed. |
