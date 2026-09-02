@@ -20,6 +20,11 @@ readonly INTERVAL_SECONDS="${3:-60}"
 # generic vector route, so normal invocations do not change behavior.
 readonly Q4_K_FOUR_ROWS="${FREETOKEN_Q4_Q4_K_FOUR_ROWS:-0}"
 readonly Q5_K_FOUR_ROWS="${FREETOKEN_Q4_Q5_K_FOUR_ROWS:-0}"
+# Match the C139 full API configuration by default. Both values remain
+# caller-visible and are written into the artifact so an endurance result can
+# never be mistaken for a different allocation or overlap profile.
+readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.30}"
+readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-1}"
 
 # Keep every host-specific path explicit so an invocation cannot silently
 # operate on another machine's service or an arbitrary source checkout.
@@ -41,6 +46,8 @@ case "${INTERVAL_SECONDS}" in ''|*[!0-9]*) echo "interval must be non-negative" 
 (( SESSION_COUNT > 0 )) || { echo "session count must be positive" >&2; exit 2; }
 [[ "${Q4_K_FOUR_ROWS}" == "0" || "${Q4_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q4_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${Q5_K_FOUR_ROWS}" == "0" || "${Q5_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q5_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
+[[ "${MEMORY_RATIO}" =~ ^0\.[0-9]+$|^1\.0+$ ]] || { echo "FREETOKEN_Q4_MEMORY_RATIO is invalid" >&2; exit 2; }
+[[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || { echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2; exit 2; }
 [[ ! -e "${ARTIFACT_ROOT}" ]] || { echo "artifact root already exists: ${ARTIFACT_ROOT}" >&2; exit 2; }
 [[ "${Q4_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "Q4 source must be under ${ROOT_DIR}" >&2; exit 2; }
 [[ "${RECOVERY_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "recovery source must be under ${ROOT_DIR}" >&2; exit 2; }
@@ -93,8 +100,8 @@ restore_normal_service() {
 
 mkdir -p "${ARTIFACT_ROOT}"
 printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${ARTIFACT_ROOT}/controller.txt"
-printf 'session_count=%s\ninterval_seconds=%s\nq4_k_four_rows=%s\nq5_k_four_rows=%s\n' \
-    "${SESSION_COUNT}" "${INTERVAL_SECONDS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" \
+printf 'session_count=%s\ninterval_seconds=%s\nq4_k_four_rows=%s\nq5_k_four_rows=%s\nmemory_ratio=%s\nprefill_overlap=%s\n' \
+    "${SESSION_COUNT}" "${INTERVAL_SECONDS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" "${MEMORY_RATIO}" "${PREFILL_OVERLAP}" \
     >>"${ARTIFACT_ROOT}/controller.txt"
 trap 'restore_normal_service' EXIT INT TERM
 
@@ -107,7 +114,8 @@ bash "${RECOVERY_STOPPER}"
 FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" \
 FREETOKEN_GGUF_Q4_K_FOUR_ROWS="${Q4_K_FOUR_ROWS}" \
 FREETOKEN_GGUF_Q5_K_FOUR_ROWS="${Q5_K_FOUR_ROWS}" \
-    bash "${Q4_LAUNCHER}" start "${Q4_ARTIFACT_DIR}" 0.25
+FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
+    bash "${Q4_LAUNCHER}" start "${Q4_ARTIFACT_DIR}" "${MEMORY_RATIO}"
 wait_for_serving 1922 "${ARTIFACT_ROOT}/q4-health.json"
 FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_BATTERY}" "${BATTERY_ARTIFACT_DIR}" "${SESSION_COUNT}" "${INTERVAL_SECONDS}"
 # Ask the summarizer to write its own explicit artifact.  Redirecting stdout
