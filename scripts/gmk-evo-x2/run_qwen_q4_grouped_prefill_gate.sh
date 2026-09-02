@@ -19,9 +19,17 @@ readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6
 readonly BENCHMARK="${SOURCE_DIR}/benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_prefill.py"
 readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-prefill-f1baf13"
 readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
+# Keep the original both-projection screen as the default.  A caller can select
+# one grouped projection for a diagnostic component screen; API promotion still
+# requires a separate exact-output gate.
+readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
+[[ "${GROUPED_MODE}" == "both" || "${GROUPED_MODE}" == "gate_up" || "${GROUPED_MODE}" == "down" ]] || {
+    echo "FREETOKEN_Q4_GROUPED_MODE must be both, gate_up, or down" >&2
+    exit 2
+}
 mkdir -p "${ARTIFACT_DIR}"
 
 # Return an HTTP status only while retaining the full completion response for
@@ -84,8 +92,10 @@ FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 \
 PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
 TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
 FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=1024 \
+FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_MODE}" \
 "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
-    --model "${MODEL_PATH}" --mode grouped --tokens 1024 --warmup 8 --repetitions 20 \
+    --model "${MODEL_PATH}" --mode grouped --grouped-mode "${GROUPED_MODE}" \
+    --tokens 1024 --warmup 8 --repetitions 20 \
     --json "${ARTIFACT_DIR}/grouped.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
     >"${ARTIFACT_DIR}/grouped.log" 2>&1
 
