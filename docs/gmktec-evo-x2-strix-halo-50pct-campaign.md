@@ -1282,3 +1282,39 @@ recovery probes.  Preserve `q4-c57-prefill-hit-d2d-20260902T034248Z`, including
 the server log lines that identify the unavailable batch-copy binding, exact
 quality parity, raw scheduler artifacts, recovery-progress heartbeat, and
 cleanup evidence.
+
+### C58 and C59: repeated 30 percent Q4 cache-budget gate
+
+C58 increased the Q4 candidate's `--memory-ratio` from the qualified 25 percent
+setting to 30 percent while retaining mixed Q6 prefill overlap.  This gives the
+MoE cache more resident expert-page capacity without changing model weights,
+quantization, prompts, output limits, or the output-quality gate.  The isolated
+candidate resolved `moe_cache_size=7048` with prefill overlap enabled and
+produced the same deterministic response hash as the qualified reference.
+
+C59 independently repeated the identical 30 percent configuration in a fresh
+candidate lifecycle.  Both runs completed three scheduler samples and passed
+the exact same-source quality gate.  The normal NVFP4 service was restored with
+a verified HTTP 200 completion after 478 probes for C58 and 469 probes for C59.
+
+| Run | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| C55+C56, 25 percent cache baseline | 3,022.293 | 48.657 | 0.401549 s | Exact in both runs |
+| C58, 30 percent cache | 3,124.709 | 49.037 | 0.387881 s | Exact, `3302eda43396` |
+| C59, 30 percent cache repeat | 3,113.096 | 49.236 | 0.389344 s | Exact, `3302eda43396` |
+| C58+C59, six samples combined | 3,118.903 | 49.137 | 0.388612 s | Exact in both runs |
+
+Relative to the repeated 25 percent overlap baseline, the repeated 30 percent
+cache configuration improves client-visible prefill by 3.20 percent, improves
+decode by 0.99 percent, and reduces warm TTFT by 3.22 percent.  Every measured
+serving metric moved in the intended direction in both isolated lifecycles, and
+the exact output hash remained unchanged.
+
+**Decision: promote 30 percent cache capacity as the next Q4 overlap baseline.**
+This is a repeated, quality-preserving API result, not a claim about a single
+kernel.  Preserve `q4-c58-cache-ratio-030-20260902T035719Z` and
+`q4-c59-cache-ratio-030-repeat-20260902T040741Z`, including their raw scheduler
+samples, summaries, exact-quality files, controller logs, recovery progress,
+and cleanup evidence.  The next candidate must use a distinct profiler-grounded
+mechanism or separately establish that a larger cache budget has enough free
+memory and repeatable end-to-end benefit.
