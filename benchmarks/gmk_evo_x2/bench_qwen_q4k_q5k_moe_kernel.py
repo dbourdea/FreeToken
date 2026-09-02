@@ -13,6 +13,7 @@ but is never a substitute for the quality-gated OpenAI API measurement.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -38,6 +39,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=30, help="unmeasured production-kernel calls")
     parser.add_argument("--repetitions", type=int, default=300, help="timed calls per projection")
     parser.add_argument("--json", type=Path, required=True, help="new JSON artifact path")
+    parser.add_argument(
+        "--save-output",
+        type=Path,
+        help="new torch artifact path for the three CPU comparison tensors",
+    )
+    parser.add_argument(
+        "--reference-output",
+        type=Path,
+        help="existing torch artifact whose three outputs must match this run",
+    )
     return parser.parse_args()
 
 
@@ -52,6 +63,10 @@ def _require_inputs(args: argparse.Namespace) -> None:
         raise ValueError("--warmup and --repetitions must be positive")
     if args.json.exists():
         raise FileExistsError(f"refusing to overwrite artifact: {args.json}")
+    if args.save_output is not None and args.save_output.exists():
+        raise FileExistsError(f"refusing to overwrite output artifact: {args.save_output}")
+    if args.reference_output is not None and not args.reference_output.is_file():
+        raise FileNotFoundError(f"reference output is missing: {args.reference_output}")
     if not torch.cuda.is_available():
         raise RuntimeError("this benchmark requires a CUDA or HIP PyTorch device")
 
@@ -97,6 +112,47 @@ def _finite(tensor: torch.Tensor, label: str) -> None:
 
     if not torch.isfinite(tensor).all():
         raise RuntimeError(f"{label} produced non-finite output")
+
+
+def _cpu_output(tensor: torch.Tensor) -> torch.Tensor:
+    """Detach one GPU result as a contiguous CPU BF16 tensor for comparison."""
+
+    return tensor.detach().to(device="cpu").contiguous()
+
+
+def _sha256(tensor: torch.Tensor) -> str:
+    """Return a stable digest of exactly the stored tensor bytes."""
+
+    return hashlib.sha256(tensor.view(torch.uint8).numpy().tobytes()).hexdigest()
+
+
+def _compare_outputs(
+    candidate: dict[str, torch.Tensor], reference_path: Path | None
+) -> dict[str, object] | None:
+    """Validate every real-projection output against an optional baseline record."""
+
+    if reference_path is None:
+        return None
+    reference = torch.load(reference_path, map_location="cpu", weights_only=True)
+    if not isinstance(reference, dict) or set(reference) != set(candidate):
+        raise ValueError("reference output must contain exactly gate, up, and down tensors")
+    metrics: dict[str, dict[str, float]] = {}
+    for name, output in candidate.items():
+        expected = reference[name]
+        if not isinstance(expected, torch.Tensor):
+            raise TypeError(f"reference {name} is not a tensor")
+        torch.testing.assert_close(output, expected, rtol=0.001, atol=0.01)
+        difference = (output.float() - expected.float()).abs()
+        metrics[name] = {
+            "maximum_absolute_difference": float(difference.max().item()),
+            "mean_absolute_difference": float(difference.mean().item()),
+        }
+    return {
+        "reference_output": str(reference_path.resolve()),
+        "rtol": 0.001,
+        "atol": 0.01,
+        "projections": metrics,
+    }
 
 
 def main() -> int:
@@ -147,6 +203,14 @@ def main() -> int:
     _finite(gate_output, "Q4_K gate")
     _finite(up_output, "Q4_K up")
     _finite(down_output, "Q5_K down")
+    # Preserve the identical CPU tensors used for the parity check.  Event
+    # timing remains separate below, so artifact transfer cannot affect it.
+    outputs = {
+        "gate": _cpu_output(gate_output),
+        "up": _cpu_output(up_output),
+        "down": _cpu_output(down_output),
+    }
+    parity = _compare_outputs(outputs, args.reference_output)
 
     result = {
         "schema_version": 1,
@@ -165,9 +229,14 @@ def main() -> int:
         "gate_shape": list(gate_output.shape),
         "up_shape": list(up_output.shape),
         "down_shape": list(down_output.shape),
+        "output_sha256": {name: _sha256(output) for name, output in outputs.items()},
+        "parity": parity,
     }
     result["three_projection_us"] = result["gate_q4k_us"] + result["up_q4k_us"] + result["down_q5k_us"]
     args.json.parent.mkdir(parents=True, exist_ok=True)
+    if args.save_output is not None:
+        args.save_output.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(outputs, args.save_output)
     args.json.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
