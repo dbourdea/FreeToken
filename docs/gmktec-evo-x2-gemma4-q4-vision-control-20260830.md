@@ -137,3 +137,25 @@ reasoning channels separately, warmup exclusion, multiple repetitions, and
 streaming telemetry. That will measure prompt TPS, first-token latency, and
 decode TPS without rewarding a runtime merely for emitting more hidden
 reasoning tokens.
+
+## Extended quality control, 2026-09-02
+
+The immutable isolated artifact
+`/home/david/freetoken-amd/artifacts/gemma4-gguf-vision-20260902T165806Z/`
+expanded the vision suite beyond the original three fixtures. The native
+ROCm/HIP Gemma API first repeated the deterministic `17 * 19 = 323` text
+control, then passed all seven image fixtures: solid red, green, blue, and
+yellow, plus left, right, and top spatial-color questions on two-color images.
+Every visible answer matched the required lowercase color.
+
+The same run completed the bounded visual-description quality control. Given a
+red-left, blue-right rectangle, it returned a 51-word visible description that
+contained `red`, `blue`, `left`, and `right`, satisfying the required 45 to 65
+word range. Streaming evidence recorded 63 completion tokens, 1,142.04 ms
+TTFT, and 53.27 visible completion tokens per second.
+
+The controller used the maintained Qwen recovery checkout rather than the
+retired historical harness path. After the temporary Gemma server exited, the
+protected Qwen health endpoint returned `status: ok`. This qualifies the
+recorded deterministic text and image controls, not general visual reasoning
+quality beyond those fixtures.
