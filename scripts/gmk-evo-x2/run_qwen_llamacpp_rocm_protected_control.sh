@@ -64,6 +64,7 @@ preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
 GMK_EVO_X2_QWEN_QUALITY_SUITE=1 GMK_EVO_X2_QWEN_CONCURRENT_CLIENTS=4 \
 GMK_EVO_X2_LLAMA_PARALLEL_SLOTS=4 \
 GMK_EVO_X2_QWEN_COLD_PREFILL_CONTROL="${GMK_EVO_X2_QWEN_COLD_PREFILL_CONTROL:-0}" \
+GMK_EVO_X2_QWEN_COLD_CONCURRENT="${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" \
     bash "${CONTROL_SCRIPT}" "${ARTIFACT_DIR}/llamacpp-control" \
     >"${ARTIFACT_DIR}/llamacpp-control.log" 2>&1
 printf 'llamacpp_quality_scheduler_and_concurrent=passed\n' >"${ARTIFACT_DIR}/result.txt"

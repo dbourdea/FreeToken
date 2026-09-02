@@ -83,4 +83,15 @@ PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" "${HARNESS}" \
     --expected-host david-Gmktec-x2-2 --filler-repetitions 48 --sample-variation prefix_nonce \
     --samples 3 --max-tokens 16 --artifact "${ARTIFACT_DIR}/cold-prefill.json" \
     >"${ARTIFACT_DIR}/cold-prefill.log" 2>&1
+if [[ "${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" == "1" ]]; then
+    # One synchronized C4 round retains a single cold-admission epoch. Each
+    # client gets an early unique prefix so it cannot reuse a prior user prompt.
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_control.py" \
+        --base-url http://127.0.0.1:1922/v1 --model "${MODEL}" \
+        --tokenizer "${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4" \
+        --expected-host david-Gmktec-x2-2 --concurrency 4 --rounds 1 \
+        --sample-variation prefix_nonce --artifact "${ARTIFACT_DIR}/cold-concurrent-c4.json" \
+        >"${ARTIFACT_DIR}/cold-concurrent-c4.log" 2>&1
+fi
 printf 'q4_cold_prefill_control=passed\n' >"${ARTIFACT_DIR}/result.txt"

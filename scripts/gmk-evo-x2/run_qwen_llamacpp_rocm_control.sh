@@ -171,5 +171,15 @@ if [[ "${GMK_EVO_X2_QWEN_COLD_PREFILL_CONTROL:-}" == "1" ]]; then
         >"${ARTIFACT_ROOT}/cold-prefill.log" 2>&1
 fi
 
+if [[ "${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" == "1" ]]; then
+    # Match FreeToken's one-round cache-neutral C4 admission measurement.
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_control.py" \
+        --base-url "${BASE_URL}" --model "${MODEL_NAME}" --tokenizer "${TOKENIZER_DIR}" \
+        --expected-host "david-Gmktec-x2-2" --concurrency 4 --rounds 1 \
+        --sample-variation prefix_nonce --artifact "${ARTIFACT_ROOT}/cold-concurrent-c4.json" \
+        >"${ARTIFACT_ROOT}/cold-concurrent-c4.log" 2>&1
+fi
+
 # Capture final endpoint health before the EXIT trap terminates the control.
 curl -fsS "${BASE_URL%/v1}/health" >"${ARTIFACT_ROOT}/health-before-cleanup.json"
