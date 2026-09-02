@@ -1576,3 +1576,45 @@ baseline.** The temporary allowlist entry was removed after the result. Preserve
 scheduler samples, summary JSON, candidate server log, recovery heartbeat, and
 cleanup proof. The normal NVFP4 API recovered after the controller's readiness
 loop and the controller completed successfully.
+
+### C78-C81: concurrent-prefill instrumentation and admission-cap closure
+
+The single-request scheduler controller already recorded client-visible prefill
+TPS, decode TPS, warm TTFT, and stream-gap percentiles. Its four-client control
+recorded aggregate decode throughput and tail latency, but did not separately
+measure prompt-prefill capacity. C78 introduced a strictly client-visible
+concurrent-prefill metric. For each request it uses API-reported `prompt_tokens`
+and its own TTFT. For each synchronized round it divides the sum of those
+prompt-token counts by elapsed time from the earliest request start to the last
+request's first visible output. The raw request timings and usage objects remain
+in the JSON artifact, so the aggregate calculation is independently auditable.
+
+C79 then used that metric to test whether raising the isolated Q4 scheduler's
+admission cap from the qualified four requests to eight helped a fixed
+four-client workload. C80 and C81 repeated the same model, 30 percent cache,
+mixed Q4_K/Q6_K prefill overlap, one-wave GDN launch, deterministic prompt,
+three scheduler samples, and three concurrent rounds with the qualified
+four-request cap. Every candidate returned the same complete AIME output hash
+as the qualified reference, `3302eda43396`, before throughput scoring.
+
+| Run | Admission cap | Aggregate prefill TPS, mean | Aggregate decode TPS, mean | p99 TTFT | p99 token gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C79 | 8 | 4,621.180 | 91.888 | 1.089 s | 41.542 ms |
+| C80 | 4 | 4,219.967 | 92.189 | 1.394 s | 40.385 ms |
+| C81 | 4 | 4,557.900 | 91.257 | 1.104 s | 44.352 ms |
+
+The first four-request run had a lower prefill result and one visible TTFT
+outlier. The clean four-request repeat overlaps the eight-request result on
+prefill, decode, and tail latency. Raising the cap also did not improve
+aggregate decode throughput. The available evidence therefore does not establish
+a material or repeatable end-user benefit for the eight-request setting.
+
+**Decision: reject eight admissions and retain the qualified four-request
+cap.** The launcher now refuses an eight-request value, preventing the
+non-improving candidate from becoming a default by accident. Preserve
+`q4-c78-max-requests-8-concurrent-c4-20260902T075728Z`,
+`q4-c79-max-requests-8-concurrent-c4-prefill-20260902T080725Z`,
+`q4-c80-max-requests-4-concurrent-c4-prefill-20260902T081729Z`, and
+`q4-c81-max-requests-4-concurrent-c4-prefill-repeat-20260902T082828Z`, including
+their quality hashes, scheduler summaries, concurrent raw responses, recovery
+heartbeats, cleanup records, and normal-service completion evidence.
