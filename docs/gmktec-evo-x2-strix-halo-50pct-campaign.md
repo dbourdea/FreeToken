@@ -1233,3 +1233,32 @@ now writes an explicit `recovery-progress.txt` heartbeat.  Preserve
 `q4-c55-q6-prefill-overlap-20260902T031634Z`, including the unit gate, exact
 quality parity file, three raw scheduler samples, summary JSON, recovery log,
 and cleanup evidence.
+
+### C56: independent mixed-cache overlap repeat
+
+C56 repeated the C55 configuration in a new isolated server lifecycle.  It
+again passed the same-source output gate with `3302eda43396`, completed three
+new scheduler samples, and restored the normal NVFP4 API with a real HTTP 200
+completion after 473 probes.  The recovery-progress heartbeat recorded the
+loading phase throughout the expected multi-minute reload.
+
+| Run | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| C55 overlap | 2,920.936 | 48.620 | 0.415089 s | Exact, `3302eda43396` |
+| C56 overlap repeat | 3,123.649 | 48.694 | 0.388010 s | Exact, `3302eda43396` |
+| C55+C56, six samples combined | 3,022.293 | 48.657 | 0.401549 s | Exact in both runs |
+
+The combined overlap prefill mean is 6.70 percent above C52's 2,832.541 prompt
+tokens/s synchronous control.  The combined decode mean is 1.18 percent above
+C52 and the combined warm TTFT is 6.16 percent lower.  This repeat confirms
+the direction of the C55 result, although the run-to-run prefill spread means
+the gain must still be reported as a host-level observed result, not a
+guaranteed minimum.
+
+**Decision: promote mixed-cache Q6 prefill overlap to the next optimization
+baseline.** It is the first profiler-directed candidate in this stage to pass
+both repeated API evidence and exact deterministic output parity while
+improving prefill, decode, and TTFT.  Preserve
+`q4-c56-q6-prefill-overlap-repeat-20260902T032914Z` beside C55, including its
+quality parity, raw scheduler samples, recovery-progress heartbeat, and
+cleanup result.
