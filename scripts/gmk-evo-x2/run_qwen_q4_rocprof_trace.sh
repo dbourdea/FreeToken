@@ -170,7 +170,11 @@ trap restore_normal_service EXIT INT TERM
 # Fail closed when a caller supplies an unexpected source tree or missing tools.
 [[ "${SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "invalid source directory" >&2; exit 2; }
 [[ -f "${MODEL_PATH}" && -x "${VENV_PYTHON}" && -x "${Q4_LAUNCHER}" ]] || { echo "missing Q4 prerequisites" >&2; exit 2; }
-[[ -x "${NORMAL_STARTER}" && -x "${NORMAL_STOPPER}" && -x "${PROFILER_WRAPPER}" ]] || { echo "missing lifecycle helper" >&2; exit 2; }
+# The recovery helpers are executed directly and must carry their executable
+# bit.  The profiler wrapper is always invoked through ``bash``, so requiring
+# it to be readable supports checked-out scripts whose executable mode is not
+# preserved without weakening the actual launch path.
+[[ -x "${NORMAL_STARTER}" && -x "${NORMAL_STOPPER}" && -r "${PROFILER_WRAPPER}" ]] || { echo "missing lifecycle helper" >&2; exit 2; }
 [[ -f "${INSPECTOR}" ]] || { echo "missing ROCprof inspector" >&2; exit 2; }
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
 case "${MEMORY_RATIO}" in
