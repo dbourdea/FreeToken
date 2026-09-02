@@ -175,3 +175,16 @@ non-identical grouped-matrix family and is eligible for the complete API gate.
 The next execution must use the canonical deterministic quality fingerprint,
 then measure cache-neutral prefill, scheduler, C4, TTFT, token-gap tails, and
 protected-service recovery before considering default selection.
+
+C139 completed that full API gate. Its canonical AIME response fingerprint was
+exact, at `3302eda43396`. Across three scheduler samples, the Q5-only path
+measured 3,130.30 mean client prefill TPS, 48.20 decode TPS, and 387.19 ms warm
+TTFT. Across three C4 rounds, it measured 4,758.05 aggregate prefill TPS,
+94.80 aggregate decode TPS, 1.025 s p99 TTFT, and 39.93 ms p99 token gap.
+Relative to the qualified generic-vector baseline, these are +0.37 percent
+single-request prefill, +4.39 percent C4 prefill, +3.88 percent C4 decode,
+and lower C4 tails, with a separately retained 1.91 percent single-request
+decode reduction. The guarded controller then restored the normal service only
+after a real `READY` completion at recovery attempt 439. The candidate has met
+the quality and matched API performance admission criteria; extended-tail and
+endurance qualification remain required before a default change.
