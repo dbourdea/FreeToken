@@ -88,6 +88,12 @@ scoped repair investigation of an existing native FreeToken ROCm/HIP path.
 
 ## Current state
 
-The 24-hour isolated Q4 endurance controller is active. No candidate code may
-be tested against its GPU process or its protected service until that controller
-has reached a terminal state and recovery has been independently verified.
+C123 reached a terminal zero-swap failure after session 48. Sessions 1 through
+47 had `runner_swap_kib=0`; session 48 preserved all three deterministic
+visible answers but reported 128,376 KiB for the isolated Q4 process group.
+The controller stopped the candidate and restored the normal Qwen service,
+whose health endpoint subsequently returned `status: ok` with
+`maintenance: serving`. The first corrected diagnostic may now run only in a
+new isolated artifact after it captures per-process swap ownership. It must
+retain the strict zero-swap gate and may not claim a 24-hour qualification from
+the C123 partial run.
