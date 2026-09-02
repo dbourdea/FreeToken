@@ -1715,3 +1715,45 @@ comparison prerequisite. Preserve
 server logs, quality artifacts, scheduler summaries, concurrent raw responses,
 controller errors where applicable, recovery heartbeat, cleanup record, and
 normal-service completion proof.
+
+### C90-C92: cache-neutral ROCm Q4 cold-prefill control
+
+C89's repeated-prompt C4 values could not alone distinguish real prompt work
+from cache reuse. C90 therefore introduced an explicit controller and harness
+for a fixed 1,016-token retrieval prompt with a different nonce before the
+long filler on every request. C90 discovered a controller fault: the isolated
+Q4 Uvicorn health endpoint reported ready before its model worker could accept
+a completion, so every harness request returned HTTP 503. It recorded no TPS
+claim and restored the normal service after 536 completion probes.
+
+C91 repaired that readiness condition to require a real Q4 completion before
+the timed harness began. It ran three unique-prefix samples on the qualified
+one-wave, Q4/Q6-overlap, four-request Q4 profile. C92 ran the same harness,
+model file, tokenizer, ROCm 10 stack, loopback API contract, and greedy marker
+retrieval through a four-slot llama.cpp control. Both artifacts report 1,016
+prompt tokens, zero cached prompt tokens per sample, and the exact `azure-17`
+answer for all three samples. The normal Qwen service recovered after 536 C91
+probes and 473 C92 probes respectively.
+
+| Runtime and cache-neutral condition | Cold-prefill TPS, mean | Cold-prefill TPS, per sample | TTFT, mean | Quality and cache gate |
+| --- | ---: | --- | ---: | --- |
+| FreeToken Q4, C91 | 234.359 | 88.783, 307.484, 306.809 | 6.020 s | Three exact `azure-17` results; 0 cached tokens each |
+| ROCm 10 llama.cpp Q4_K_M, C92 | 978.625 | 983.153, 961.507, 991.214 | 1.038 s | Three exact `azure-17` results; 0 cached tokens each |
+
+The first C91 request is retained as an initialization-sensitive outlier rather
+than discarded. Its next two requests were still only about 307 TPS despite
+the forced cache miss. C92's samples were consistently about 962 to 991 TPS.
+This proves the C89 prefill difference cannot be dismissed as repeated-prompt
+cache accounting. It does not establish a universal runtime conclusion, since
+the implementations use different serving internals, but it makes
+cache-neutral FreeToken prefill the next optimization target.
+
+**Decision: do not promote a serving configuration from this diagnostic alone.**
+Use the paired artifacts to profile and gate only real Q4 prefill candidates:
+prefill chunk geometry, ragged-batch construction, Q4/Q6 host-device staging,
+and attention dispatch. Preserve
+`q4-c90-cold-prefill-freetoken-20260902T102141Z`,
+`q4-c91-cold-prefill-freetoken-ready-20260902T103251Z`, and
+`q4-c92-llamacpp-cold-prefill-20260902T104716Z`, including the failed C90
+controller record, all raw SSE events, usage blocks, prompt hashes, source
+logs, recovery heartbeats, cleanup records, and normal-service proofs.
