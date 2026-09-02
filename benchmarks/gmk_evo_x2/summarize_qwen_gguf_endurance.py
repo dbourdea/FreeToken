@@ -34,6 +34,30 @@ def percentile(values: Iterable[float], fraction: float) -> float:
     return ordered[rank - 1]
 
 
+def latency_summary(ttfts: list[float], gaps: list[float]) -> dict[str, dict[str, float | None]]:
+    """Return consistently named latency aggregates for one explicit sample set.
+
+    The caller decides which sessions belong to the sample set. This helper
+    prevents a steady-state view from silently replacing complete all-session
+    evidence, which must remain available for reproducible tail analysis.
+    """
+
+    return {
+        "max_turn_ttft_seconds": {
+            "mean": mean(ttfts) if ttfts else None,
+            "p95": percentile(ttfts, 0.95) if ttfts else None,
+            "p99": percentile(ttfts, 0.99) if ttfts else None,
+            "max": max(ttfts) if ttfts else None,
+        },
+        "max_visible_token_gap_seconds": {
+            "mean": mean(gaps) if gaps else None,
+            "p95": percentile(gaps, 0.95) if gaps else None,
+            "p99": percentile(gaps, 0.99) if gaps else None,
+            "max": max(gaps) if gaps else None,
+        },
+    }
+
+
 def read_swap_fields(path: Path) -> dict[str, int]:
     """Extract the explicitly recorded per-runner and whole-host swap values."""
 
@@ -52,7 +76,9 @@ def session_number(path: Path) -> int:
     return int(match.group(1))
 
 
-def summarize(artifact_root: Path, expected_sessions: int) -> dict[str, Any]:
+def summarize(
+    artifact_root: Path, expected_sessions: int, exclude_initial_sessions: int = 0
+) -> dict[str, Any]:
     """Validate every session and return portable summary metrics and failures."""
 
     sessions_dir = artifact_root / "sessions"
@@ -60,6 +86,10 @@ def summarize(artifact_root: Path, expected_sessions: int) -> dict[str, Any]:
     failures: list[str] = []
     ttfts: list[float] = []
     gaps: list[float] = []
+    # Keep warmup-excluded timings distinct from the complete evidence set.
+    # They are descriptive only and never alter the qualification verdict.
+    steady_ttfts: list[float] = []
+    steady_gaps: list[float] = []
     runner_swaps: list[int] = []
     host_swaps: list[int] = []
 
@@ -79,8 +109,13 @@ def summarize(artifact_root: Path, expected_sessions: int) -> dict[str, Any]:
                 )
         tail = payload.get("tail_metrics", {})
         try:
-            ttfts.append(float(tail["max_ttft_seconds"]))
-            gaps.append(float(tail["max_token_gap_seconds"]))
+            ttft = float(tail["max_ttft_seconds"])
+            gap = float(tail["max_token_gap_seconds"])
+            ttfts.append(ttft)
+            gaps.append(gap)
+            if session > exclude_initial_sessions:
+                steady_ttfts.append(ttft)
+                steady_gaps.append(gap)
         except (KeyError, TypeError, ValueError) as error:
             failures.append(f"session {session:02d} missing tail metric: {error}")
 
@@ -113,17 +148,11 @@ def summarize(artifact_root: Path, expected_sessions: int) -> dict[str, Any]:
         "observed_sessions": len(session_paths),
         "passed": not failures,
         "failures": failures,
-        "max_turn_ttft_seconds": {
-            "mean": mean(ttfts) if ttfts else None,
-            "p95": percentile(ttfts, 0.95) if ttfts else None,
-            "p99": percentile(ttfts, 0.99) if ttfts else None,
-            "max": max(ttfts) if ttfts else None,
-        },
-        "max_visible_token_gap_seconds": {
-            "mean": mean(gaps) if gaps else None,
-            "p95": percentile(gaps, 0.95) if gaps else None,
-            "p99": percentile(gaps, 0.99) if gaps else None,
-            "max": max(gaps) if gaps else None,
+        **latency_summary(ttfts, gaps),
+        "steady_state_excluding_initial_sessions": {
+            "excluded_initial_sessions": exclude_initial_sessions,
+            "observed_sessions": len(steady_ttfts),
+            **latency_summary(steady_ttfts, steady_gaps),
         },
         "runner_swap_kib": {
             "min": min(runner_swaps) if runner_swaps else None,
@@ -143,8 +172,16 @@ def main() -> int:
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--expected-sessions", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--exclude-initial-sessions",
+        type=int,
+        default=0,
+        help="Report a labelled steady-state latency view excluding this many initial sessions.",
+    )
     args = parser.parse_args()
-    summary = summarize(args.artifact_root, args.expected_sessions)
+    if args.exclude_initial_sessions < 0:
+        parser.error("--exclude-initial-sessions must be non-negative")
+    summary = summarize(args.artifact_root, args.expected_sessions, args.exclude_initial_sessions)
     args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if summary["passed"] else 1

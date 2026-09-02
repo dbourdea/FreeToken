@@ -368,6 +368,26 @@ class QwenEnduranceSummaryTests(unittest.TestCase):
         self.assertTrue(any("expected 2 sessions" in failure for failure in summary["failures"]))
         self.assertTrue(any("runner swap=4" in failure for failure in summary["failures"]))
 
+    def test_summary_keeps_all_sample_latency_when_reporting_steady_state(self) -> None:
+        """Warmup exclusion must add a view without hiding the cold result."""
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_session(root, 1)
+            self._write_session(root, 2)
+            first = root / "sessions" / "session-01.json"
+            payload = json.loads(first.read_text())
+            payload["tail_metrics"]["max_ttft_seconds"] = 10.0
+            first.write_text(json.dumps(payload))
+
+            summary = summarize(root, expected_sessions=2, exclude_initial_sessions=1)
+
+        self.assertEqual(summary["max_turn_ttft_seconds"]["max"], 10.0)
+        steady_state = summary["steady_state_excluding_initial_sessions"]
+        self.assertEqual(steady_state["excluded_initial_sessions"], 1)
+        self.assertEqual(steady_state["observed_sessions"], 1)
+        self.assertEqual(steady_state["max_turn_ttft_seconds"]["max"], 0.4)
+
 
 class LlamaCppControlScriptTests(unittest.TestCase):
     """Protect the isolated ROCm llama.cpp control lifecycle and workload reuse."""
