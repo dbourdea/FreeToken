@@ -90,7 +90,11 @@ def main() -> int:
     source = _tensor(args.model, args.tensor)
     rows, columns = source.shape
     packed = source.packed().contiguous().to(device=device, non_blocking=False)
-    activation = torch.randn(1, columns, dtype=torch.bfloat16, device=device)
+    # Baseline and candidate execute in separate processes and extension
+    # caches. A fixed device generator is therefore required to make their
+    # BF16 activation bytes identical before output parity is meaningful.
+    generator = torch.Generator(device=device).manual_seed(20260902)
+    activation = torch.randn(1, columns, dtype=torch.bfloat16, device=device, generator=generator)
 
     def call() -> torch.Tensor:
         # The production binding receives packed weight first and derives the
