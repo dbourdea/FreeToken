@@ -389,16 +389,23 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_mmq(
 #pragma unroll
   for (int i = 0; i < QR4_K * VDR_Q4_K_Q8_1_MMQ / QI8_1; ++i) {
     int sumi_d = 0;
+    // Reconstruct the Q8_1 integer sum from the packed bytes instead of
+    // consuming ds8.y. The vector reference takes this same integer-sum path
+    // and multiplies it by the primary Q8 scale in FP32; ds8.y is a stored
+    // half-precision product that otherwise changes the grouped contraction.
+    int sumi_m = 0;
 
 #pragma unroll
     for (int j = 0; j < QI8_1; ++j) {
-      sumi_d = __dp4a((v[j] >> (4 * i)) & 0x0F0F0F0F, u[i * QI8_1 + j], sumi_d);  // SIMD dot product
+      const int q8_values = u[i * QI8_1 + j];
+      sumi_d = __dp4a((v[j] >> (4 * i)) & 0x0F0F0F0F, q8_values, sumi_d);  // SIMD dot product
+      sumi_m = __dp4a(0x01010101, q8_values, sumi_m);                       // integer sum of the same Q8 values
     }
 
     const float2 ds8f = __half22float2(ds8[i]);
 
     sumf_d += ds8f.x * (sc[i] * sumi_d);
-    sumf_m += ds8f.y * m[i];  // sum of q8_1 block * q4_K min val
+    sumf_m += ds8f.x * (m[i] * sumi_m);
   }
 
   const float2 dm4f = __half22float2(dm4);
@@ -460,16 +467,21 @@ static __device__ __forceinline__ float vec_dot_q5_K_q8_1_impl_mmq(
 #pragma unroll
   for (int i = 0; i < QR5_K * VDR_Q5_K_Q8_1_MMQ / QI8_1; ++i) {
     int sumi_d = 0;
+    // Keep the min-term contraction bitwise aligned with the Q5_K vector
+    // reference: derive the Q8 sum from packed bytes and apply ds8.x in FP32.
+    int sumi_m = 0;
 
 #pragma unroll
     for (int j = 0; j < QI8_1; ++j) {
-      sumi_d = __dp4a(v[i * QI8_1 + j], u[i * QI8_1 + j], sumi_d);  // SIMD dot product
+      const int q8_values = u[i * QI8_1 + j];
+      sumi_d = __dp4a(v[i * QI8_1 + j], q8_values, sumi_d);  // SIMD dot product
+      sumi_m = __dp4a(0x01010101, q8_values, sumi_m);        // integer sum of the same Q8 values
     }
 
     const float2 ds8f = __half22float2(ds8[i]);
 
     sumf_d += ds8f.x * (sc[i] * sumi_d);
-    sumf_m += ds8f.y * m[i];  // sum of q8_1 block * q4_K min val
+    sumf_m += ds8f.x * (m[i] * sumi_m);
   }
 
   const float2 dm4f = __half22float2(dm4);

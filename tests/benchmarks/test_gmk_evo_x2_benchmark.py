@@ -300,6 +300,16 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('"single-expert"', contents)
         self.assertIn('"route_pattern": args.route_pattern', contents)
 
+    def test_grouped_kernels_recompute_the_q8_sum_for_vector_alignment(self) -> None:
+        """The grouped Q4 and Q5 candidate must not use the rounded stored Q8 sum term."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        dot_product = repository_root / "python" / "freetoken" / "kernel" / "csrc" / "gguf" / "vecdotq.cuh"
+        contents = dot_product.read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(contents.count('sumi_m = __dp4a(0x01010101, q8_values, sumi_m);'), 2)
+        self.assertGreaterEqual(contents.count('sumf_m += ds8f.x * (m[i] * sumi_m);'), 2)
+
     def test_dense_q8_timeshare_controller_owns_detached_recovery(self) -> None:
         """A lost SSH parent must not leave the normal service stopped after Q8 screening."""
 
