@@ -1550,3 +1550,29 @@ candidate JSON, saved references, parity records, compiler logs, controller
 logs, cleanup proofs, and normal-service completions. C76 restored the normal
 NVFP4 API after 379 recovery probes and a subsequent independent completion
 returned HTTP 200.
+
+### C77: 32 percent Q4 cache-capacity interpolation
+
+C77 tested the only unmeasured narrow capacity point between the qualified 30
+percent cache and the rejected 35 percent boundary. It retained the qualified
+one-wave GDN launch, mixed Q4_K/Q6_K prefill overlap, fixed scheduler inputs,
+and exact same-source output control. The candidate's observed output hash was
+the qualified `3302eda43396`, then all three scored scheduler samples completed.
+
+| Setting | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| Repeated 30 percent baseline, C58+C59 | 3,118.903 | 49.137 | 0.388612 s | Exact |
+| 32 percent cache, C77 | 2,890.167 | 48.965 | 0.419520 s | Exact, `3302eda43396` |
+
+Relative to the repeated 30 percent baseline, C77 regressed prefill by 7.33
+percent, decode by 0.35 percent, and warm TTFT by 7.95 percent. It is therefore
+not a candidate for a repeat or an API default. This interpolation confirms
+that the useful cache-capacity region does not extend monotonically above 30
+percent for the fixed workload.
+
+**Decision: reject 32 percent and retain 30 percent as the cache-capacity
+baseline.** The temporary allowlist entry was removed after the result. Preserve
+`q4-c77-cache-ratio-032-20260902T074244Z`, including exact-quality parity, raw
+scheduler samples, summary JSON, candidate server log, recovery heartbeat, and
+cleanup proof. The normal NVFP4 API recovered after the controller's readiness
+loop and the controller completed successfully.

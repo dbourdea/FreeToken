@@ -84,8 +84,8 @@ mkdir -p "${ARTIFACT_DIR}"
     echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
     exit 2
 }
-[[ "${MEMORY_RATIO}" == "0.25" || "${MEMORY_RATIO}" == "0.30" || "${MEMORY_RATIO}" == "0.32" || "${MEMORY_RATIO}" == "0.35" ]] || {
-    echo "FREETOKEN_Q4_MEMORY_RATIO must be 0.25, 0.30, 0.32, or 0.35" >&2
+[[ "${MEMORY_RATIO}" == "0.25" || "${MEMORY_RATIO}" == "0.30" || "${MEMORY_RATIO}" == "0.35" ]] || {
+    echo "FREETOKEN_Q4_MEMORY_RATIO must be 0.25, 0.30, or 0.35" >&2
     exit 2
 }
 
