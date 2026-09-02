@@ -1068,3 +1068,26 @@ The controller recovered the normal NVFP4 API and verified a real HTTP 200
 completion after 387 readiness attempts.  Preserve the invalid C43 record and
 `q4-c44-moe-k-fourwave-20260902T003242Z`; neither is an API-performance
 result.
+
+### C45: matched four-wave routed-expert parity gate
+
+C45 repaired the first four-wave candidate's token-group geometry so that the
+Q4_K and Q5_K routed-expert launches use one token per physical wave at both
+the default eight-wave setting and the isolated four-wave setting.  It rebuilt
+both variants in separate native extension caches and repeated the three-output
+real-weight comparison.  HIP translation completed with no unsupported CUDA
+function calls.
+
+The corrected four-wave geometry still failed Q4_K output parity before timing:
+9,713 of 16,384 elements differed, with a maximum absolute difference of
+1.203125 versus the allowed 0.01.  This proves that the routed-expert kernel
+has further reduction or indexing dependencies on the established eight-wave
+shape.  It is not safe to infer a performance result from this candidate.
+
+**Decision: close the simple routed-expert four-wave candidate family.** Both
+tested four-wave geometries violate the real-output gate, so no member may
+reach API, quality, prefill, or decode testing.  The detached controller
+restored the normal NVFP4 API and verified a real HTTP 200 completion after
+375 readiness attempts.  Preserve
+`q4-c45-moe-k-fourwave-mapped-20260902T004151Z` with its source-specific
+baseline, failed parity log, native build output, and recovery evidence.
