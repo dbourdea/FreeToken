@@ -1477,3 +1477,37 @@ explicitly opt-in for future profiling only.  Preserve
 component records, quality-parity file, all three scheduler JSON samples,
 summary, server logs, controller lifecycle records, and normal-service recovery
 evidence.
+
+### C70 and C71: routed Q4_K/Q5_K eight-wave block experiment
+
+C70 was the first isolated attempt to qualify a HIP specialization that packs
+eight routed vector waves into one physical block.  It did not reach device
+timing because the isolated candidate checkout contained an older copy of the
+real-weight harness which did not yet accept the output-record argument.  This
+was a controller and checkout synchronization failure, not a performance or
+quality result.  The controller restored the normal NVFP4 API and recorded a
+successful real completion after 377 recovery probes.
+
+C71 repeated the test only after the current harness was copied into the
+isolated candidate checkout.  The one-route reference built and completed the
+real Qwen Q4_K gate, Q4_K up, and Q5_K down component work.  Its three
+projection interval was 64.296 microseconds.  The eight-wave candidate also
+built, but the required elementwise comparison failed before timing could be
+reported: 9,722 of 16,384 values in the tested projection differed, or 59.3
+percent, with a maximum absolute difference of 1.203125.  This is far outside
+the candidate gate of relative tolerance 0.001 and absolute tolerance 0.01.
+
+The failure demonstrates that the apparent CUDA-style wave packing does not
+preserve FreeToken's routed Q4_K/Q5_K output contract on this HIP execution
+path.  No API or TPS claim is made for C71.  The experimental compile switch,
+kernel, and controller were removed from the active source path after the
+failure, so the unqualified implementation cannot be selected accidentally.
+The normal NVFP4 API was restored and verified by a post-run HTTP 200 real
+completion after 370 recovery probes.
+
+**Decision: reject the eight-wave routed-vector block mechanism for this HIP
+path.** Preserve `q4-c70-route-block-component-20260902T063259Z` as the
+checkout-interface failure and
+`q4-c71-route-block-component-20260902T064008Z` as the numerical rejection,
+including both controller logs, the baseline tensor record, candidate compiler
+log, parity exception, recovery evidence, and normal-service completion proof.
