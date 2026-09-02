@@ -93,7 +93,10 @@ def main() -> int:
     activation = torch.randn(1, columns, dtype=torch.bfloat16, device=device)
 
     def call() -> torch.Tensor:
-        return ggml_mul_mat_vec_a8(activation, packed, int(GGML_Q8_0), rows, columns)
+        # The production binding receives packed weight first and derives the
+        # input width from that payload. Passing only its four public arguments
+        # keeps this component call identical to normal model execution.
+        return ggml_mul_mat_vec_a8(packed, activation, int(GGML_Q8_0), rows)
 
     for _ in range(args.warmup):
         output = call()
