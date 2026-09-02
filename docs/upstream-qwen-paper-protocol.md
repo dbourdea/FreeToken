@@ -55,6 +55,28 @@ unavailable before calling a GMKtec EVO-X2 result a strict replication:
 | TPS definition and reported statistic | Resolved at paper level | Per-request mean decode TPS and per-request mean TTFT. Retain the client-side formula and raw timestamps. |
 | Expert cache, KV allocation, CPU thread count, and selected backend | Unknown | Recover the launch configuration or state that parity is approximate. |
 
+## Current upstream benchmark source audit
+
+On 2026-09-02, upstream `main` at
+`6eca2d7d2b8576c7ad0ba62853df9f618cba929f` was inspected for released
+benchmark inputs. The tree contains `benchmarks/bench_decode_moe.py`, which
+implements a W1-style AIME-25 streamed OpenAI chat benchmark. It downloads
+`math-ai/aime25` by default, selects problem index zero unless overridden,
+performs one warm request, then records a second request. Its default measured
+decode length is 256 tokens and it uses `ignore_eos` to retain that requested
+step count. It records client-observed warm TTFT, decode TPS from token usage
+and first-to-last content-event time, output hash, prompt-token count, and
+server-reported VRAM.
+
+This released script is a practical reproducibility aid for a current
+paper-inspired W1 control. It is not proof that it is the paper's exact runner:
+the paper does not name its AIME question, prompt template, request sequence,
+decode budget, cache allocation, commit, or the original sampling
+configuration. The inspected upstream tree does not contain a released
+OpenCode SWE-bench W2 harness, Claude Code W3 harness, OpenClaw mailbox kit,
+or the paper's raw benchmark artifacts. Consequently, W2 through W4 remain
+unreplicable at strict-paper fidelity from public source alone.
+
 ## Current GMKtec EVO-X2 comparison status
 
 Existing evidence proves native HIP functional serving for
