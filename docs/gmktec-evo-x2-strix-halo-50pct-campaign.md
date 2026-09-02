@@ -1929,3 +1929,30 @@ campaign's requested 50 percent end-to-end result. Preserve
 `q4-c101-two-rows-full-scheduler-r1-20260902` as rejected reference-mismatch
 evidence and `q4-c102-two-rows-full-scheduler-r1-20260902` as the valid full
 quality, scheduler, concurrency, and recovery evidence.
+
+### C103: two-row HIP occupancy closure
+
+C103 tested the remaining low-risk compile-time occupancy variable for the
+default-off two-row Q4_K/Q5_K kernel. The established candidate declares one
+wave-sized block per compute unit through `__launch_bounds__(32, 1)`. C103
+compiled the identical arithmetic with `__launch_bounds__(32, 2)`, allowing two
+such blocks to target the same compute unit. The component harness used the
+same real Qwen first expert layer, 1,024 activations, all 256 experts, top-k
+eight routing, saved one-row-vector output reference, and twenty timed samples.
+
+| Kernel | Minimum blocks per compute unit | Median device time | Exact output SHA-256 |
+| --- | ---: | ---: | --- |
+| One-row vector reference | 1 | 81.045 ms | `46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d` |
+| Qualified two-row vector | 1 | 74.488 ms | Same |
+| Two-row occupancy candidate | 2 | 74.600 ms | Same |
+
+The two-block target preserved bit-identical output but was 0.15 percent slower
+than the already-qualified one-block two-row kernel. It cannot advance to API
+testing. The protected normal Qwen service recovered through a real completion
+after 465 probes.
+
+**Decision: reject two-block occupancy and retain the one-block two-row
+candidate as the only qualified Q4_K/Q5_K row-pair implementation.** Preserve
+`q4-c103-two-rows-occupancy2-component-r1-20260902`, including both compiler
+configurations, timing samples, output hashes, exact-parity record, controller
+logs, cleanup record, and normal-service completion evidence.
