@@ -1,14 +1,24 @@
-# Upstream Qwen 8 GB benchmark protocol evidence
+# Upstream Qwen benchmark protocol evidence
 
 ## Confirmed source facts
 
-The FreeToken paper states that its main experiments use Qwen3.6-35B-A3B,
-DeepSeek-V4-Flash, and GLM-5.2 on six machines spanning an 8 GB RTX 4060 laptop
-through an RTX PRO 6000 workstation. Its RTX 4060 laptop row is a Core
-i9-13900H with 20 threads, 32 GiB LPDDR5, 8 GiB RTX 4060 Laptop VRAM, PCIe 4.0
-x8, measured 11.8 GB/s expert-transfer bandwidth, and measured 47.5 GB/s
-CPU-side MoE bandwidth. The paper states that this laptop serves a 35B model at
-39.3 tokens per second.
+The supplied FreeToken paper, version `2608.16157v1`, states that its main
+experiments use Qwen3.6-35B-A3B, DeepSeek-V4-Flash, and GLM-5.2 on six
+machines spanning an 8 GB RTX 4060 laptop through an RTX PRO 6000 workstation.
+Its Table 1 reports measured host-to-device expert-transfer bandwidth (`BP`)
+and measured effective CPU-side MoE expert-kernel bandwidth (`BH`), rather
+than substituting vendor-link or memory specifications.
+
+| Paper system | GPU and VRAM | CPU threads | System DRAM | PCIe | `BP` | `BH` |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| 5090 desktop | RTX 5090, 32 GB | Ryzen 9 9950X3D, 32 | DDR5, 192 GiB | 5.0 x16 | 49.0 GB/s | 53.8 GB/s |
+| 4060 laptop | RTX 4060 Laptop, 8 GB | Core i9-13900H, 20 | LPDDR5, 32 GiB | 4.0 x8 | 11.8 GB/s | 47.5 GB/s |
+
+The paper states that the 8 GB laptop serves the official Qwen3.6-35B-A3B
+NVFP4 release at 39.3 tokens per second in its cross-hardware coding-agent
+study. It describes the 284B result as DeepSeek-V4-Flash on the 5090 desktop,
+whose 32 GB RTX 5090 is paired with 192 GiB system memory. That paper system
+is not a 32 GB-total-memory desktop.
 
 The 8 GB laptop uses Qwen3.6-35B-A3B's official NVFP4 release. The other Qwen
 cross-engine comparisons use BF16 for exact weight-format parity. The paper's
@@ -30,10 +40,10 @@ Primary sources:
 
 ## Fields the paper summary does not establish
 
-The published HTML establishes the hardware, model format, metric type, and
+The supplied paper establishes the hardware, model format, metric type, and
 workload classes. It does not identify the following fields for the 39.3 TPS
 row. They must be resolved from released artifacts, the authors, or marked
-unavailable before calling the GMKtec EVO-X2 result a strict replication:
+unavailable before calling a GMKtec EVO-X2 result a strict replication:
 
 | Field | State | Required action |
 | --- | --- | --- |
@@ -41,7 +51,7 @@ unavailable before calling the GMKtec EVO-X2 result a strict replication:
 | Laptop CPU and RAM | Resolved | Core i9-13900H, 20 threads, 32 GiB LPDDR5. Record OS, driver, CUDA, and FreeToken commit if recovered. |
 | Prompt corpus and token count | Workload class resolved | Locate the exact AIME questions, SWE issue, tool harness versions, and rendered token counts. |
 | Output length and stop policy | Unknown | Locate benchmark runner defaults and raw results. |
-| Warmup procedure and cache state | Partially resolved | Paper says the first request warms the cache normally. Recover the scored-run sequence. |
+| Warmup procedure and cache state | Unknown | Recover the scored-run sequence, cache state, and any discarded warmup requests from the released runner or authors. |
 | TPS definition and reported statistic | Resolved at paper level | Per-request mean decode TPS and per-request mean TTFT. Retain the client-side formula and raw timestamps. |
 | Expert cache, KV allocation, CPU thread count, and selected backend | Unknown | Recover the launch configuration or state that parity is approximate. |
 
