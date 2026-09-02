@@ -3,9 +3,12 @@
 
 The existing scheduler baseline measures one warm request at a time.  This
 control releases a fixed number of requests together, preserves each raw
-response and timing stream, and reports both individual latency and aggregate
-throughput.  It is a local GMKtec EVO-X2 control, not a reproduction of an upstream
-agent workload.  The program never starts, stops, or reconfigures a server.
+response and timing stream, and reports individual latency, aggregate decode
+throughput, and aggregate prompt-prefill throughput. Prompt-prefill TPS uses
+the API usage prompt-token count and the elapsed time until every request has
+received its first visible output token. It is a local GMKtec EVO-X2 control,
+not a reproduction of an upstream agent workload. The program never starts,
+stops, or reconfigures a server.
 """
 
 from __future__ import annotations
@@ -190,6 +193,18 @@ def request_args(args: argparse.Namespace) -> argparse.Namespace:
     )
 
 
+def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
+    """Return the server-reported prompt token count only when it is usable.
+
+    The server owns the exact chat-template formatting, so API usage is more
+    accurate than tokenizing the raw user message locally. A missing or invalid
+    value makes the request unsuitable for a prefill-TPS measurement.
+    """
+
+    value = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+    return value if isinstance(value, int) and value > 0 else None
+
+
 def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dict[str, Any]:
     """Release one synchronized request group and retain every request result."""
 
@@ -203,8 +218,11 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
         barrier.wait(timeout=30.0)
         observations, text, started, finished, errors, usage = stream_completion(workload_args)
         generated_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+        prompt_tokens = usage_prompt_tokens(usage)
         ttft = observations[0].offset_seconds if observations else None
         last = observations[-1].offset_seconds if observations else None
+        first_output_offset = started - suite_started + ttft if ttft is not None else None
+        prefill_tps = prompt_tokens / ttft if prompt_tokens is not None and ttft is not None and ttft > 0 else None
         decode_seconds = last - ttft if ttft is not None and last is not None else None
         decode_tps = (
             (generated_tokens - 1) / decode_seconds
@@ -217,6 +235,8 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
         ]
         if not observations:
             errors.append("stream contained no content events")
+        if prefill_tps is None:
+            errors.append("server did not provide a positive prompt-token count and TTFT for prefill TPS")
         if decode_tps is None:
             errors.append("fewer than two generated tokens or no positive decode interval")
         return {
@@ -225,6 +245,9 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
             "finished_offset_seconds": finished - suite_started,
             "wall_seconds": finished - started,
             "ttft_seconds": ttft,
+            "first_output_offset_seconds": first_output_offset,
+            "prompt_tokens": prompt_tokens,
+            "prefill_tps": prefill_tps,
             "decode_seconds": decode_seconds,
             "decode_tps": decode_tps,
             "generated_tokens": generated_tokens,
@@ -248,6 +271,9 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
     last_finish = max((request["finished_offset_seconds"] for request in requests), default=None)
     span = last_finish - first_start if first_start is not None and last_finish is not None else None
     aggregate_tokens = sum(request["generated_tokens"] for request in successful)
+    first_output_offsets = [request["first_output_offset_seconds"] for request in successful if request["first_output_offset_seconds"] is not None]
+    prefill_span = max(first_output_offsets) - first_start if first_output_offsets and first_start is not None else None
+    aggregate_prompt_tokens = sum(request["prompt_tokens"] for request in successful if request["prompt_tokens"] is not None)
     return {
         "round_index": round_index,
         "started_epoch_seconds": suite_started,
@@ -258,6 +284,14 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
             "requested_requests": args.concurrency,
             "aggregate_generated_tokens": aggregate_tokens,
             "aggregate_tps": aggregate_tokens / span if span and span > 0 else None,
+            "aggregate_prompt_tokens": aggregate_prompt_tokens,
+            "prefill_span_seconds": prefill_span,
+            "aggregate_prefill_tps": (
+                aggregate_prompt_tokens / prefill_span
+                if prefill_span is not None and prefill_span > 0 and aggregate_prompt_tokens > 0
+                else None
+            ),
+            "prefill_tps": numeric_summary([request["prefill_tps"] for request in successful if request["prefill_tps"] is not None]),
             "decode_tps": numeric_summary([request["decode_tps"] for request in successful if request["decode_tps"] is not None]),
             "ttft_seconds": numeric_summary([request["ttft_seconds"] for request in successful if request["ttft_seconds"] is not None]),
             "token_gap_seconds": numeric_summary([gap for request in successful for gap in request["token_gap_seconds"]]),
@@ -276,6 +310,17 @@ def main(argv: list[str] | None = None) -> int:
     tokenizer = load_tokenizer(args.tokenizer)
     rounds = [run_round(args, tokenizer, index) for index in range(1, args.rounds + 1)]
     aggregate_tps = [item["summary"]["aggregate_tps"] for item in rounds if item["summary"]["aggregate_tps"] is not None]
+    aggregate_prefill_tps = [
+        item["summary"]["aggregate_prefill_tps"]
+        for item in rounds
+        if item["summary"]["aggregate_prefill_tps"] is not None
+    ]
+    all_prefill_tps = [
+        request["prefill_tps"]
+        for item in rounds
+        for request in item["requests"]
+        if request["prefill_tps"] is not None
+    ]
     all_ttft = [request["ttft_seconds"] for item in rounds for request in item["requests"] if request["ttft_seconds"] is not None]
     all_gaps = [gap for item in rounds for request in item["requests"] for gap in request["token_gap_seconds"]]
     artifact = {
@@ -300,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
             "successful_rounds": sum(item["status"] == "passed" for item in rounds),
             "requested_rounds": args.rounds,
             "aggregate_tps": numeric_summary(aggregate_tps),
+            "aggregate_prefill_tps": numeric_summary(aggregate_prefill_tps),
+            "prefill_tps": numeric_summary(all_prefill_tps),
             "ttft_seconds": numeric_summary(all_ttft),
             "token_gap_seconds": numeric_summary(all_gaps),
             "p99_ttft_seconds": nearest_rank_percentile(all_ttft, 0.99),
