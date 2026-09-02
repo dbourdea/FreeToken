@@ -41,7 +41,7 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
 [[ "${MOE_K_THREE_ROWS}" == "0" || "${MOE_K_THREE_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_THREE_ROWS must be 0 or 1" >&2; exit 2; }
 [[ ! ( "${MOE_K_TWO_ROWS}" == "1" && "${MOE_K_THREE_ROWS}" == "1" ) ]] || { echo "select at most one Q4 row-sharing candidate" >&2; exit 2; }
 [[ "${GROUPED_PREFILL_MIN_TOKENS}" =~ ^[0-9]+$ ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS must be a non-negative integer" >&2; exit 2; }
-[[ "${GROUPED_PREFILL_MODE}" == "both" || "${GROUPED_PREFILL_MODE}" == "q4_gate_up" || "${GROUPED_PREFILL_MODE}" == "q5_down" ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MODE must be both, q4_gate_up, or q5_down" >&2; exit 2; }
+[[ "${GROUPED_PREFILL_MODE}" == "both" || "${GROUPED_PREFILL_MODE}" == "gate_up" || "${GROUPED_PREFILL_MODE}" == "down" ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MODE must be both, gate_up, or down" >&2; exit 2; }
 for required in "${LAUNCHER}" "${QUALITY}" "${SCHEDULER}" "${CONCURRENT}" "${TOKENIZER}" \
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"; do
@@ -98,13 +98,17 @@ FREETOKEN_GGUF_MOE_K_THREE_ROWS="${MOE_K_THREE_ROWS}" \
 FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS="${GROUPED_PREFILL_MIN_TOKENS}" \
 FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_PREFILL_MODE}" \
     "${LAUNCHER}" start "${ARTIFACT_DIR}/q4-server" 0.30 0
+candidate_ready=0
 for _ in $(seq 1 480); do
     code="$(candidate_status "${ARTIFACT_DIR}/ready.json" || true)"
-    [[ "${code}" == "200" ]] && break
+    if [[ "${code}" == "200" ]]; then
+        candidate_ready=1
+        break
+    fi
     printf 'status=%s\n' "${code}" >>"${ARTIFACT_DIR}/ready-progress.txt"
     sleep 1
 done
-[[ -s "${ARTIFACT_DIR}/ready.json" ]] || { echo "Q4 candidate did not reach real completion readiness" >&2; exit 1; }
+[[ "${candidate_ready}" == "1" ]] || { echo "Q4 candidate did not reach real completion readiness" >&2; exit 1; }
 
 # The deterministic fingerprint is an admission gate, never a post-hoc report.
 PYTHONPATH="${SOURCE_DIR}/python" "${VENV_PYTHON}" "${QUALITY}" \
