@@ -28,6 +28,10 @@ _HIP_GGUF_MMV_Y_ENV = "FREETOKEN_GGUF_MMV_Y"
 # not change routed-expert Q4_K or Q5_K kernels, whose independent experiments
 # already rejected wider decode launches on this GPU family.
 _HIP_GGUF_Q8_MMV_WARPS_ENV = "FREETOKEN_GGUF_Q8_MMV_WARPS"
+# This independent switch applies only to the dense Q6_K single-token path.
+# Its two-wave candidate is screened against the real Q6_K output tensor before
+# it can be considered for API, quality, prefill, or decode measurement.
+_HIP_GGUF_Q6_MMV_WARPS_ENV = "FREETOKEN_GGUF_Q6_MMV_WARPS"
 # This separate switch controls the number of physical waves in the Q4_K and
 # Q5_K routed-expert decode kernels.  It is intentionally restricted to the
 # established eight-wave path and the isolated four-wave component candidate.
@@ -82,6 +86,14 @@ def _hip_gguf_cflags() -> list[str]:
         raise RuntimeError(
             f"{_HIP_GGUF_Q8_MMV_WARPS_ENV} must be 1 or 8, got {q8_mmv_warps!r}"
         )
+    # Keep the Q6_K experiment a binary, reviewed launch choice.  Wider Q6
+    # reductions alter accumulation order and therefore require the component
+    # parity gate in the accompanying benchmark before any service experiment.
+    q6_mmv_warps = os.environ.get(_HIP_GGUF_Q6_MMV_WARPS_ENV, "1").strip()
+    if q6_mmv_warps not in {"1", "2"}:
+        raise RuntimeError(
+            f"{_HIP_GGUF_Q6_MMV_WARPS_ENV} must be 1 or 2, got {q6_mmv_warps!r}"
+        )
     # The profiled Q4_K and Q5_K routed-expert kernels normally use eight
     # physical waves.  A four-wave build is available only for a real-weight
     # parity and device-time screen before any API or quality experiment.
@@ -94,6 +106,7 @@ def _hip_gguf_cflags() -> list[str]:
         "-O3",
         f"-DGGML_CUDA_MMV_Y={mmv_y}",
         f"-DGGML_CUDA_Q8_MMV_WARPS={q8_mmv_warps}",
+        f"-DGGML_CUDA_Q6_MMV_WARPS={q6_mmv_warps}",
         f"-DGGML_CUDA_MOE_K_WARPS={moe_k_warps}",
     ]
 

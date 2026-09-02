@@ -5,6 +5,10 @@
 #define GGML_CUDA_Q8_MMV_WARPS 1
 #endif
 
+#ifndef GGML_CUDA_Q6_MMV_WARPS
+#define GGML_CUDA_Q6_MMV_WARPS 1
+#endif
+
 // The old vendored implementation assigns one physical wave to each Q8_0
 // output row.  This Q8-only candidate follows modern llama.cpp's RDNA4
 // direction: eight waves divide the K loop for one row, then wave zero reduces
@@ -48,6 +52,63 @@ static __global__ void mul_mat_vec_q8_0_q8_1_warped(
   // Only wave zero writes the result.  The other waves publish matching lane
   // partial sums to shared memory, allowing a deterministic lane-local merge
   // before the existing warp reduction produces the output scalar.
+  __shared__ float wave_partials[num_warps - 1][WARP_SIZE];
+  if (wave > 0) {
+    wave_partials[wave - 1][lane] = partial;
+  }
+  __syncthreads();
+  if (wave > 0) {
+    return;
+  }
+#pragma unroll
+  for (int index = 0; index < num_warps - 1; ++index) {
+    partial += wave_partials[index][lane];
+  }
+#pragma unroll
+  for (int mask = WARP_SIZE / 2; mask > 0; mask >>= 1) {
+    partial += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), partial, mask);
+  }
+  if (lane == 0) {
+    dst[vec * nrows + row] = partial;
+  }
+}
+
+// Divide a dense Q6_K output row across a bounded number of physical waves.
+// Every wave retains the original packed-block mapping, then wave zero merges
+// lane-matched partial sums before performing the existing lane reduction.
+template <typename scalar_t, int num_warps>
+static __global__ void mul_mat_vec_q6_K_q8_1_warped(
+    const void* __restrict__ vx,
+    const void* __restrict__ vy,
+    scalar_t* __restrict__ dst,
+    const int ncols,
+    const int nrows,
+    const int nvecs) {
+  const int row = blockIdx.x;
+  const int vec = blockIdx.y;
+  if (row >= nrows || vec >= nvecs) {
+    return;
+  }
+
+  const int lane = threadIdx.x;
+  const int wave = threadIdx.y;
+  const int thread = wave * WARP_SIZE + lane;
+  const int blocks_per_row = ncols / QK_K;
+  const int blocks_per_iteration = VDR_Q6_K_Q8_1_MMVQ * num_warps * WARP_SIZE / QI6_K;
+  const int nrows_y = (ncols + 512 - 1) / 512 * 512;
+  const block_q6_K* x = static_cast<const block_q6_K*>(vx);
+  const block_q8_1* y = static_cast<const block_q8_1*>(vy);
+  float partial = 0.0f;
+
+  for (int block = thread / (QI6_K / VDR_Q6_K_Q8_1_MMVQ);
+       block < blocks_per_row;
+       block += blocks_per_iteration) {
+    const int input_block = row * blocks_per_row + block;
+    const int activation_block = vec * (nrows_y / QK8_1) + block * (QK_K / QK8_1);
+    const int quant_index = VDR_Q6_K_Q8_1_MMVQ * (thread % (QI6_K / VDR_Q6_K_Q8_1_MMVQ));
+    partial += vec_dot_q6_K_q8_1(&x[input_block], &y[activation_block], quant_index);
+  }
+
   __shared__ float wave_partials[num_warps - 1][WARP_SIZE];
   if (wave > 0) {
     wave_partials[wave - 1][lane] = partial;
@@ -279,11 +340,20 @@ static void mul_mat_vec_q6_K_q8_1_cuda(
     const int nrows,
     const int nvecs,
     cudaStream_t stream) {
+#if GGML_CUDA_Q6_MMV_WARPS == 1
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, nvecs, 1);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK_K, QI6_K, block_q6_K, VDR_Q6_K_Q8_1_MMVQ, vec_dot_q6_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#elif GGML_CUDA_Q6_MMV_WARPS == 2
+  const dim3 block_nums(nrows, nvecs, 1);
+  const dim3 block_dims(WARP_SIZE, GGML_CUDA_Q6_MMV_WARPS, 1);
+  mul_mat_vec_q6_K_q8_1_warped<scalar_t, GGML_CUDA_Q6_MMV_WARPS>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
+#else
+#error "GGML_CUDA_Q6_MMV_WARPS must be 1 or 2"
+#endif
 }
 
 template <typename scalar_t>
