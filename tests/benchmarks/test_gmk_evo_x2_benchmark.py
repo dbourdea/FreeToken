@@ -269,6 +269,19 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('--output "${ARTIFACT_ROOT}/summary.json"', contents)
         self.assertNotIn('--expected-sessions "${SESSION_COUNT}" >"${ARTIFACT_ROOT}/summary.json"', contents)
 
+    def test_grouped_differential_requires_completed_normal_response(self) -> None:
+        """GPU handoff cannot accept a 200 response that ended at a token cutoff."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        controller = repository_root / "scripts" / "gmk-evo-x2" / "run_qwen_q4_grouped_differential_gate.sh"
+        contents = controller.read_text(encoding="utf-8")
+
+        self.assertIn('"max_tokens":512', contents)
+        self.assertIn('normal_completion()', contents)
+        self.assertIn('["finish_reason"])', contents)
+        self.assertIn("grep -qx 'stop'", contents)
+        self.assertIn('normal_completion "${ARTIFACT_DIR}/preflight.json"', contents)
+
     def test_dense_q8_timeshare_controller_owns_detached_recovery(self) -> None:
         """A lost SSH parent must not leave the normal service stopped after Q8 screening."""
 

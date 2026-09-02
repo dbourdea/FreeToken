@@ -25,7 +25,7 @@ readonly BENCHMARK="${SOURCE_DIR}/benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_di
 # a production cache entry. The harness itself does not need an API server.
 readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-differential"
 readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-differential"
-readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
+readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":512,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
 mkdir -p "${ARTIFACT_DIR}"
@@ -39,6 +39,18 @@ normal_status() {
         http://127.0.0.1:1919/v1/chat/completions
 }
 
+# Require a completed model response, rather than treating a listening socket,
+# HTTP 200, or a reasoning-token length cutoff as proof that the protected
+# service is ready for the next owner. The response body remains in the named
+# artifact for later inspection when this check fails.
+normal_completion() {
+    local output="$1" code
+    code="$(normal_status "${output}" || true)"
+    [[ "${code}" == "200" ]] || return 1
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["choices"][0]["finish_reason"])' "${output}" \
+        | grep -qx 'stop'
+}
+
 # Start the maintained recovery service and require one actual completion. The
 # loop is bounded, records every failed readiness probe, and executes from the
 # EXIT trap even when the diagnostic or HIP extension build fails.
@@ -46,12 +58,11 @@ recover_normal_service() {
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \
         >"${ARTIFACT_DIR}/recovery-start.txt" 2>&1 || true
     for attempt in $(seq 1 600); do
-        code="$(normal_status "${ARTIFACT_DIR}/recovery-probe.json" || true)"
-        if [[ "${code}" == "200" ]]; then
+        if normal_completion "${ARTIFACT_DIR}/recovery-probe.json"; then
             printf 'normal_api_ready=1 attempts=%s\n' "${attempt}" >"${ARTIFACT_DIR}/cleanup.txt"
             return 0
         fi
-        printf 'attempt=%s status=%s\n' "${attempt}" "${code}" >>"${ARTIFACT_DIR}/recovery-progress.txt"
+        printf 'attempt=%s completion=not-ready\n' "${attempt}" >>"${ARTIFACT_DIR}/recovery-progress.txt"
         sleep 1
     done
     printf 'normal_api_ready=0 attempts=600\n' >"${ARTIFACT_DIR}/cleanup.txt"
@@ -70,8 +81,8 @@ done
 trap recover_normal_service EXIT
 
 # Do not take GPU ownership from an unhealthy protected service.
-preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
-[[ "${preflight_code}" == "200" ]] || { echo "normal API unavailable before differential gate: ${preflight_code}" >&2; exit 1; }
+normal_completion "${ARTIFACT_DIR}/preflight.json" \
+    || { echo "normal API did not complete before differential gate" >&2; exit 1; }
 "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
     >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 mkdir -p "${EXTENSION_CACHE}" "${TRITON_CACHE}"
