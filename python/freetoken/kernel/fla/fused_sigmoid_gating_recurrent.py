@@ -15,6 +15,10 @@ import triton.language as tl
 # This controls only the fused GDN decode launch.  The one-wave default is the
 # established path; two waves are available solely to the isolated ROCm screen.
 _GDN_NUM_WARPS_ENV = "FREETOKEN_GDN_NUM_WARPS"
+# This controls the Triton software-pipeline depth for the same fused decode
+# kernel.  It is intentionally separate from the physical workgroup width so
+# component evidence can attribute an observed change to one knob at a time.
+_GDN_NUM_STAGES_ENV = "FREETOKEN_GDN_NUM_STAGES"
 
 
 def _gdn_num_warps() -> int:
@@ -28,6 +32,20 @@ def _gdn_num_warps() -> int:
     value = os.environ.get(_GDN_NUM_WARPS_ENV, "1").strip()
     if value not in {"1", "2"}:
         raise RuntimeError(f"{_GDN_NUM_WARPS_ENV} must be 1 or 2, got {value!r}")
+    return int(value)
+
+
+def _gdn_num_stages() -> int:
+    """Return a reviewed GDN pipeline depth and reject arbitrary cache variants.
+
+    Three stages is the qualified production default.  Two and four stages are
+    bounded isolated candidates because they can alter HIP register pressure,
+    occupancy, and memory latency hiding without changing the kernel math.
+    """
+
+    value = os.environ.get(_GDN_NUM_STAGES_ENV, "3").strip()
+    if value not in {"2", "3", "4"}:
+        raise RuntimeError(f"{_GDN_NUM_STAGES_ENV} must be 2, 3, or 4, got {value!r}")
     return int(value)
 
 
@@ -313,9 +331,9 @@ def fused_sigmoid_gating_delta_rule_update(
     BK, BV = triton.next_power_of_2(K), min(triton.next_power_of_2(V), 32)
     NK, NV = triton.cdiv(K, BK), triton.cdiv(V, BV)
     assert NK == 1, "NK > 1 is not supported yet"
-    # Retain the stable three-stage pipeline.  Only the physical wave count is
-    # candidate-controlled, and only through the validated helper above.
-    num_stages = 3
+    # Keep the qualified three-stage default while allowing only the bounded
+    # pipeline candidates validated by the isolated parity controller.
+    num_stages = _gdn_num_stages()
     num_warps = _gdn_num_warps()
 
     if scale is None:
