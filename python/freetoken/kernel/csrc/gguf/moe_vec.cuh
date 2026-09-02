@@ -71,6 +71,14 @@ static bool freetoken_moe_k_two_rows_enabled() {
   return value != nullptr && (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0);
 }
 
+// Return whether the isolated three-row experiment is enabled.  This remains
+// distinct from the qualified two-row flag so neither component screens nor
+// normal API processes can accidentally select a higher-register candidate.
+static bool freetoken_moe_k_three_rows_enabled() {
+  const char* value = std::getenv("FREETOKEN_GGUF_MOE_K_THREE_ROWS");
+  return value != nullptr && (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0);
+}
+
 // The HIP launcher is defined after the CUDA-compatible wrapper so the
 // generic wrappers remain grouped by quantization format below.
 template <typename scalar_t>
@@ -158,6 +166,84 @@ static void moe_vec_q_k_hip_two_rows_cuda(
   const dim3 block_nums((nrows + 1) / 2, tokens * top_k, 1);
   const dim3 block_dims(WARP_SIZE, 1, 1);
   moe_vec_q_k_hip_two_rows<scalar_t, qi, block_q_t, vdr, vec_dot, min_blocks>
+      <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
+}
+
+// The three-row candidate extends the two-row mapping by assigning three
+// adjacent output rows to one wave.  Each accumulator retains the production
+// vector-dot call order, lane ownership, XOR reduction order, and destination
+// address for its row.  Only the amount of work carried by the wave changes.
+template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot, int min_blocks>
+__launch_bounds__(WARP_SIZE, min_blocks)
+static __global__ void moe_vec_q_k_hip_three_rows(
+    const void* __restrict__ vx,
+    const void* __restrict__ vy,
+    scalar_t* __restrict__ dst,
+    const int* __restrict__ topk_ids,
+    const int topk,
+    const int ncols,
+    const int nrows,
+    const int token_stride) {
+  const int row0 = 3 * blockIdx.x;
+  const int route = blockIdx.y;
+  if (row0 >= nrows) {
+    return;
+  }
+
+  const int token = route / topk;
+  const int expert = topk_ids[route];
+  const int blocks_per_row = ncols / QK_K;
+  const int blocks_per_wave = vdr * WARP_SIZE / qi;
+  const block_q_t* x = ((const block_q_t*)vx) + expert * nrows * blocks_per_row;
+  const block_q8_1* y = (const block_q8_1*)(((const int*)vy) + token * token_stride);
+  float tmp0 = 0.0f;
+  float tmp1 = 0.0f;
+  float tmp2 = 0.0f;
+
+  for (int i = threadIdx.x / (qi / vdr); i < blocks_per_row; i += blocks_per_wave) {
+    const int iby = i * (QK_K / QK8_1);
+    const int iqs = vdr * (threadIdx.x % (qi / vdr));
+    tmp0 += vec_dot(&x[row0 * blocks_per_row + i], &y[iby], iqs);
+    if (row0 + 1 < nrows) {
+      tmp1 += vec_dot(&x[(row0 + 1) * blocks_per_row + i], &y[iby], iqs);
+    }
+    if (row0 + 2 < nrows) {
+      tmp2 += vec_dot(&x[(row0 + 2) * blocks_per_row + i], &y[iby], iqs);
+    }
+  }
+
+#pragma unroll
+  for (int mask = WARP_SIZE / 2; mask > 0; mask >>= 1) {
+    tmp0 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp0, mask);
+    tmp1 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp1, mask);
+    tmp2 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp2, mask);
+  }
+  if (threadIdx.x == 0) {
+    dst[route * nrows + row0] = tmp0;
+  }
+  if (threadIdx.x == 1 && row0 + 1 < nrows) {
+    dst[route * nrows + row0 + 1] = tmp1;
+  }
+  if (threadIdx.x == 2 && row0 + 2 < nrows) {
+    dst[route * nrows + row0 + 2] = tmp2;
+  }
+}
+
+template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot, int min_blocks>
+static void moe_vec_q_k_hip_three_rows_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int* topk_ids,
+    const int top_k,
+    const int tokens,
+    const int ncols,
+    const int nrows,
+    const int token_stride,
+    cudaStream_t stream) {
+  const dim3 block_nums((nrows + 2) / 3, tokens * top_k, 1);
+  const dim3 block_dims(WARP_SIZE, 1, 1);
+  moe_vec_q_k_hip_three_rows<scalar_t, qi, block_q_t, vdr, vec_dot, min_blocks>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
 #endif
@@ -399,6 +485,13 @@ static void moe_vec_q4_K_q8_1_cuda(
     const int token_stride,
     cudaStream_t stream) {
 #if defined(USE_ROCM)
+  if (freetoken_moe_k_three_rows_enabled()) {
+    moe_vec_q_k_hip_three_rows_cuda<
+        scalar_t, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1,
+        FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS>(
+        vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
+    return;
+  }
   if (freetoken_moe_k_two_rows_enabled()) {
     moe_vec_q_k_hip_two_rows_cuda<
         scalar_t, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1,
@@ -427,6 +520,13 @@ static void moe_vec_q5_K_q8_1_cuda(
     const int token_stride,
     cudaStream_t stream) {
 #if defined(USE_ROCM)
+  if (freetoken_moe_k_three_rows_enabled()) {
+    moe_vec_q_k_hip_three_rows_cuda<
+        scalar_t, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1,
+        FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS>(
+        vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
+    return;
+  }
   if (freetoken_moe_k_two_rows_enabled()) {
     moe_vec_q_k_hip_two_rows_cuda<
         scalar_t, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1,

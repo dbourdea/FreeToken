@@ -24,9 +24,9 @@ readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
 # requires a separate exact-output gate.
 readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
 # Select the candidate family without changing the normal serving default.
-# ``grouped`` retains the original route-sort experiment. ``two_rows`` selects
-# the HIP one-wave/two-output-row vector experiment. Both remain component-only
-# gates and neither changes the recovery server or production defaults.
+# ``grouped`` retains the original route-sort experiment. ``two_rows`` and
+# ``three_rows`` select isolated HIP row-sharing vector experiments. Every
+# option remains component-only and none changes recovery or production defaults.
 readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
 # Keep occupancy selection explicit in evidence. One is the qualified two-row
 # compile target; two is a single bounded candidate, not a serving default.
@@ -42,8 +42,8 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
     echo "FREETOKEN_Q4_GROUPED_MODE must be both, gate_up, or down" >&2
     exit 2
 }
-[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" ]] || {
-    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped or two_rows" >&2
+[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" || "${COMPONENT_CANDIDATE}" == "three_rows" ]] || {
+    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped, two_rows, or three_rows" >&2
     exit 2
 }
 [[ "${TWO_ROWS_MIN_BLOCKS}" == "1" || "${TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
@@ -129,24 +129,33 @@ if [[ "${COMPONENT_CANDIDATE}" == "grouped" ]]; then
         >"${ARTIFACT_DIR}/grouped.log" 2>&1
     printf 'candidate=grouped mode=%s\n' "${GROUPED_MODE}" >"${ARTIFACT_DIR}/candidate.txt"
 else
-    # This kernel candidate changes only how two adjacent real Q4_K/Q5_K rows
-    # share one HIP wave.  The saved production-vector output is the strict
-    # reference, so a timing result is retained only if numerical parity holds.
-    PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
-    TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
-    FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 FREETOKEN_GGUF_MOE_K_TWO_ROWS=1 \
+    # Row-sharing candidates only change how adjacent real Q4_K/Q5_K rows use
+    # one HIP wave.  The saved production-vector output remains the strict
+    # reference, so timing survives only when numerical parity holds.
+    row_flag=(--vector-two-rows)
+    row_env="FREETOKEN_GGUF_MOE_K_TWO_ROWS=1"
+    row_name="two-rows"
+    if [[ "${COMPONENT_CANDIDATE}" == "three_rows" ]]; then
+        row_flag=(--vector-three-rows)
+        row_env="FREETOKEN_GGUF_MOE_K_THREE_ROWS=1"
+        row_name="three-rows"
+    fi
+    env "${row_env}" PYTHONPATH="${SOURCE_DIR}/python" \
+    TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" TRITON_CACHE_DIR="${TRITON_CACHE}" \
+    PYTORCH_ROCM_ARCH=gfx1151 FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 \
     FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS="${TWO_ROWS_MIN_BLOCKS}" \
     FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS="${Q4_TWO_ROWS_MIN_BLOCKS}" \
     FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS="${Q5_TWO_ROWS_MIN_BLOCKS}" \
     "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
-        --model "${MODEL_PATH}" --mode vector --vector-two-rows \
+        --model "${MODEL_PATH}" --mode vector "${row_flag[@]}" \
         --two-rows-min-blocks "${TWO_ROWS_MIN_BLOCKS}" \
         --q4-two-rows-min-blocks "${Q4_TWO_ROWS_MIN_BLOCKS}" \
         --q5-two-rows-min-blocks "${Q5_TWO_ROWS_MIN_BLOCKS}" \
         --tokens 1024 --warmup 8 --repetitions 20 \
-        --json "${ARTIFACT_DIR}/two-rows.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
-        >"${ARTIFACT_DIR}/two-rows.log" 2>&1
-    printf 'candidate=two_rows min_blocks=%s q4_min_blocks=%s q5_min_blocks=%s\n' \
+        --json "${ARTIFACT_DIR}/${row_name}.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
+        >"${ARTIFACT_DIR}/${row_name}.log" 2>&1
+    printf 'candidate=%s min_blocks=%s q4_min_blocks=%s q5_min_blocks=%s\n' \
+        "${COMPONENT_CANDIDATE}" \
         "${TWO_ROWS_MIN_BLOCKS}" "${Q4_TWO_ROWS_MIN_BLOCKS}" "${Q5_TWO_ROWS_MIN_BLOCKS}" \
         >"${ARTIFACT_DIR}/candidate.txt"
 fi
