@@ -80,16 +80,11 @@ def test_hip_gguf_flags_reject_an_unreviewed_row_grouping(monkeypatch: pytest.Mo
         gguf._hip_gguf_cflags()
 
 
-def test_hip_gguf_flags_allow_reviewed_q8_wave_counts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Expose the bounded dense-Q8 wave candidates in the extension build key."""
+def test_hip_gguf_flags_reject_screened_q8_wave_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep rejected dense-Q8 multiwave geometries out of production builds."""
 
-    monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1151")
-    for wave_count in ("2", "4", "8"):
-        monkeypatch.setenv("FREETOKEN_GGUF_Q8_MMV_WARPS", wave_count)
-        assert f"-DGGML_CUDA_Q8_MMV_WARPS={wave_count}" in gguf._hip_gguf_cflags()
-
-    monkeypatch.setenv("FREETOKEN_GGUF_Q8_MMV_WARPS", "3")
-    with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_Q8_MMV_WARPS must be 1, 2, 4, or 8"):
+    monkeypatch.setenv("FREETOKEN_GGUF_Q8_MMV_WARPS", "2")
+    with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_Q8_MMV_WARPS must be 1"):
         gguf._hip_gguf_cflags()
 
 

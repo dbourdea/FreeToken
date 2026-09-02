@@ -1511,3 +1511,42 @@ checkout-interface failure and
 `q4-c71-route-block-component-20260902T064008Z` as the numerical rejection,
 including both controller logs, the baseline tensor record, candidate compiler
 log, parity exception, recovery evidence, and normal-service completion proof.
+
+### C72-C76: dense Q8_0 intermediate wave closure
+
+C72 through C74 repaired three harness defects before a valid dense-Q8 result
+could exist: the GGUF wrapper uses `shape` rather than `ndim`, the production
+binding accepts packed weight first with four arguments, and independent
+baseline and candidate processes need a fixed activation seed. Those three
+attempts make no kernel timing or quality claim. Each controller restored the
+normal NVFP4 service with a verified real completion.
+
+C75 was the first valid two-wave screen. It used the fixed input, original
+packed Q8_0 Qwen bytes, 30 warmup calls, 300 timed calls, and an elementwise
+comparison against the one-wave reference for both profiler-relevant dense
+tensors. The two-wave result passed the declared numerical tolerance, but it
+was slower on both tensors.
+
+C76 repeated the same valid gate at four waves and also passed parity while
+regressing both tensors.
+
+| Tensor | One wave | Two waves | Four waves | Parity for two and four waves |
+| --- | ---: | ---: | ---: | --- |
+| `blk.0.attn_qkv.weight`, 2,048 to 8,192 | 26.485 us | 27.744 us | 31.992 us | Passed, max error at most 0.0004883 |
+| `blk.0.ssm_out.weight`, 4,096 to 2,048 | 14.519 us | 18.519 us | 17.532 us | Bit-identical |
+
+Two waves regress the attention tensor by 4.75 percent and the state-space
+tensor by 27.55 percent. Four waves regress them by 17.21 percent and 20.34
+percent, respectively. The earlier eight-wave screen had also regressed both
+shapes. Together these measurements close the dense-Q8 multiwave family for
+this model and HIP target before API testing.
+
+**Decision: retain the qualified one-wave dense Q8_0 kernel and reject all
+multiwave geometries.** The runtime flag now accepts only one, preventing the
+screened options from entering a future extension build. Preserve
+`q8-c75-two-wave-component-20260902T072254Z` and
+`q8-c76-four-wave-component-20260902T073053Z`, including their baseline and
+candidate JSON, saved references, parity records, compiler logs, controller
+logs, cleanup proofs, and normal-service completions. C76 restored the normal
+NVFP4 API after 379 recovery probes and a subsequent independent completion
+returned HTTP 200.
