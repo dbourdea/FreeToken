@@ -2171,3 +2171,22 @@ Preserve `q4-c116-four-rows-component-r1-20260902` and
 `q4-c117-four-rows-full-scheduler-r1-20260902`, including raw component and
 API outputs, immutable timing samples, quality response, recovery logs, and
 normal-service completion proof.
+
+### C118: Q4_K-only four-row isolation closure
+
+C118 tested whether the Q4_K side of the Q4_K/Q5_K MoE projection could retain
+the four-row benefit by itself while Q5_K stayed on the generic vector kernel.
+The format selector is explicit and defaults off, so neither normal serving nor
+the all-format four-row candidate can inherit it accidentally.
+
+The component result exactly matched the generic-vector SHA-256
+`46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d`, with
+zero maximum and mean absolute difference. Its 81.382 ms median device time
+was slower than the same-run generic-vector result and 15.11 percent slower
+than the all-format C116 four-row candidate at 70.701 ms.
+
+**Decision: close the Q4_K-only four-row candidate before API testing.** It is
+arithmetically exact but does not supply a component-level speed benefit. Keep
+`q4-c118-four-rows-q4-only-component-r1-20260902`, including the parity output,
+timed samples, selector record, logs, cleanup record, and normal-service
+completion proof. No scheduler, C4, or quality-TPS claim is made for C118.
