@@ -4,11 +4,31 @@ decode kernel. Borrowed verbatim (pure torch+triton, no sglang deps) from sglang
 Does gating(sigmoid+softplus) + optional in-kernel l2norm + delta-rule recurrent update +
 per-request state read/write-by-index in ONE kernel — no external gating or
 gather/scatter/clone glue."""
+import os
 from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
+
+
+# This controls only the fused GDN decode launch.  The one-wave default is the
+# established path; two waves are available solely to the isolated ROCm screen.
+_GDN_NUM_WARPS_ENV = "FREETOKEN_GDN_NUM_WARPS"
+
+
+def _gdn_num_warps() -> int:
+    """Return a reviewed GDN launch width and reject arbitrary runtime tuning.
+
+    This guard makes the launch shape part of the reproducible candidate
+    configuration.  It prevents an inherited shell value from silently changing
+    model behavior or producing a cache entry that cannot be explained later.
+    """
+
+    value = os.environ.get(_GDN_NUM_WARPS_ENV, "1").strip()
+    if value not in {"1", "2"}:
+        raise RuntimeError(f"{_GDN_NUM_WARPS_ENV} must be 1 or 2, got {value!r}")
+    return int(value)
 
 
 @triton.jit(do_not_specialize=["T"])
@@ -293,8 +313,10 @@ def fused_sigmoid_gating_delta_rule_update(
     BK, BV = triton.next_power_of_2(K), min(triton.next_power_of_2(V), 32)
     NK, NV = triton.cdiv(K, BK), triton.cdiv(V, BV)
     assert NK == 1, "NK > 1 is not supported yet"
+    # Retain the stable three-stage pipeline.  Only the physical wave count is
+    # candidate-controlled, and only through the validated helper above.
     num_stages = 3
-    num_warps = 1
+    num_warps = _gdn_num_warps()
 
     if scale is None:
         scale = k.shape[-1] ** -0.5
