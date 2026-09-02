@@ -1618,3 +1618,49 @@ non-improving candidate from becoming a default by accident. Preserve
 `q4-c81-max-requests-4-concurrent-c4-prefill-repeat-20260902T082828Z`, including
 their quality hashes, scheduler summaries, concurrent raw responses, recovery
 heartbeats, cleanup records, and normal-service completion evidence.
+
+### C82-C85: fused GDN pipeline-stage closure
+
+C82 introduced a bounded `FREETOKEN_GDN_NUM_STAGES` control for the fused
+sigmoid-gating delta-rule decode kernel. The control allows only two, three,
+or four compiler pipeline stages, defaults to the qualified three-stage path,
+and has host-side tests that reject arbitrary inherited values. The component
+screen validates the Qwen GGUF geometry, uses deterministic synthetic one-token
+inputs at the actual attention and GDN state dimensions, and compares both the
+exact output bytes and final recurrent state bytes. It intentionally does not
+claim real-weight or API performance.
+
+C82 measured the two-stage candidate at 36.196 microseconds versus 38.387
+microseconds for its three-stage reference, a 6.05 percent component gain.
+C83 measured four stages at 38.302 microseconds versus 38.221 microseconds,
+or a 0.21 percent regression. Both passed exact output and state equality.
+The four-stage option is therefore closed as non-improving.
+
+C84 was a deliberately preserved controller rejection: the stage-two candidate
+produced the observed canonical quality fingerprint `3302eda43396`, but the
+caller supplied an overlong nonmatching reference string. The controller
+correctly stopped before TPS scoring and restored the normal service. C85
+repeated the same candidate with the exact recorded reference fingerprint,
+then completed the three scheduler samples and three four-client rounds.
+
+| Setting | Single prefill TPS, mean | Single decode TPS, mean | Warm TTFT, mean | Aggregate C4 prefill TPS, mean | Aggregate C4 decode TPS, mean | C4 p99 TTFT | C4 p99 token gap | Quality |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Qualified one-wave, three-stage baseline, C58+C59 and C81 | 3,118.903 | 49.137 | 0.388612 s | 4,557.900 | 91.257 | 1.104 s | 44.352 ms | Exact `3302eda43396` |
+| GDN two stages, C85 | 3,115.375 | 48.862 | 0.389038 s | 4,356.983 | 90.752 | 1.380 s | 42.078 ms | Exact `3302eda43396` |
+
+Although the isolated GDN component improved, C85 regressed single-request
+prefill by 0.11 percent, decode by 0.56 percent, and aggregate four-client
+prefill by 4.41 percent. It also increased C4 p99 TTFT by 25.0 percent. The
+slightly lower p99 token gap does not offset the prefill and admission-latency
+regressions. This is a clear example of a component gain being hidden by the
+complete serving path.
+
+**Decision: retain the qualified one-wave, three-stage GDN launch and reject
+both the two-stage and four-stage candidates for API serving.** Preserve
+`q4-c82-gdn-stage2-component-20260902T085352Z`,
+`q4-c83-gdn-stage4-component-20260902T090344Z`,
+`q4-c84-gdn-stage2-full-api-20260902T091149Z`, and
+`q4-c85-gdn-stage2-full-api-corrected-quality-20260902T092132Z`, including
+component output and state references, quality parity, scheduler samples,
+concurrent raw responses, controller logs, recovery heartbeats, cleanup
+records, and normal-service completion evidence.
