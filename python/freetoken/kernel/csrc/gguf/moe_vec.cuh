@@ -55,6 +55,12 @@ static __global__ void moe_vec_q(
 #ifndef FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS
 #define FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS 1
 #endif
+#ifndef FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS
+#define FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS
+#endif
+#ifndef FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS
+#define FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS
+#endif
 
 // Return whether the isolated Q4_K/Q5_K two-row candidate is enabled.  This
 // is deliberately a runtime opt-in, not a build-wide default: production
@@ -85,12 +91,12 @@ static void moe_vec_q4_0_q8_1_hip_two_rows_cuda(
 // and retains a separate, identically ordered reduction for each row.  It
 // therefore shares packed activations and route metadata without changing
 // either row's quantized vector-dot implementation or output addressing.
-template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot>
+template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot, int min_blocks>
 // The default reserves one wave-sized block per compute unit. An isolated
 // compile-time occupancy experiment may request two blocks, but it cannot
 // alter results because the body below preserves every row's original lane
 // reduction and vector-dot order.
-__launch_bounds__(WARP_SIZE, FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS)
+__launch_bounds__(WARP_SIZE, min_blocks)
 static __global__ void moe_vec_q_k_hip_two_rows(
     const void* __restrict__ vx,
     const void* __restrict__ vy,
@@ -137,7 +143,7 @@ static __global__ void moe_vec_q_k_hip_two_rows(
   }
 }
 
-template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot>
+template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot, int min_blocks>
 static void moe_vec_q_k_hip_two_rows_cuda(
     const void* vx,
     const void* vy,
@@ -151,7 +157,7 @@ static void moe_vec_q_k_hip_two_rows_cuda(
     cudaStream_t stream) {
   const dim3 block_nums((nrows + 1) / 2, tokens * top_k, 1);
   const dim3 block_dims(WARP_SIZE, 1, 1);
-  moe_vec_q_k_hip_two_rows<scalar_t, qi, block_q_t, vdr, vec_dot>
+  moe_vec_q_k_hip_two_rows<scalar_t, qi, block_q_t, vdr, vec_dot, min_blocks>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
 }
 #endif
@@ -395,7 +401,8 @@ static void moe_vec_q4_K_q8_1_cuda(
 #if defined(USE_ROCM)
   if (freetoken_moe_k_two_rows_enabled()) {
     moe_vec_q_k_hip_two_rows_cuda<
-        scalar_t, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1>(
+        scalar_t, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1,
+        FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS>(
         vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
     return;
   }
@@ -422,7 +429,8 @@ static void moe_vec_q5_K_q8_1_cuda(
 #if defined(USE_ROCM)
   if (freetoken_moe_k_two_rows_enabled()) {
     moe_vec_q_k_hip_two_rows_cuda<
-        scalar_t, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1>(
+        scalar_t, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1,
+        FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS>(
         vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
     return;
   }

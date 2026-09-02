@@ -31,6 +31,10 @@ readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
 # Keep occupancy selection explicit in evidence. One is the qualified two-row
 # compile target; two is a single bounded candidate, not a serving default.
 readonly TWO_ROWS_MIN_BLOCKS="${FREETOKEN_Q4_TWO_ROWS_MIN_BLOCKS:-1}"
+# Separate controls are needed only for a diagnostic that keeps Q4_K at its
+# qualified one-block target while testing Q5_K's independent residency.
+readonly Q4_TWO_ROWS_MIN_BLOCKS="${FREETOKEN_Q4_Q4_TWO_ROWS_MIN_BLOCKS:-${TWO_ROWS_MIN_BLOCKS}}"
+readonly Q5_TWO_ROWS_MIN_BLOCKS="${FREETOKEN_Q4_Q5_TWO_ROWS_MIN_BLOCKS:-${TWO_ROWS_MIN_BLOCKS}}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
@@ -44,6 +48,14 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
 }
 [[ "${TWO_ROWS_MIN_BLOCKS}" == "1" || "${TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
     echo "FREETOKEN_Q4_TWO_ROWS_MIN_BLOCKS must be 1 or 2" >&2
+    exit 2
+}
+[[ "${Q4_TWO_ROWS_MIN_BLOCKS}" == "1" || "${Q4_TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
+    echo "FREETOKEN_Q4_Q4_TWO_ROWS_MIN_BLOCKS must be 1 or 2" >&2
+    exit 2
+}
+[[ "${Q5_TWO_ROWS_MIN_BLOCKS}" == "1" || "${Q5_TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
+    echo "FREETOKEN_Q4_Q5_TWO_ROWS_MIN_BLOCKS must be 1 or 2" >&2
     exit 2
 }
 mkdir -p "${ARTIFACT_DIR}"
@@ -124,13 +136,19 @@ else
     TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
     FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 FREETOKEN_GGUF_MOE_K_TWO_ROWS=1 \
     FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS="${TWO_ROWS_MIN_BLOCKS}" \
+    FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS="${Q4_TWO_ROWS_MIN_BLOCKS}" \
+    FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS="${Q5_TWO_ROWS_MIN_BLOCKS}" \
     "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
         --model "${MODEL_PATH}" --mode vector --vector-two-rows \
         --two-rows-min-blocks "${TWO_ROWS_MIN_BLOCKS}" \
+        --q4-two-rows-min-blocks "${Q4_TWO_ROWS_MIN_BLOCKS}" \
+        --q5-two-rows-min-blocks "${Q5_TWO_ROWS_MIN_BLOCKS}" \
         --tokens 1024 --warmup 8 --repetitions 20 \
         --json "${ARTIFACT_DIR}/two-rows.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
         >"${ARTIFACT_DIR}/two-rows.log" 2>&1
-    printf 'candidate=two_rows min_blocks=%s\n' "${TWO_ROWS_MIN_BLOCKS}" >"${ARTIFACT_DIR}/candidate.txt"
+    printf 'candidate=two_rows min_blocks=%s q4_min_blocks=%s q5_min_blocks=%s\n' \
+        "${TWO_ROWS_MIN_BLOCKS}" "${Q4_TWO_ROWS_MIN_BLOCKS}" "${Q5_TWO_ROWS_MIN_BLOCKS}" \
+        >"${ARTIFACT_DIR}/candidate.txt"
 fi
 
 # A passed marker means both runs completed, grouped output matched the saved

@@ -40,6 +40,11 @@ _HIP_GGUF_MOE_K_WARPS_ENV = "FREETOKEN_GGUF_MOE_K_WARPS"
 # compute unit. This opt-in occupancy control permits a separately benchmarked
 # two-block residency target without changing the normal extension build.
 _HIP_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS"
+# Per-format controls allow the Q4_K and Q5_K occupancy hypotheses to be
+# screened independently. They inherit the legacy shared value so existing
+# candidate invocations retain their exact prior compilation shape.
+_HIP_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS"
+_HIP_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS"
 def _hip_target_arch() -> str | None:
     """Return the active AMD GPU target in ``gfxNNNN`` form when HIP exposes it.
 
@@ -113,6 +118,18 @@ def _hip_gguf_cflags() -> list[str]:
             f"{_HIP_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV} must be 1 or 2, "
             f"got {two_rows_min_blocks!r}"
         )
+    q4_two_rows_min_blocks = os.environ.get(
+        _HIP_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS_ENV, two_rows_min_blocks
+    ).strip()
+    q5_two_rows_min_blocks = os.environ.get(
+        _HIP_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS_ENV, two_rows_min_blocks
+    ).strip()
+    for name, value in (
+        (_HIP_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS_ENV, q4_two_rows_min_blocks),
+        (_HIP_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS_ENV, q5_two_rows_min_blocks),
+    ):
+        if value not in {"1", "2"}:
+            raise RuntimeError(f"{name} must be 1 or 2, got {value!r}")
     return [
         "-O3",
         f"-DGGML_CUDA_MMV_Y={mmv_y}",
@@ -120,6 +137,8 @@ def _hip_gguf_cflags() -> list[str]:
         f"-DGGML_CUDA_Q6_MMV_WARPS={q6_mmv_warps}",
         f"-DGGML_CUDA_MOE_K_WARPS={moe_k_warps}",
         f"-DFREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS={two_rows_min_blocks}",
+        f"-DFREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS={q4_two_rows_min_blocks}",
+        f"-DFREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS={q5_two_rows_min_blocks}",
     ]
 
 
