@@ -54,3 +54,25 @@ to separate tokenization, queueing, scheduler execution, model prefill, or GPU
 kernel work, which the OpenAI-compatible streaming API does not expose as
 independent timestamped events.  ROCm profiler evidence remains the source for
 kernel-level attribution.
+
+## Grouped Q4 prefill numerical differential
+
+`bench_qwen_q4_grouped_differential.py` is a component diagnostic for the
+default-off grouped Q4_K and Q5_K matrix prefill path. It is not an API
+benchmark and never reports its device work as request TPS. It materializes a
+real Qwen expert layer, then compares the accepted vector implementation with
+the grouped implementation at the Q4 gate/up, SwiGLU intermediate, Q5 down,
+and final router-weighted output boundaries. The resulting JSON identifies the
+first divergent tensor before any attempt to change the grouped path.
+
+Run it only while no protected service or endurance controller owns the GPU:
+
+```bash
+python benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_differential.py \
+  --model /home/david/freetoken-amd/models/controls/qwen36-35b-a3b-unsloth-a483e9e6/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf \
+  --json /home/david/freetoken-amd/artifacts/q4-grouped-differential-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+The command refuses to overwrite an existing artifact and requires a native
+ROCm/HIP PyTorch device. A mismatch is expected evidence for this diagnostic,
+not a test failure to hide or a reason to relax model-output quality checks.
