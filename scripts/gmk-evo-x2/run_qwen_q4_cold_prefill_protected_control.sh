@@ -17,9 +17,16 @@ readonly RECOVERY_SOURCE="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly LAUNCHER="${SOURCE_DIR}/scripts/gmk-evo-x2/launch_qwen_gguf_qualified.sh"
 readonly HARNESS="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_long_context_control.py"
 readonly MODEL="qwen36-35b-a3b-q4km-gguf-amd"
+# This component-qualified candidate is opt-in for the isolated process only.
+# It never changes the recovery server or the default Q4 launch profile.
+readonly MOE_K_TWO_ROWS="${FREETOKEN_Q4_MOE_K_TWO_ROWS:-0}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
+[[ "${MOE_K_TWO_ROWS}" == "0" || "${MOE_K_TWO_ROWS}" == "1" ]] || {
+    echo "FREETOKEN_Q4_MOE_K_TWO_ROWS must be 0 or 1" >&2
+    exit 2
+}
 for required in "${LAUNCHER}" "${HARNESS}" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"; do
     [[ -f "${required}" ]] || { echo "missing required file: ${required}" >&2; exit 2; }
 done
@@ -67,6 +74,7 @@ preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
 # Preserve the accepted 30 percent Q4 profile: one GDN wave, Q4/Q6 overlap,
 # and four request admission.  Only the client prompts change their prefixes.
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_PREFILL_OVERLAP=1 \
+FREETOKEN_GGUF_MOE_K_TWO_ROWS="${MOE_K_TWO_ROWS}" \
     "${LAUNCHER}" start "${ARTIFACT_DIR}/q4-server" 0.30 0
 for _ in $(seq 1 480); do
     code="$(candidate_status "${ARTIFACT_DIR}/q4-ready-probe.json" || true)"
@@ -94,4 +102,4 @@ if [[ "${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" == "1" ]]; then
         --sample-variation prefix_nonce --artifact "${ARTIFACT_DIR}/cold-concurrent-c4.json" \
         >"${ARTIFACT_DIR}/cold-concurrent-c4.log" 2>&1
 fi
-printf 'q4_cold_prefill_control=passed\n' >"${ARTIFACT_DIR}/result.txt"
+printf 'q4_cold_prefill_control=passed moe_k_two_rows=%s\n' "${MOE_K_TWO_ROWS}" >"${ARTIFACT_DIR}/result.txt"
