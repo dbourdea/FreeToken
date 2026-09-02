@@ -2099,3 +2099,28 @@ invalid URL-boundary controller record and
 `q4-c109-three-rows-full-scheduler-r2-20260902` as the valid quality,
 scheduler, C4, and recovery evidence. Future work must target the primary
 single-request prefill path without trading away exact quality.
+
+### C110: three-row HIP two-block occupancy closure
+
+C110 tested whether the three-row kernel's additional accumulators would
+benefit from requesting two resident wave-sized blocks per compute unit. The
+candidate retained the real Qwen first-layer geometry, 1,024 deterministic
+activations, all 256 experts, top-k eight routes, eight warmups, twenty timed
+repetitions, and the saved generic-vector output reference used by C106. It
+produced the same exact SHA-256
+`46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d`.
+
+| Three-row residency target | Median device time | Interpretation |
+| --- | ---: | --- |
+| One block, C106 | 72.805 ms | Qualified component reference |
+| Two blocks, C110 | 72.803 ms | 0.003 percent lower, within measurement variation |
+
+The two-block result is nominally only 0.002 ms lower than C106 and cannot
+support a performance claim. The normal Qwen API recovered through a real
+completion after 479 probes.
+
+**Decision: close the two-block three-row occupancy variant without API
+testing.** Retain the existing one-block evidence as the reference and preserve
+`q4-c110-three-rows-occupancy2-component-r1-20260902`, including compiler
+settings, raw samples, exact parity record, logs, cleanup evidence, and normal
+service completion proof.
