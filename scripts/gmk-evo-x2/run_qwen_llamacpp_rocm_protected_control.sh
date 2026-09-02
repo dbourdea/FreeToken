@@ -12,7 +12,10 @@ set -euo pipefail
 # Require an immutable caller-owned evidence root and retain fixed host paths.
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_llamacpp_rocm_protected_control.sh ARTIFACT_DIR}"
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
+# Permit a caller to name the current isolated source that supplies both the
+# llama.cpp control and matching benchmark harness. The default preserves the
+# historical harness checkout for installations that still use its layout.
+readonly SOURCE_DIR="${FREETOKEN_LLAMA_CONTROL_SOURCE_DIR:-${ROOT_DIR}/source-qwen-harness-d6ee8ce}"
 readonly RECOVERY_SOURCE="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly CONTROL_SCRIPT="${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_llamacpp_rocm_control.sh"
 readonly NORMAL_STOP="${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"
