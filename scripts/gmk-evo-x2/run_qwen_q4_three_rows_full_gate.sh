@@ -23,6 +23,10 @@ readonly CONCURRENT="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_cont
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly TOKENIZER="${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4"
 readonly CANDIDATE_MODEL="qwen36-35b-a3b-q4km-gguf-amd"
+# The AIME helper appends `/v1` itself, while scheduler and concurrency helpers
+# accept an OpenAI API base that already ends in `/v1`. Keep both boundaries
+# explicit so a controller cannot accidentally request `/v1/v1/models`.
+readonly CANDIDATE_ROOT="http://127.0.0.1:1922"
 readonly CANDIDATE_URL="http://127.0.0.1:1922/v1"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
@@ -90,7 +94,7 @@ done
 
 # The deterministic fingerprint is an admission gate, never a post-hoc report.
 PYTHONPATH="${SOURCE_DIR}/python" "${VENV_PYTHON}" "${QUALITY}" \
-    --base-url "${CANDIDATE_URL}" --model "${CANDIDATE_MODEL}" \
+    --base-url "${CANDIDATE_ROOT}" --model "${CANDIDATE_MODEL}" \
     --artifact "${ARTIFACT_DIR}/quality-aime.json" \
     --expected-output-sha1 3302eda43396 >"${ARTIFACT_DIR}/quality-aime.log" 2>&1
 
