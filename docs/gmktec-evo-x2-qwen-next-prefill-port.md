@@ -87,6 +87,14 @@ The output is still not storage-equal, so this candidate cannot enter API
 quality or TPS testing. The next repair must preserve this Q8-sum correction
 and isolate the remaining packed-dot or FP32 accumulation-order difference.
 
+C133 added bounded residual coordinates. The remaining Q4 and Q5 differences
+repeat over groups of eight routed rows at fixed output lanes. This rules out
+token order, mixed-expert sorting, and scatter as residual causes. The next
+candidate must operate inside the row-local grouped packed-dot path, either by
+reconstructing the vector dot sequence from the tiled values or by proving and
+repairing a remaining tile-layout discrepancy. It must retain the Q8-sum
+correction and remain default-off until exact tensor equality is demonstrated.
+
 ## Required implementation sequence
 
 1. Build a component differential harness that runs the qualified vector path
