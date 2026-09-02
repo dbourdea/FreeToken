@@ -279,7 +279,10 @@ destination = pathlib.Path(sys.argv[1])
 model = sys.argv[2]
 mode = sys.argv[3]
 if mode == "prefill":
-    content = "cache expert " * 4096
+    # Leave ample room below the configured 8,192-token context limit for chat
+    # template tokens and the one generated token, while retaining a multi-thousand
+    # token prompt that exposes the production prefill path.
+    content = "cache expert " * 3000
     max_tokens = 1
 else:
     content = "Write exactly 300 numbered lines. Every line must contain the words cache and expert."
