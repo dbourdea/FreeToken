@@ -122,7 +122,10 @@ def fused_experts_gguf_q4_k_q5_k(
     fused_width = gate_up_q4_k.shape[1]
     hidden_size = down_q5_k.shape[1]
     grouped_minimum = _grouped_prefill_min_tokens()
-    use_grouped_prefill = grouped_minimum > 0 and tokens >= grouped_minimum
+    # A decode step has exactly one activation row.  Keep it on the established
+    # vector kernel even if an operator intentionally sets a threshold of one:
+    # the grouped route is a prefill-only hypothesis, not a decode experiment.
+    use_grouped_prefill = grouped_minimum > 0 and tokens > 1 and tokens >= grouped_minimum
     if use_grouped_prefill:
         # Gate/up routes retain Qwen's original top-k layout.  The grouped
         # helper performs sorting internally but writes results back to that
