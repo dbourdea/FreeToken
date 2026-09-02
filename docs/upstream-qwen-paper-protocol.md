@@ -84,7 +84,11 @@ defaults to test row zero. The dataset viewer and Hub reference API were
 verified on 2026-09-02. The public `main` revision was
 `563bb8404243c5f09de6ec262f2db674fe5bce9b`, with `default` configuration,
 `test` split, and the three fields `problem`, `answer`, and `id`. Row zero has
-`id` `0` and expected answer `70`.
+`id` `0` and expected answer `70`. The pinned `test.jsonl` fixture downloaded
+from that revision has SHA-256
+`b4e273c02d3e7fe1b74b59eae768fc8230bfb0f79539890cb56f4361caac0331`; row
+zero's source problem has SHA-256
+`26a263ad81138dbfb41647a1e55af77c0b8ab02d4b051fc23722a7f0c403535d`.
 
 The planned control will retain this dataset revision, configuration, split,
 row identifier, downloaded-file SHA-256, chat-template instruction, sampling
