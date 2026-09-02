@@ -25,6 +25,10 @@ readonly Q5_K_FOUR_ROWS="${FREETOKEN_Q4_Q5_K_FOUR_ROWS:-0}"
 # never be mistaken for a different allocation or overlap profile.
 readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.30}"
 readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-1}"
+# A swap drain is an opt-in residency repair. It is never enabled implicitly:
+# when selected, the controller disables all configured swap only after it has
+# stopped the normal service, then restores swap before normal recovery.
+readonly DRAIN_SWAP="${FREETOKEN_Q4_DRAIN_SWAP:-0}"
 
 # Keep every host-specific path explicit so an invocation cannot silently
 # operate on another machine's service or an arbitrary source checkout.
@@ -48,6 +52,7 @@ case "${INTERVAL_SECONDS}" in ''|*[!0-9]*) echo "interval must be non-negative" 
 [[ "${Q5_K_FOUR_ROWS}" == "0" || "${Q5_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q5_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${MEMORY_RATIO}" =~ ^0\.[0-9]+$|^1\.0+$ ]] || { echo "FREETOKEN_Q4_MEMORY_RATIO is invalid" >&2; exit 2; }
 [[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || { echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2; exit 2; }
+[[ "${DRAIN_SWAP}" == "0" || "${DRAIN_SWAP}" == "1" ]] || { echo "FREETOKEN_Q4_DRAIN_SWAP must be 0 or 1" >&2; exit 2; }
 [[ ! -e "${ARTIFACT_ROOT}" ]] || { echo "artifact root already exists: ${ARTIFACT_ROOT}" >&2; exit 2; }
 [[ "${Q4_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "Q4 source must be under ${ROOT_DIR}" >&2; exit 2; }
 [[ "${RECOVERY_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "recovery source must be under ${ROOT_DIR}" >&2; exit 2; }
@@ -91,6 +96,13 @@ restore_normal_service() {
     if [[ -f "${Q4_ARTIFACT_DIR}/server.pid" ]]; then
         FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_LAUNCHER}" stop "${Q4_ARTIFACT_DIR}" || status=1
     fi
+    # Re-enable every configured swap device before restarting the normal model.
+    # The boolean is set only after swapoff succeeds, avoiding an unrelated
+    # swapon attempt if privilege or capacity preflight fails.
+    if [[ "${swap_disabled}" == "1" ]]; then
+        sudo -n swapon -a || status=1
+        free -h >"${ARTIFACT_ROOT}/memory-after-swapon.txt" || true
+    fi
     if ! curl -fsS --max-time 5 http://127.0.0.1:1919/health >"${RECOVERY_ARTIFACT}" 2>/dev/null; then
         bash "${RECOVERY_STARTER}" >"${ARTIFACT_ROOT}/recovery-start.log" 2>&1 || status=1
     fi
@@ -100,14 +112,31 @@ restore_normal_service() {
 
 mkdir -p "${ARTIFACT_ROOT}"
 printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${ARTIFACT_ROOT}/controller.txt"
-printf 'session_count=%s\ninterval_seconds=%s\nq4_k_four_rows=%s\nq5_k_four_rows=%s\nmemory_ratio=%s\nprefill_overlap=%s\n' \
-    "${SESSION_COUNT}" "${INTERVAL_SECONDS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" "${MEMORY_RATIO}" "${PREFILL_OVERLAP}" \
+printf 'session_count=%s\ninterval_seconds=%s\nq4_k_four_rows=%s\nq5_k_four_rows=%s\nmemory_ratio=%s\nprefill_overlap=%s\ndrain_swap=%s\n' \
+    "${SESSION_COUNT}" "${INTERVAL_SECONDS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" "${MEMORY_RATIO}" "${PREFILL_OVERLAP}" "${DRAIN_SWAP}" \
     >>"${ARTIFACT_ROOT}/controller.txt"
+# Record the original state before any host-level action. This lets a later
+# reviewer distinguish the host's existing swapped pages from the candidate's
+# own process-scoped swap gate.
+free -h >"${ARTIFACT_ROOT}/memory-before-swap-policy.txt"
+swap_disabled=0
 trap 'restore_normal_service' EXIT INT TERM
+
+# Establish noninteractive swap authority before taking the protected service
+# offline. A missing sudo grant now leaves both swap and normal serving intact.
+if [[ "${DRAIN_SWAP}" == "1" ]]; then
+    sudo -n true
+fi
 
 # The stopper refuses an unmanaged legacy tree. That fail-closed behavior
 # prevents this controller from guessing at child ownership on a shared host.
 bash "${RECOVERY_STOPPER}"
+if [[ "${DRAIN_SWAP}" == "1" ]]; then
+    # Empty swap only after normal Qwen has released its resident model pages.
+    sudo -n swapoff -a
+    swap_disabled=1
+    free -h >"${ARTIFACT_ROOT}/memory-after-swapoff.txt"
+fi
 # Pass both selectors to the isolated launcher explicitly. This keeps the
 # normal recovery service free of experimental settings and makes the long-run
 # candidate precisely reproducible from controller.txt alone.
