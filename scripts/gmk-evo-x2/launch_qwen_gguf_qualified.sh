@@ -30,6 +30,9 @@ readonly CUDA_GRAPH_MAX_BS="${4:-0}"
 # An isolated candidate may set this to one only after its mixed-cache parity
 # gate passes, which omits the disabling CLI flag and enables double buffering.
 readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
+# Keep device-to-device prefill-hit reuse opt-in because it depends on a
+# runtime batch-copy capability that may be unavailable on a given ROCm stack.
+readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
 
 # Keep durable models, kernel caches, and artifacts separate from the checked
 # out source so source switching cannot delete benchmark evidence or weights.
@@ -124,6 +127,14 @@ validate_paths() {
         echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
         return 1
     }
+    [[ "${PREFILL_HIT_D2D}" == "0" || "${PREFILL_HIT_D2D}" == "1" ]] || {
+        echo "FREETOKEN_Q4_PREFILL_HIT_D2D must be 0 or 1" >&2
+        return 1
+    }
+    [[ "${PREFILL_HIT_D2D}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
+        echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
+        return 1
+    }
     [[ "${EXTENSION_CACHE}" == "${ROOT_DIR}/cache/"* ]] || { echo "extension cache must be under ${ROOT_DIR}/cache" >&2; return 1; }
 }
 
@@ -165,6 +176,9 @@ case "${ACTION}" in
         )
         if [[ "${PREFILL_OVERLAP}" == "0" ]]; then
             serve_args+=(--disable-moe-prefill-overlap)
+        fi
+        if [[ "${PREFILL_HIT_D2D}" == "1" ]]; then
+            serve_args+=(--moe-prefill-hit-d2d)
         fi
         ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
         PYTHONPATH=python TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \

@@ -23,6 +23,9 @@ readonly CUDA_GRAPH_MAX_BS="${FREETOKEN_Q4_CUDA_GRAPH_MAX_BS:-0}"
 # Enable the candidate's repaired mixed Q4_K/Q6_K double-buffer prefill path
 # only when this controller is explicitly invoked for that parity-gated study.
 readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
+# Exercise prefill cache-hit reuse only as an explicitly named candidate; the
+# launcher records the final CLI argument and server log records any fallback.
+readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
 # Keep all inputs below the host-owned FreeToken root rather than relying on the
 # caller's working directory.
 readonly ROOT_DIR="/home/david/freetoken-amd"
@@ -57,6 +60,14 @@ readonly CANDIDATE_REQUEST='{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[
 }
 [[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
     echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
+    exit 2
+}
+[[ "${PREFILL_HIT_D2D}" == "0" || "${PREFILL_HIT_D2D}" == "1" ]] || {
+    echo "FREETOKEN_Q4_PREFILL_HIT_D2D must be 0 or 1" >&2
+    exit 2
+}
+[[ "${PREFILL_HIT_D2D}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
+    echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
     exit 2
 }
 
@@ -123,6 +134,7 @@ preflight_code="$(completion_status http://127.0.0.1:1919/v1/chat/completions "$
 FREETOKEN_Q4_EXTENSION_CACHE_DIR="${ROOT_DIR}/cache/torch_extensions-gdn-${GDN_NUM_WARPS}-f1baf13" \
 FREETOKEN_GDN_NUM_WARPS="${GDN_NUM_WARPS}" \
 FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
+FREETOKEN_Q4_PREFILL_HIT_D2D="${PREFILL_HIT_D2D}" \
 bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" 0.25 "${CUDA_GRAPH_MAX_BS}"
 
 # Wait for an actual candidate completion.  A model-list response is explicitly
