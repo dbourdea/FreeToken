@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture a safe, warm-cache ROCprof trace for the isolated Qwen3.6 Q4 control.
+# Capture a safe ROCprof trace for the qualified Qwen3.6 Q4 serving baseline.
 #
 # This controller deliberately treats profiling as a diagnostic time-share job,
 # not as a TPS benchmark.  It first checks the normal NVFP4 API, prewarms the
@@ -13,20 +13,30 @@ set -euo pipefail
 
 # Require a unique caller-owned artifact directory for immutable provenance.
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_q4_rocprof_trace.sh ARTIFACT_DIR [SOURCE_DIR]}"
-# Permit an explicit reviewed Qwen checkout while keeping the qualified source
-# as the default for ordinary diagnostic traces.
-readonly SOURCE_DIR="${2:-/home/david/freetoken-amd/source-qwen-bench-metrics-f1baf13}"
+# Permit an explicit reviewed Qwen checkout while keeping the repeated,
+# quality-qualified mixed-cache source as the diagnostic default.
+readonly SOURCE_DIR="${2:-/home/david/freetoken-amd/source-qwen-gdn-isolated-f1}"
 # Keep all fixed host paths together so they are easy to audit before use.
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly NORMAL_SOURCE_DIR="${ROOT_DIR}/source-qwen-c06-fc3346f"
+# Bind recovery to the protected NVFP4 service source instead of a historical
+# experiment checkout, so every profiler exit restores the current service.
+readonly NORMAL_SOURCE_DIR="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly Q4_MODEL_NAME="qwen36-35b-a3b-q4km-gguf-amd"
 readonly Q4_PORT="1922"
 readonly NORMAL_PORT="1919"
 # Keep reusable generated HIP code outside every source checkout and under the
-# managed cache root accepted by the qualified Q4 launcher.
-readonly EXTENSION_CACHE="${ROOT_DIR}/cache/rocprof-q4-warm-cache"
+# managed cache root accepted by the qualified Q4 launcher.  This separate
+# cache prevents a diagnostic trace from contaminating the serving cache.
+readonly EXTENSION_CACHE="${ROOT_DIR}/cache/rocprof-q4-overlap-cache"
+# Trace the repeated 30 percent cache baseline unless a bounded diagnostic
+# override is explicitly supplied.  This is intentionally not a production
+# setting and remains confined to the loopback profiler candidate.
+readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.30}"
+# Mixed primary and auxiliary cache overlap is the currently qualified Q4
+# baseline.  A zero value is available only for an explicit A/B diagnostic.
+readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-1}"
 readonly Q4_LAUNCHER="${SOURCE_DIR}/scripts/gmk-evo-x2/launch_qwen_gguf_qualified.sh"
 readonly NORMAL_STARTER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"
 readonly NORMAL_STOPPER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"
@@ -49,6 +59,26 @@ wait_for_models() {
     local destination="$3"
     for _ in $(seq 1 "${attempts}"); do
         if curl -fsS --max-time 8 "http://127.0.0.1:${port}/v1/models" >"${destination}"; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+# A listener and models response can appear before the scheduler has loaded the
+# model.  This function requires one tiny deterministic completion, which is
+# the same readiness standard used to protect the normal service elsewhere.
+wait_for_completion() {
+    local port="$1"
+    local model="$2"
+    local attempts="$3"
+    local destination="$4"
+    local payload
+    payload="{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply only with OK.\"}],\"temperature\":0,\"max_tokens\":2,\"stream\":false}"
+    for _ in $(seq 1 "${attempts}"); do
+        if curl -fsS --max-time 30 -H 'Content-Type: application/json' -d "${payload}" \
+            "http://127.0.0.1:${port}/v1/chat/completions" >"${destination}"; then
             return 0
         fi
         sleep 2
@@ -127,7 +157,8 @@ restore_normal_service() {
     finalize_profile
     if [[ "${normal_was_stopped}" == "1" ]]; then
         bash "${NORMAL_STARTER}" "${ARTIFACT_DIR}/normal-recovery" || true
-        wait_for_models "${NORMAL_PORT}" 240 "${ARTIFACT_DIR}/normal-health-after.json" || true
+        wait_for_completion "${NORMAL_PORT}" "qwen3.6-35b-a3b-nvfp4-amd" 300 \
+            "${ARTIFACT_DIR}/normal-health-after.json" || true
     fi
     exit "${status}"
 }
@@ -142,6 +173,14 @@ trap restore_normal_service EXIT INT TERM
 [[ -x "${NORMAL_STARTER}" && -x "${NORMAL_STOPPER}" && -x "${PROFILER_WRAPPER}" ]] || { echo "missing lifecycle helper" >&2; exit 2; }
 [[ -f "${INSPECTOR}" ]] || { echo "missing ROCprof inspector" >&2; exit 2; }
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
+case "${MEMORY_RATIO}" in
+    0.25|0.30|0.35) ;;
+    *) echo "FREETOKEN_Q4_MEMORY_RATIO must be 0.25, 0.30, or 0.35" >&2; exit 2 ;;
+esac
+[[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
+    echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
+    exit 2
+}
 mkdir -p "${PREWARM_DIR}" "${PROFILE_DIR}" "${EXTENSION_CACHE}"
 
 # Preserve proof that the protected API was healthy before reclaiming the GPU.
@@ -155,7 +194,8 @@ wait_for_models "${NORMAL_PORT}" 1 "${ARTIFACT_DIR}/normal-health-before.json" |
 bash "${NORMAL_STOPPER}"
 normal_was_stopped=1
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_EXTENSION_CACHE_DIR="${EXTENSION_CACHE}" \
-    bash "${Q4_LAUNCHER}" start "${PREWARM_DIR}" 0.25 0
+FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
+    bash "${Q4_LAUNCHER}" start "${PREWARM_DIR}" "${MEMORY_RATIO}" 0
 wait_for_models "${Q4_PORT}" 120 "${PREWARM_DIR}/models.json"
 wait_for_scheduler_ready "${PREWARM_DIR}/server.log" 120
 
@@ -165,8 +205,16 @@ curl -fsS --max-time 90 -H 'Content-Type: application/json' \
     -d "{\"model\":\"${Q4_MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: warm cache confirmed\"}],\"temperature\":0,\"max_tokens\":16,\"stream\":false}" \
     "http://127.0.0.1:${Q4_PORT}/v1/chat/completions" >"${PREWARM_DIR}/response.json"
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_EXTENSION_CACHE_DIR="${EXTENSION_CACHE}" \
-    bash "${Q4_LAUNCHER}" stop "${PREWARM_DIR}" 0.25 0
+FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
+    bash "${Q4_LAUNCHER}" stop "${PREWARM_DIR}" "${MEMORY_RATIO}" 0
 wait_for_port_clear
+
+# Mirror the prewarm launch exactly.  The profiler command uses a direct server
+# invocation, so the conditional flag must be reconstructed here explicitly.
+profile_overlap_flag=()
+if [[ "${PREFILL_OVERLAP}" == "0" ]]; then
+    profile_overlap_flag+=(--disable-moe-prefill-overlap)
+fi
 
 # Start the identical Q4 command inside a dedicated session.  The profile has a
 # short delayed collection window that excludes most initialization, while the
@@ -180,9 +228,9 @@ setsid nohup bash "${PROFILER_WRAPPER}" -d "${PROFILE_DIR}/rocprof" -f rocpd \
     --model-path "${MODEL_PATH}" --served-model-name "${Q4_MODEL_NAME}" \
     --host 127.0.0.1 --port "${Q4_PORT}" --max-running-requests 4 \
     --attention-backend triton --moe-backend offload --nvfp4-backend triton \
-    --expert-load serial --moe-cache-auto --memory-ratio 0.25 \
+    --expert-load serial --moe-cache-auto --memory-ratio "${MEMORY_RATIO}" \
     --max-seq-len-override 8192 --kv-reserve-tokens 8192 --cuda-graph-max-bs 0 \
-    --disable-pynccl --disable-moe-prefill-overlap >"${PROFILE_LOG}" 2>&1 &
+    --disable-pynccl "${profile_overlap_flag[@]}" >"${PROFILE_LOG}" 2>&1 &
 profile_pid="$!"
 printf '%s\n' "${profile_pid}" >"${PROFILE_PID_FILE}"
 wait_for_models "${Q4_PORT}" 120 "${PROFILE_DIR}/models.json"
