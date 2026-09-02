@@ -26,6 +26,10 @@ readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
 # Exercise prefill cache-hit reuse only as an explicitly named candidate; the
 # launcher records the final CLI argument and server log records any fallback.
 readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
+# Keep the Q4 cache-budget study narrowly bounded.  These values preserve a
+# meaningful KV reserve while testing whether additional resident experts can
+# reduce routed decode fetches on the unified-memory AMD platform.
+readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.25}"
 # Keep all inputs below the host-owned FreeToken root rather than relying on the
 # caller's working directory.
 readonly ROOT_DIR="/home/david/freetoken-amd"
@@ -68,6 +72,10 @@ readonly CANDIDATE_REQUEST='{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[
 }
 [[ "${PREFILL_HIT_D2D}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
     echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
+    exit 2
+}
+[[ "${MEMORY_RATIO}" == "0.25" || "${MEMORY_RATIO}" == "0.30" || "${MEMORY_RATIO}" == "0.35" ]] || {
+    echo "FREETOKEN_Q4_MEMORY_RATIO must be 0.25, 0.30, or 0.35" >&2
     exit 2
 }
 
@@ -135,7 +143,7 @@ FREETOKEN_Q4_EXTENSION_CACHE_DIR="${ROOT_DIR}/cache/torch_extensions-gdn-${GDN_N
 FREETOKEN_GDN_NUM_WARPS="${GDN_NUM_WARPS}" \
 FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
 FREETOKEN_Q4_PREFILL_HIT_D2D="${PREFILL_HIT_D2D}" \
-bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" 0.25 "${CUDA_GRAPH_MAX_BS}"
+bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" "${MEMORY_RATIO}" "${CUDA_GRAPH_MAX_BS}"
 
 # Wait for an actual candidate completion.  A model-list response is explicitly
 # insufficient because it can succeed before the model worker finishes loading.
