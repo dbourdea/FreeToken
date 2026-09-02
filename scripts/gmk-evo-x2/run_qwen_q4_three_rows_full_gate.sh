@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Qualify the opt-in three-row Q4_K/Q5_K HIP candidate through complete API gates.
+# Qualify an opt-in Q4_K/Q5_K HIP candidate through complete API gates.
 #
 # This controller time-shares the GPU only after a real protected-service
 # completion. It runs the canonical deterministic fingerprint, three warm
@@ -28,9 +28,20 @@ readonly CANDIDATE_MODEL="qwen36-35b-a3b-q4km-gguf-amd"
 # explicit so a controller cannot accidentally request `/v1/v1/models`.
 readonly CANDIDATE_ROOT="http://127.0.0.1:1922"
 readonly CANDIDATE_URL="http://127.0.0.1:1922/v1"
+# Each candidate selector is explicit and recorded below.  The values are passed
+# only to the isolated launcher, never to the protected recovery service.
+readonly MOE_K_TWO_ROWS="${FREETOKEN_Q4_MOE_K_TWO_ROWS:-0}"
+readonly MOE_K_THREE_ROWS="${FREETOKEN_Q4_MOE_K_THREE_ROWS:-0}"
+readonly GROUPED_PREFILL_MIN_TOKENS="${FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS:-0}"
+readonly GROUPED_PREFILL_MODE="${FREETOKEN_Q4_GROUPED_PREFILL_MODE:-both}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
+[[ "${MOE_K_TWO_ROWS}" == "0" || "${MOE_K_TWO_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_TWO_ROWS must be 0 or 1" >&2; exit 2; }
+[[ "${MOE_K_THREE_ROWS}" == "0" || "${MOE_K_THREE_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_THREE_ROWS must be 0 or 1" >&2; exit 2; }
+[[ ! ( "${MOE_K_TWO_ROWS}" == "1" && "${MOE_K_THREE_ROWS}" == "1" ) ]] || { echo "select at most one Q4 row-sharing candidate" >&2; exit 2; }
+[[ "${GROUPED_PREFILL_MIN_TOKENS}" =~ ^[0-9]+$ ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS must be a non-negative integer" >&2; exit 2; }
+[[ "${GROUPED_PREFILL_MODE}" == "both" || "${GROUPED_PREFILL_MODE}" == "q4_gate_up" || "${GROUPED_PREFILL_MODE}" == "q5_down" ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MODE must be both, q4_gate_up, or q5_down" >&2; exit 2; }
 for required in "${LAUNCHER}" "${QUALITY}" "${SCHEDULER}" "${CONCURRENT}" "${TOKENIZER}" \
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"; do
@@ -76,13 +87,16 @@ stop_candidate() {
 
 trap 'stop_candidate; recover_normal_service' EXIT
 preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
-[[ "${preflight_code}" == "200" ]] || { echo "normal API unavailable before three-row full gate: ${preflight_code}" >&2; exit 1; }
+[[ "${preflight_code}" == "200" ]] || { echo "normal API unavailable before Q4 full gate: ${preflight_code}" >&2; exit 1; }
 "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 
-# Only this child inherits the experimental selector. The established 30 percent,
+# Only this child inherits experimental selectors. The established 30 percent,
 # four-request, overlap-enabled Q4 profile is otherwise unchanged.
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_PREFILL_OVERLAP=1 \
-FREETOKEN_GGUF_MOE_K_THREE_ROWS=1 \
+FREETOKEN_GGUF_MOE_K_TWO_ROWS="${MOE_K_TWO_ROWS}" \
+FREETOKEN_GGUF_MOE_K_THREE_ROWS="${MOE_K_THREE_ROWS}" \
+FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS="${GROUPED_PREFILL_MIN_TOKENS}" \
+FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_PREFILL_MODE}" \
     "${LAUNCHER}" start "${ARTIFACT_DIR}/q4-server" 0.30 0
 for _ in $(seq 1 480); do
     code="$(candidate_status "${ARTIFACT_DIR}/ready.json" || true)"
@@ -90,7 +104,7 @@ for _ in $(seq 1 480); do
     printf 'status=%s\n' "${code}" >>"${ARTIFACT_DIR}/ready-progress.txt"
     sleep 1
 done
-[[ -s "${ARTIFACT_DIR}/ready.json" ]] || { echo "three-row candidate did not reach real completion readiness" >&2; exit 1; }
+[[ -s "${ARTIFACT_DIR}/ready.json" ]] || { echo "Q4 candidate did not reach real completion readiness" >&2; exit 1; }
 
 # The deterministic fingerprint is an admission gate, never a post-hoc report.
 PYTHONPATH="${SOURCE_DIR}/python" "${VENV_PYTHON}" "${QUALITY}" \
@@ -113,4 +127,5 @@ PYTHONPATH="${SOURCE_DIR}/python" "${VENV_PYTHON}" "${CONCURRENT}" \
     --expected-host david-Gmktec-x2-2 --concurrency 4 --rounds 3 --max-tokens 256 \
     --artifact "${ARTIFACT_DIR}/concurrent-c4.json" >"${ARTIFACT_DIR}/concurrent-c4.log" 2>&1
 
-printf 'three_row_candidate_quality_scheduler_and_c4=passed\n' >"${ARTIFACT_DIR}/result.txt"
+printf 'q4_candidate_quality_scheduler_and_c4=passed moe_k_two_rows=%s moe_k_three_rows=%s grouped_prefill_min_tokens=%s grouped_prefill_mode=%s\n' \
+    "${MOE_K_TWO_ROWS}" "${MOE_K_THREE_ROWS}" "${GROUPED_PREFILL_MIN_TOKENS}" "${GROUPED_PREFILL_MODE}" >"${ARTIFACT_DIR}/result.txt"
