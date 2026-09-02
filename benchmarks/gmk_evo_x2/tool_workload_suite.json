@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "A bounded, deterministic tool-using coding-workload control for GMKtec EVO-X2. It is intentionally not a claim to reproduce the paper's OpenCode, Claude Code, or OpenClaw harnesses.",
+  "model_task": "Repair the addition function in calculator.py using the offered tools, then report PATCH_APPLIED.",
+  "fixture": {
+    "path": "calculator.py",
+    "initial_content": "def add(a, b):\n    return a - b\n",
+    "expected_content": "def add(a, b):\n    return a + b\n"
+  },
+  "expected_final": "PATCH_APPLIED"
+}
