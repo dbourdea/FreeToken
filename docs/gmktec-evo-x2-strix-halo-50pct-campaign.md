@@ -1840,3 +1840,49 @@ GGUF kernel or a new exact vector-kernel implementation. Preserve
 `q4-c97-cold-concurrent-llamacpp-20260902T113840Z`, including raw SSE events,
 usage blocks, prompt hashes, per-request timing, controller logs, cleanup
 records, and normal-service completion proof.
+
+### C98-C100: exact Q4_K/Q5_K HIP two-row vector candidate
+
+C98 implemented a default-off HIP vector-kernel candidate for the actual
+Q4_K gate/up and Q5_K down MoE weights. One 32-lane wave computes two adjacent
+output rows while preserving each row's original packed vector-dot call order,
+lane ownership, reduction order, route indexing, and output address. The
+candidate is selected only when `FREETOKEN_GGUF_MOE_K_TWO_ROWS=1`; the normal
+server keeps the established generic vector path. C98 used the first real Qwen
+expert layer, 1,024 activations, all 256 experts, top-k eight routes, twenty
+timed samples, and the existing vector output as its reference. The result was
+bit-identical, with the same SHA-256 `46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d`.
+
+C99 established that the component improvement reached the isolated API.
+C100 repeated that test after making the deterministic OpenAI quality suite a
+mandatory controller gate. It passed exact canary and arithmetic responses and
+the JSON-schema case before collecting any TPS result. Both controllers used
+the qualified one-wave, 30 percent memory, Q4/Q6 prefill-overlap, four-request
+profile, distinct early nonces for cache-neutral prompts, and completion-based
+normal-service recovery. C100 restored a real normal completion after 470
+probes.
+
+| Configuration and artifact | Real-weight component median | Output equality | Cold single prefill TPS, mean | Cold C4 aggregate prefill TPS | Cold C4 aggregate decode TPS | Quality gate |
+| --- | ---: | --- | ---: | ---: | ---: | --- |
+| Established Q4_K/Q5_K vector, C98 reference | 81.168 ms | Reference | Not measured in C98 | Not measured in C98 | Not measured in C98 | N/A |
+| HIP two-row vector, C98 | 74.488 ms | Bit-identical | Not measured in C98 | Not measured in C98 | Not measured in C98 | Component parity passed |
+| HIP two-row vector, C100 | Qualified by C98 | Same kernel revision | 336.599 | 320.354 | 39.702 | Exact canary, arithmetic, and JSON passed |
+| Prior generic-vector cold control, C91/C96 | N/A | Prior qualified configuration | 234.359 | 327.282 | 39.714 | Marker retrieval and nonce controls passed |
+
+The C98 component time is 8.23 percent lower than its same-run vector
+reference. The C100 cold single-request mean is 43.63 percent above C91's
+retained three-sample mean, and its samples are tightly grouped from 332.798 to
+338.715 TPS. This is meaningful but not a claim that the overall campaign has
+met the requested 50 percent end-to-end gain: the one-round cold C4 aggregate
+prefill and decode measurements are slightly below C96. C100 therefore
+qualifies the candidate for the complete normal scheduler and multi-round
+decode measurement, not for default production promotion.
+
+**Decision: retain the default-off two-row candidate and advance it to the
+full scheduler/decode gate.** Preserve
+`q4-c98-two-rows-component-r1-20260902`,
+`q4-c99-two-rows-api-cold-r1-20260902`, and
+`q4-c100-two-rows-api-quality-r1-20260902`, including the saved reference
+tensor, parity hash, timing samples, quality-suite raw responses, cold prompt
+hashes, raw SSE events, controller logs, cleanup records, and normal-service
+completion evidence.
