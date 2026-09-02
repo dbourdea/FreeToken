@@ -30,6 +30,7 @@ from freetoken.utils import cached_load_hf_config
 
 
 _GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
+_GROUPED_PREFILL_MODE_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MODE"
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--mode", choices=("vector", "grouped"), required=True)
+    parser.add_argument(
+        "--grouped-mode",
+        choices=("both", "gate_up", "down"),
+        default="both",
+        help="When --mode grouped, select the grouped Q4 gate/up, Q5 down, or both projections.",
+    )
     parser.add_argument("--layer", type=int, default=0)
     parser.add_argument("--tokens", type=int, default=1024)
     parser.add_argument("--warmup", type=int, default=8)
@@ -116,6 +123,7 @@ def main() -> int:
     args = parse_args()
     grouped_threshold = args.tokens if args.mode == "grouped" else 0
     os.environ[_GROUPED_PREFILL_MIN_TOKENS_ENV] = str(grouped_threshold)
+    os.environ[_GROUPED_PREFILL_MODE_ENV] = args.grouped_mode
     gate_up, down, hidden_size, num_experts, top_k, cache = materialize_layer(args.model, args.layer)
     device = gate_up.device
     generator = torch.Generator(device=device)
@@ -185,6 +193,7 @@ def main() -> int:
         "hip": torch.version.hip,
         "torch": torch.__version__,
         "grouped_prefill_min_tokens": grouped_threshold,
+        "grouped_prefill_mode": args.grouped_mode if args.mode == "grouped" else "vector",
         "samples_ms": samples_ms,
         "median_device_ms": statistics.median(samples_ms),
         "output_sha256": digest(output_cpu),

@@ -22,6 +22,7 @@ from freetoken.models.gguf.dequant import GGML_Q4_K, GGML_Q5_K
 # repeatable API performance on the target ROCm system.  A value of zero, the
 # default, disables the experimental dispatch entirely.
 _GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
+_GROUPED_PREFILL_MODE_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MODE"
 
 
 def _grouped_prefill_min_tokens() -> int:
@@ -47,6 +48,24 @@ def _grouped_prefill_min_tokens() -> int:
             f"got {minimum_tokens}"
         )
     return minimum_tokens
+
+
+def _grouped_prefill_mode() -> str:
+    """Return the explicitly selected grouped projection subset.
+
+    The full grouped path changes both quantized projections at once.  Keeping
+    gate/up-only and down-only modes available for isolated component screens
+    lets the campaign locate numerical divergence before exposing a candidate
+    to an API quality gate.  The production default stays ``both`` because the
+    surrounding minimum-token switch remains disabled by default.
+    """
+
+    mode = os.environ.get(_GROUPED_PREFILL_MODE_ENV, "both").strip().lower()
+    if mode not in {"both", "gate_up", "down"}:
+        raise RuntimeError(
+            f"{_GROUPED_PREFILL_MODE_ENV} must be one of both, gate_up, or down, got {mode!r}"
+        )
+    return mode
 
 
 def _grouped_moe_a8(
@@ -126,7 +145,8 @@ def fused_experts_gguf_q4_k_q5_k(
     # vector kernel even if an operator intentionally sets a threshold of one:
     # the grouped route is a prefill-only hypothesis, not a decode experiment.
     use_grouped_prefill = grouped_minimum > 0 and tokens > 1 and tokens >= grouped_minimum
-    if use_grouped_prefill:
+    grouped_mode = _grouped_prefill_mode() if use_grouped_prefill else "both"
+    if use_grouped_prefill and grouped_mode in {"both", "gate_up"}:
         # Gate/up routes retain Qwen's original top-k layout.  The grouped
         # helper performs sorting internally but writes results back to that
         # original flattened route position.
@@ -145,7 +165,7 @@ def fused_experts_gguf_q4_k_q5_k(
             hidden_states, gate_up_q4_k, topk_ids, top_k, int(GGML_Q4_K), fused_width, tokens
         )
     intermediate = silu_and_mul(gate_up)
-    if use_grouped_prefill:
+    if use_grouped_prefill and grouped_mode in {"both", "down"}:
         # Each gate/up route becomes one independent down projection.  Reshape
         # the expert ids to one route per activation while keeping flattened
         # token-major ordering, which is exactly the output order required for
