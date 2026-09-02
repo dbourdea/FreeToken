@@ -77,6 +77,22 @@ OpenCode SWE-bench W2 harness, Claude Code W3 harness, OpenClaw mailbox kit,
 or the paper's raw benchmark artifacts. Consequently, W2 through W4 remain
 unreplicable at strict-paper fidelity from public source alone.
 
+### AIME-25 source pin for the paper-inspired W1 control
+
+The upstream W1 benchmark names the Hugging Face dataset `math-ai/aime25` and
+defaults to test row zero. The dataset viewer and Hub reference API were
+verified on 2026-09-02. The public `main` revision was
+`563bb8404243c5f09de6ec262f2db674fe5bce9b`, with `default` configuration,
+`test` split, and the three fields `problem`, `answer`, and `id`. Row zero has
+`id` `0` and expected answer `70`.
+
+The planned control will retain this dataset revision, configuration, split,
+row identifier, downloaded-file SHA-256, chat-template instruction, sampling
+parameters, measured token count, and every raw response in its artifact. The
+dataset pin makes that future run reproducible, but it does not turn it into a
+strict paper replication because the paper did not publish the corresponding
+original run fields.
+
 ## Current GMKtec EVO-X2 comparison status
 
 Existing evidence proves native HIP functional serving for
