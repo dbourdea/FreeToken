@@ -1318,3 +1318,30 @@ samples, summaries, exact-quality files, controller logs, recovery progress,
 and cleanup evidence.  The next candidate must use a distinct profiler-grounded
 mechanism or separately establish that a larger cache budget has enough free
 memory and repeatable end-to-end benefit.
+
+### C60: 35 percent Q4 cache-budget boundary
+
+C60 tested the remaining bounded cache setting, 35 percent, with the promoted
+mixed-cache prefill-overlap configuration unchanged.  The candidate resolved
+`moe_cache_size=8630` and retained 17.26 GiB of free memory after initialization,
+so this was a valid capacity experiment rather than an out-of-memory result.
+It also passed the exact deterministic output gate with `3302eda43396` and the
+normal NVFP4 service was restored with a verified HTTP 200 completion after 492
+recovery probes.
+
+| Setting | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| Promoted 30 percent cache, C58+C59 | 3,118.903 | 49.137 | 0.388612 s | Exact in both runs |
+| 35 percent cache, C60 | 2,863.624 | 48.899 | 0.423559 s | Exact, `3302eda43396` |
+
+Although C60 had adequate apparent free memory and exact output parity, it
+regressed prefill by 8.19 percent, decode by 0.48 percent, and warm TTFT by
+8.99 percent versus the repeated 30 percent baseline.  The wider resident-cache
+set is therefore not beneficial for this workload and is not a candidate for a
+repeat run.
+
+**Decision: reject 35 percent cache capacity and retain 30 percent.** Preserve
+`q4-c60-cache-ratio-035-20260902T041847Z`, including its three raw scheduler
+samples, exact-quality file, cache-resolution server log, recovery-progress
+heartbeat, and cleanup proof.  Further work should move to a distinct
+profiler-directed mechanism rather than expanding this cache budget again.
