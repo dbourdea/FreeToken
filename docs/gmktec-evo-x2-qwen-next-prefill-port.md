@@ -24,7 +24,7 @@ The copy path was byte-exact but slower at the API boundary. The Gated DeltaNet
 component gain did not survive the complete serving gate. Dense Q8_0 and Q6_K
 multi-wave candidates were also screened and rejected before API promotion.
 
-## Local llama.cpp reference finding
+## Corrected local llama.cpp and FreeToken finding
 
 The local llama.cpp ROCm reference contains an RDNA4 matrix-quantized MMQ
 family for Q4_K and Q5_K. Its dispatcher selects the quantized matrix path for
@@ -33,18 +33,26 @@ reference has architecture-specific Q4_K and Q5_K RDNA4 configurations in
 `ggml/src/ggml-cuda/mmq-config-rdna4.cuh` and launches the MMQ route from
 `ggml/src/ggml-cuda/ggml-cuda.cu` when its selector accepts the matrix shape.
 
-FreeToken already vendors generic Q4_K and Q5_K MMQ building blocks in
-`python/freetoken/kernel/csrc/gguf/mmq.cuh`. However, the Qwen routed-expert
-prefill binding in `gguf_kernel.cu` calls the separate `moe.cuh` vector-family
-entry point. That route uses the campaign's row-sharing variants, rather than
-the RDNA4 matrix-quantized expert-id path. This difference is the remaining
-high-value architectural gap between the two local implementations.
+FreeToken also already contains the relevant routed matrix implementation:
+`python/freetoken/kernel/csrc/gguf/moe.cuh` consumes sorted token ids, expert
+ids, and padded expert-group boundaries through `ggml_moe_a8`. The Qwen helper
+`_grouped_moe_a8` calls that implementation when grouped prefill is requested.
+The previously tested grouped Q4_K and Q5_K candidates therefore exercised the
+same broad matrix-style family and were rejected at the exact deterministic
+quality gate. A second port of the same family would duplicate a failed test,
+not create a new candidate.
 
-## Candidate boundary
+The remaining implementation question is narrower: identify which difference
+between the grouped matrix route and the qualified vector route changes the
+model-visible result. Candidate sources include route ordering, token padding,
+Q8_1 activation quantization/scatter, FP32 reduction order, or the temporary
+BF16 conversion boundary. No throughput claim is valid until that difference
+is isolated and exact equality is recovered.
 
-The candidate must add an opt-in HIP-only routed-MMQ implementation for Q4_K
-gate and up projections and Q5_K down projections when prompt length is at
-least the declared matrix threshold. It must preserve all of the following:
+## Corrected candidate boundary
+
+The candidate must be a diagnostic, opt-in HIP-only isolation of one of the
+matrix-route numerical boundaries above. It must preserve all of the following:
 
 1. Original Q4_K, Q5_K, and exceptional Q6_K GGUF byte layouts.
 2. Existing top-k router ordering, token sorting, expert ids, and output
@@ -56,22 +64,25 @@ least the declared matrix threshold. It must preserve all of the following:
 
 This is not permission to substitute llama.cpp, change the model
 quantization, alter sampling, or relax output equality. It is a narrowly
-scoped port of a locally inspected algorithmic family into the existing native
-FreeToken ROCm/HIP runtime.
+scoped repair investigation of an existing native FreeToken ROCm/HIP path.
 
 ## Required implementation sequence
 
-1. Extract only the routed MMQ dispatcher, Q4_K and Q5_K RDNA4 tile policy,
-   and expert-id indexing behavior relevant to Qwen's 512-wide experts.
-2. Add a compile-time and environment-gated candidate that is mutually
-   exclusive with the completed row-sharing flags.
-3. Add a component benchmark using actual first-layer Qwen packed weights,
+1. Build a component differential harness that runs the qualified vector path
+   and the existing grouped matrix path on identical actual packed Qwen
+   weights, routes, and activations, then locates the first divergent
+   intermediate tensor.
+2. Test one numerical boundary at a time: route order and scatter first, then
+   Q8_1 activation quantization, then reduction and conversion boundaries.
+3. Add a compile-time and environment-gated correction candidate that is
+   mutually exclusive with the completed row-sharing flags.
+4. Use actual first-layer Qwen packed weights,
    deterministic BF16 token batches, all 256 experts, and top-k eight routing.
-4. Require byte-for-byte output equality with the accepted vector route before
+5. Require byte-for-byte output equality with the accepted vector route before
    any service startup.
-5. Run the existing exact API suite, cache-neutral long-prefix prefill test,
+6. Run the existing exact API suite, cache-neutral long-prefix prefill test,
    scheduler test, concurrent C4 test, tail-latency test, and recovery proof.
-6. Retain the candidate only if it preserves quality and improves the measured
+7. Retain the candidate only if it preserves quality and improves the measured
    primary prefill result. Otherwise record the failure and leave it default
    off.
 
