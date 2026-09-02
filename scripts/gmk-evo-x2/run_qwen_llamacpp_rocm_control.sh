@@ -122,6 +122,7 @@ fi
 GMK_EVO_X2_QWEN_BASE_URL="${BASE_URL}" \
 GMK_EVO_X2_QWEN_MODEL_NAME="${MODEL_NAME}" \
 GMK_EVO_X2_QWEN_TOKENIZER_DIR="${TOKENIZER_DIR}" \
+GMK_EVO_X2_QWEN_BENCHMARK_SOURCE_DIR="${SOURCE_DIR}" \
     bash "${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh" "${BENCHMARK_DIR}"
 
 # Use the same synchronized four-client client harness as the FreeToken Q4
