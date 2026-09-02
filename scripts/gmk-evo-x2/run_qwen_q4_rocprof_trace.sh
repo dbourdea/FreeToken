@@ -172,11 +172,46 @@ finalize_profile() {
     return 1
 }
 
+# ROCprof can spawn a multiprocessing worker that outlives its front-end parent
+# after a forced finalization.  Match only the exact artifact-local output path
+# in each process environment, then stop those verified leftovers before the
+# protected service is restored.  This avoids broad process-name matching and
+# leaves unrelated ROCm users untouched.
+cleanup_profile_orphans() {
+    local expected_output="${PROFILE_DIR}/rocprof"
+    local pid environment command
+    local -a matches=()
+    for proc in /proc/[0-9]*; do
+        pid="${proc##*/}"
+        [[ -r "${proc}/environ" && -r "${proc}/cmdline" ]] || continue
+        environment="$(tr '\0' '\n' < "${proc}/environ" 2>/dev/null || true)"
+        grep -Fxq "ROCPROF_OUTPUT_PATH=${expected_output}" <<<"${environment}" || continue
+        command="$(tr '\0' ' ' < "${proc}/cmdline" 2>/dev/null || true)"
+        [[ "${command}" == *"multiprocessing.spawn"* || "${command}" == *"freetoken.cli serve"* ]] || continue
+        matches+=("${pid}")
+    done
+    [[ "${#matches[@]}" -gt 0 ]] || return 0
+    printf 'terminating verified ROCprof artifact workers: %s\n' "${matches[*]}" >&2
+    kill -TERM "${matches[@]}" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+        local alive=0
+        for pid in "${matches[@]}"; do
+            kill -0 "${pid}" 2>/dev/null && alive=1
+        done
+        [[ "${alive}" == "0" ]] && return 0
+        sleep 1
+    done
+    for pid in "${matches[@]}"; do
+        kill -0 "${pid}" 2>/dev/null && kill -KILL "${pid}" 2>/dev/null || true
+    done
+}
+
 # Always restore the normal API when this controller owns its time-share slot.
 restore_normal_service() {
     local status="$?"
     set +e
     finalize_profile
+    cleanup_profile_orphans
     if [[ "${normal_was_stopped}" == "1" ]]; then
         bash "${NORMAL_STARTER}" "${ARTIFACT_DIR}/normal-recovery" || true
         wait_for_completion "${NORMAL_PORT}" "qwen3.6-35b-a3b-nvfp4-amd" 300 \

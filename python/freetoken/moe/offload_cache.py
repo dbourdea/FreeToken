@@ -14,6 +14,15 @@ from flashlib.kernels.slot_cache import N_STATS, Stat
 # base address are not 16-byte aligned.
 _FUSED_COPY = os.getenv("FREETOKEN_FUSED_COPY", "1").strip().lower() not in {"0", "false", "no", "off"}
 
+# Use the already-qualified multi-bank mapped-host copy kernel for a *full*
+# prefill expert layer.  This is deliberately independent of the unavailable
+# cudaMemcpyBatchAsync hit-D2D experiment: it replaces the legacy per-bank
+# host-to-device copies for all rows and remains opt-in until a real-Q4 model
+# parity and API-performance gate qualifies it on the target ROCm platform.
+_PREFILL_FUSED_MAPPED_COPY = os.getenv(
+    "FREETOKEN_PREFILL_FUSED_MAPPED_COPY", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+
 # cudaMemcpyBatchAsync silently degrades to a SYNCHRONOUS copy when a batch mixes
 # large entries with sub-~256KB entries on registered host memory (H100 + CUDA 13.0,
 # empirically bisected: a single 5-22KB entry beside one large entry blocks the
@@ -265,6 +274,14 @@ class OffloadMoeCache:
         self._copy_dst_ptrs: torch.Tensor | None = None
         self._copy_src_ptrs: list[torch.Tensor] | None = None
         self._copy_feat_bytes: torch.Tensor | None = None
+        # Full-layer prefill's two double buffers start at different slot-cache
+        # offsets.  These are the corresponding per-bank byte addresses and a
+        # stable device-side identity index plan for all expert rows.  They are
+        # built only when the opt-in mapped-copy path has a usable fused plan.
+        self._prefill_copy_dst_ptrs: list[torch.Tensor] = []
+        self._prefill_copy_identity: torch.Tensor | None = None
+        self._prefill_copy_count: torch.Tensor | None = None
+        self._prefill_fused_mapped_copy_active = False
         # The layer whose misses ensure_experts/materialize_layer staged last; consumed
         # by copy_missing to pick the per-layer source (part of the same pending-copy
         # state as evict_slots/src_indices/num_indices).
@@ -376,6 +393,10 @@ class OffloadMoeCache:
         self._gather_bank_ids: list[int] = []
         self._gather_dst_ptrs: torch.Tensor | None = None
         self._gather_feat_bytes: torch.Tensor | None = None
+        self._prefill_copy_dst_ptrs = []
+        self._prefill_copy_identity = None
+        self._prefill_copy_count = None
+        self._prefill_fused_mapped_copy_active = False
         if not _FUSED_COPY or self.device.type != "cuda" or not self.banks:
             return
         from freetoken.kernel.pinned import device_ptr
@@ -590,6 +611,34 @@ class OffloadMoeCache:
             cache[: 2 * self.num_experts].view(2, self.num_experts, *cache.shape[1:])
             for _, cache in self.banks
         ]
+        # The production fused copy kernel consumes raw byte addresses rather
+        # than Tensor views.  Offset each cache-bank base by exactly one full
+        # expert layer for buffer 1, leaving buffer 0 at the cache base.  This
+        # reproduces the legacy ``buffer[buffer_id].copy_(source)`` destinations
+        # without changing cache slot ownership or source layout.
+        if _PREFILL_FUSED_MAPPED_COPY and self._copy_fused_ok:
+            assert self._copy_dst_ptrs is not None
+            assert self._copy_feat_bytes is not None
+            self._prefill_copy_dst_ptrs = [
+                self._copy_dst_ptrs,
+                self._copy_dst_ptrs + self._copy_feat_bytes * self.num_experts,
+            ]
+            self._prefill_copy_identity = torch.arange(
+                self.num_experts, dtype=torch.int32, device=self.device
+            )
+            self._prefill_copy_count = torch.tensor(
+                [self.num_experts], dtype=torch.int64, device=self.device
+            )
+            self._prefill_fused_mapped_copy_active = True
+            logger.info(
+                "MoE prefill uses opt-in fused mapped-host full-layer copies "
+                "with exact identity row mapping"
+            )
+        elif _PREFILL_FUSED_MAPPED_COPY:
+            logger.warning(
+                "MoE fused mapped-host prefill copy requested but unavailable; "
+                "using legacy per-bank full-layer copies"
+            )
         if self.device.type == "cuda":
             self.prefill_copy_stream = torch.cuda.Stream(device=self.device)
             self.prefill_ready_events = [torch.cuda.Event() for _ in range(2)]
@@ -659,6 +708,25 @@ class OffloadMoeCache:
 
         def copy() -> None:
             self._invalidate_prefill_buffer(buffer_id)
+            if self._prefill_fused_mapped_copy_active:
+                # One kernel copies every expert row in every registered bank.
+                # Both index vectors are identity mappings, so the byte result is
+                # exactly the legacy whole-layer copy into this double buffer.
+                from freetoken.kernel.fast_index_copy import fast_index_copy_multi_jit
+
+                assert self._copy_src_ptrs is not None
+                assert self._copy_feat_bytes is not None
+                assert self._prefill_copy_identity is not None
+                assert self._prefill_copy_count is not None
+                fast_index_copy_multi_jit(
+                    self._prefill_copy_dst_ptrs[buffer_id],
+                    self._copy_src_ptrs[layer_id],
+                    self._copy_feat_bytes,
+                    self._prefill_copy_identity,
+                    self._prefill_copy_identity,
+                    self._prefill_copy_count,
+                )
+                return
             for (per_layer, _), buffer in zip(self.banks, self.prefill_bank_buffers):
                 buffer[buffer_id].copy_(per_layer[layer_id], non_blocking=True)
 
