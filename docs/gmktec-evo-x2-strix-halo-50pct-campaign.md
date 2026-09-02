@@ -2190,3 +2190,22 @@ arithmetically exact but does not supply a component-level speed benefit. Keep
 `q4-c118-four-rows-q4-only-component-r1-20260902`, including the parity output,
 timed samples, selector record, logs, cleanup record, and normal-service
 completion proof. No scheduler, C4, or quality-TPS claim is made for C118.
+
+### C119: all-format five-row geometry closure
+
+C119 tested five adjacent Q4_K and Q5_K output rows per HIP wave. Like the
+lower-row candidates, it preserves each output row's vector-dot sequence, lane
+ownership, XOR reduction tree, and output address. It therefore passed the
+same exact-output component screen, using the real first-layer Qwen weights,
+1,024 deterministic BF16 activations, all 256 experts, top-k eight routing,
+eight warmups, and twenty device-timed repetitions.
+
+The exact generic-vector SHA-256 matched with zero maximum and mean absolute
+difference, but the 81.307 ms median was slower than the generic component and
+15.00 percent slower than the all-format C116 four-row candidate at 70.701 ms.
+
+**Decision: close the five-row candidate before API testing.** Its extra live
+accumulator does not offset its register and occupancy cost on this hardware.
+Keep `q4-c119-five-rows-component-r1-20260902`, including raw parity output,
+timing samples, selector record, build logs, cleanup record, and normal-service
+completion proof. No scheduler, C4, or quality-TPS claim is made for C119.
