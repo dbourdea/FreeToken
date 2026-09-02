@@ -361,6 +361,19 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('assert_clean_swap\ncurl -fsS', contents)
         self.assertIn('"requested_sessions": expected', contents)
 
+    def test_endurance_prefill_probe_is_opt_in_and_keeps_its_own_artifacts(self) -> None:
+        """A future trend probe cannot silently alter the accepted tail-only battery."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        battery = repository_root / "scripts" / "gmk-evo-x2" / "run_qwen_gguf_endurance_battery.sh"
+        contents = battery.read_text(encoding="utf-8")
+
+        self.assertIn('FREETOKEN_Q4_PREFILL_TPS_EVERY_SESSIONS:-0', contents)
+        self.assertIn('if (( PREFILL_PROBE_EVERY_SESSIONS > 0 )); then', contents)
+        self.assertIn('record_prefill_probe "${session}"', contents)
+        self.assertIn('"${ARTIFACT_ROOT}/prefill/session-${session}"', contents)
+        self.assertIn('benchmarks/gmk_evo_x2/run_api_benchmark.py', contents)
+
 
 class ConcurrentControlArgumentTests(unittest.TestCase):
     """Reject nonsensical concurrent workloads before they can reach GMKtec EVO-X2."""
