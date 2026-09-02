@@ -11,6 +11,7 @@ every visible SSE event and refuses to overwrite an existing artifact.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import socket
 import statistics
@@ -36,6 +37,28 @@ def nearest_rank(values: list[float], percentile: float) -> float | None:
         return None
     ordered = sorted(values)
     return ordered[max(0, int(len(ordered) * percentile + 0.999999999) - 1)]
+
+
+def numeric_summary(values: list[float]) -> dict[str, float | None]:
+    """Return measured central and tail statistics without interpolation.
+
+    The cold-prefill controller has deliberately few samples because every
+    request has a unique early prefix and must recompute a long prompt.  These
+    statistics retain the raw per-sample values below and avoid manufacturing
+    a percentile between observations.
+    """
+
+    if not values:
+        return {key: None for key in ("mean", "median", "minimum", "maximum", "p50", "p95", "p99")}
+    return {
+        "mean": statistics.mean(values),
+        "median": statistics.median(values),
+        "minimum": min(values),
+        "maximum": max(values),
+        "p50": nearest_rank(values, 0.50),
+        "p95": nearest_rank(values, 0.95),
+        "p99": nearest_rank(values, 0.99),
+    }
 
 
 def build_prompt(
@@ -186,14 +209,24 @@ def main(argv: list[str] | None = None) -> int:
         for index in range(args.samples)
     ]
     samples = []
-    for prompt in prompts:
+    for sample_index, prompt in enumerate(prompts, start=1):
         sample = stream_sample(args, prompt)
         sample["prompt"] = prompt
         sample["prompt_character_count"] = len(prompt)
+        sample["prompt_sha256"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        prompt_tokens = sample["usage"].get("prompt_tokens") if sample["usage"] else None
+        ttft_seconds = sample["ttft_seconds"]
+        sample["cold_prefill_tps"] = (
+            prompt_tokens / ttft_seconds
+            if isinstance(prompt_tokens, int) and ttft_seconds is not None and ttft_seconds > 0
+            else None
+        )
+        sample["sample_index"] = sample_index
         samples.append(sample)
     ttft = [sample["ttft_seconds"] for sample in samples if sample["ttft_seconds"] is not None]
     gaps = [gap for sample in samples for gap in sample["token_gap_seconds"]]
     prompt_token_counts = [sample["usage"].get("prompt_tokens") for sample in samples if sample["usage"]]
+    cold_prefill_tps = [sample["cold_prefill_tps"] for sample in samples if sample["cold_prefill_tps"] is not None]
     artifact = {
         "schema_version": 1,
         "host": host,
@@ -219,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             "sample_count": len(samples),
             "passed_samples": sum(sample["quality_passed"] for sample in samples),
             "prompt_tokens_reported": prompt_token_counts,
+            "cold_prefill_tps": numeric_summary(cold_prefill_tps),
             "ttft_seconds": {
                 "mean": statistics.mean(ttft) if ttft else None,
                 "p50": nearest_rank(ttft, 0.50),

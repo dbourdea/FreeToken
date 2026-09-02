@@ -158,5 +158,18 @@ if [[ "${GMK_EVO_X2_QWEN_QUALITY_SUITE:-}" == "1" ]]; then
         >"${ARTIFACT_ROOT}/quality.log" 2>&1
 fi
 
+if [[ "${GMK_EVO_X2_QWEN_COLD_PREFILL_CONTROL:-}" == "1" ]]; then
+    # A unique early nonce forces every long prompt to miss the full prefix
+    # cache.  This separates genuine prompt-processing work from the cache-hit
+    # rounds that can otherwise inflate a repeated-prompt API benchmark.
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_long_context_control.py" \
+        --base-url "${BASE_URL}" --model "${MODEL_NAME}" \
+        --expected-host "david-Gmktec-x2-2" --filler-repetitions 48 \
+        --sample-variation prefix_nonce --samples 3 --max-tokens 16 \
+        --artifact "${ARTIFACT_ROOT}/cold-prefill.json" \
+        >"${ARTIFACT_ROOT}/cold-prefill.log" 2>&1
+fi
+
 # Capture final endpoint health before the EXIT trap terminates the control.
 curl -fsS "${BASE_URL%/v1}/health" >"${ARTIFACT_ROOT}/health-before-cleanup.json"
