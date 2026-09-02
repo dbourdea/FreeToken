@@ -31,6 +31,7 @@ from freetoken.utils import cached_load_hf_config
 
 _GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
 _GROUPED_PREFILL_MODE_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MODE"
+_MOE_K_TWO_ROWS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS"
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +45,15 @@ def parse_args() -> argparse.Namespace:
         choices=("both", "gate_up", "down"),
         default="both",
         help="When --mode grouped, select the grouped Q4 gate/up, Q5 down, or both projections.",
+    )
+    parser.add_argument(
+        "--vector-two-rows",
+        action="store_true",
+        help=(
+            "Opt into the HIP Q4_K/Q5_K two-output-row vector candidate. "
+            "This is valid only with --mode vector and exists solely for an "
+            "isolated real-weight parity and device-time gate."
+        ),
     )
     parser.add_argument("--layer", type=int, default=0)
     parser.add_argument("--tokens", type=int, default=1024)
@@ -65,6 +75,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("reference output is missing")
     if args.rtol < 0 or args.atol < 0 or not torch.cuda.is_available():
         parser.error("tolerances must be non-negative and the native ROCm GPU must be available")
+    if args.vector_two_rows and args.mode != "vector":
+        parser.error("--vector-two-rows is valid only with --mode vector")
     return args
 
 
@@ -124,6 +136,9 @@ def main() -> int:
     grouped_threshold = args.tokens if args.mode == "grouped" else 0
     os.environ[_GROUPED_PREFILL_MIN_TOKENS_ENV] = str(grouped_threshold)
     os.environ[_GROUPED_PREFILL_MODE_ENV] = args.grouped_mode
+    # The environment value is consumed by the native HIP wrapper at launch
+    # time, keeping this candidate unavailable to normal server processes.
+    os.environ[_MOE_K_TWO_ROWS_ENV] = "1" if args.vector_two_rows else "0"
     gate_up, down, hidden_size, num_experts, top_k, cache = materialize_layer(args.model, args.layer)
     device = gate_up.device
     generator = torch.Generator(device=device)
@@ -179,7 +194,7 @@ def main() -> int:
         torch.save(output_cpu, args.save_output)
     result = {
         "schema_version": 1,
-        "classification": "real-weight Q4_K/Q5_K grouped-prefill component screen, not API TPS",
+        "classification": "real-weight Q4_K/Q5_K MoE component screen, not API TPS",
         "mode": args.mode,
         "model": str(args.model.resolve()),
         "layer": args.layer,
@@ -194,6 +209,7 @@ def main() -> int:
         "torch": torch.__version__,
         "grouped_prefill_min_tokens": grouped_threshold,
         "grouped_prefill_mode": args.grouped_mode if args.mode == "grouped" else "vector",
+        "moe_k_two_rows": args.vector_two_rows,
         "samples_ms": samples_ms,
         "median_device_ms": statistics.median(samples_ms),
         "output_sha256": digest(output_cpu),

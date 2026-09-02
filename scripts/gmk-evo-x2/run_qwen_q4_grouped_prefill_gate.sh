@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Gate an opt-in grouped Q4_K/Q5_K long-prefill MoE candidate on GMKtec EVO-X2.
+# Gate an opt-in Q4_K/Q5_K long-prefill MoE candidate on GMKtec EVO-X2.
 #
 # This controller proves a real completion from the protected normal service,
-# stops it only after that preflight, runs vector and grouped component screens
+# stops it only after that preflight, runs vector and candidate component screens
 # on the original Qwen Q4_K_M expert bytes, and restores a completion-capable
 # normal service on every exit path.  It is intentionally not an API-TPS claim:
 # only a parity-passing component winner can advance to a protected API gate.
@@ -23,11 +23,20 @@ readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
 # one grouped projection for a diagnostic component screen; API promotion still
 # requires a separate exact-output gate.
 readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
+# Select the candidate family without changing the normal serving default.
+# ``grouped`` retains the original route-sort experiment. ``two_rows`` selects
+# the HIP one-wave/two-output-row vector experiment. Both remain component-only
+# gates and neither changes the recovery server or production defaults.
+readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
 [[ "${GROUPED_MODE}" == "both" || "${GROUPED_MODE}" == "gate_up" || "${GROUPED_MODE}" == "down" ]] || {
     echo "FREETOKEN_Q4_GROUPED_MODE must be both, gate_up, or down" >&2
+    exit 2
+}
+[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" ]] || {
+    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped or two_rows" >&2
     exit 2
 }
 mkdir -p "${ARTIFACT_DIR}"
@@ -86,19 +95,35 @@ FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 \
     --json "${ARTIFACT_DIR}/vector.json" --save-output "${ARTIFACT_DIR}/vector-output.pt" \
     >"${ARTIFACT_DIR}/vector.log" 2>&1
 
-# The grouped run compiles and warms route alignment before timing.  It must
-# match the saved vector output under explicit tolerances before it can record
-# a passed component result.
-PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
-TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
-FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=1024 \
-FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_MODE}" \
-"${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
-    --model "${MODEL_PATH}" --mode grouped --grouped-mode "${GROUPED_MODE}" \
-    --tokens 1024 --warmup 8 --repetitions 20 \
-    --json "${ARTIFACT_DIR}/grouped.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
-    >"${ARTIFACT_DIR}/grouped.log" 2>&1
+if [[ "${COMPONENT_CANDIDATE}" == "grouped" ]]; then
+    # The grouped run compiles and warms route alignment before timing.  It
+    # must match the saved vector output under explicit tolerances before it
+    # can record a passed component result.
+    PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
+    TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
+    FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=1024 \
+    FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_MODE}" \
+    "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
+        --model "${MODEL_PATH}" --mode grouped --grouped-mode "${GROUPED_MODE}" \
+        --tokens 1024 --warmup 8 --repetitions 20 \
+        --json "${ARTIFACT_DIR}/grouped.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
+        >"${ARTIFACT_DIR}/grouped.log" 2>&1
+    printf 'candidate=grouped mode=%s\n' "${GROUPED_MODE}" >"${ARTIFACT_DIR}/candidate.txt"
+else
+    # This kernel candidate changes only how two adjacent real Q4_K/Q5_K rows
+    # share one HIP wave.  The saved production-vector output is the strict
+    # reference, so a timing result is retained only if numerical parity holds.
+    PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
+    TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
+    FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 FREETOKEN_GGUF_MOE_K_TWO_ROWS=1 \
+    "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
+        --model "${MODEL_PATH}" --mode vector --vector-two-rows \
+        --tokens 1024 --warmup 8 --repetitions 20 \
+        --json "${ARTIFACT_DIR}/two-rows.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
+        >"${ARTIFACT_DIR}/two-rows.log" 2>&1
+    printf 'candidate=two_rows\n' >"${ARTIFACT_DIR}/candidate.txt"
+fi
 
 # A passed marker means both runs completed, grouped output matched the saved
 # vector reference, and timing evidence exists.  It makes no API claim.
-printf 'real_q4_grouped_prefill_parity_and_timing=passed\n' >"${ARTIFACT_DIR}/result.txt"
+printf 'real_q4_component_candidate_parity_and_timing=passed\n' >"${ARTIFACT_DIR}/result.txt"
