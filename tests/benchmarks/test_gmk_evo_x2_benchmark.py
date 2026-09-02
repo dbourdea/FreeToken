@@ -266,6 +266,8 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('trap \'restore_normal_service\' EXIT INT TERM', contents)
         self.assertIn('wait_for_serving 1919 "${RECOVERY_ARTIFACT}"', contents)
         self.assertIn('wait_for_serving 1922 "${ARTIFACT_ROOT}/q4-health.json"', contents)
+        self.assertIn('--output "${ARTIFACT_ROOT}/summary.json"', contents)
+        self.assertNotIn('--expected-sessions "${SESSION_COUNT}" >"${ARTIFACT_ROOT}/summary.json"', contents)
 
     def test_dense_q8_timeshare_controller_owns_detached_recovery(self) -> None:
         """A lost SSH parent must not leave the normal service stopped after Q8 screening."""

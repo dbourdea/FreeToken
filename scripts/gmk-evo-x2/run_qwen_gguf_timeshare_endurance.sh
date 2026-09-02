@@ -94,6 +94,11 @@ bash "${RECOVERY_STOPPER}"
 FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_LAUNCHER}" start "${Q4_ARTIFACT_DIR}" 0.25
 wait_for_serving 1922 "${ARTIFACT_ROOT}/q4-health.json"
 FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_BATTERY}" "${BATTERY_ARTIFACT_DIR}" "${SESSION_COUNT}" "${INTERVAL_SECONDS}"
+# Ask the summarizer to write its own explicit artifact.  Redirecting stdout
+# here would not satisfy its required --output contract and would make an
+# otherwise successful battery look like a controller failure after the work
+# had already completed.
 "${ROOT_DIR}/.venv/bin/python" "${Q4_SOURCE_DIR}/benchmarks/gmk_evo_x2/summarize_qwen_gguf_endurance.py" \
-    "${BATTERY_ARTIFACT_DIR}" --expected-sessions "${SESSION_COUNT}" >"${ARTIFACT_ROOT}/summary.json"
+    "${BATTERY_ARTIFACT_DIR}" --expected-sessions "${SESSION_COUNT}" \
+    --output "${ARTIFACT_ROOT}/summary.json"
 printf 'completed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"${ARTIFACT_ROOT}/controller.txt"
