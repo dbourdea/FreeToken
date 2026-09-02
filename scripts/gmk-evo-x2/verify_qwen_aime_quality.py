@@ -28,7 +28,10 @@ if str(SOURCE_ROOT) not in sys.path:
 from benchmarks.bench_decode_moe import load_problem, resolve_sampling, stream_generate
 
 
-REFERENCE_SHA1 = "0acef4eab6f4"
+# The canonical same-source fingerprint for the currently qualified Qwen
+# control. Callers can still supply another explicitly documented reference
+# when validating a separately versioned model or prompt fixture.
+REFERENCE_SHA1 = "3302eda43396"
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aime", default=None)
     parser.add_argument("--problem", type=int, default=0)
     parser.add_argument("--decode", type=int, default=128)
+    parser.add_argument(
+        "--expected-output-sha1",
+        default=REFERENCE_SHA1,
+        help="Canonical 12-character deterministic output fingerprint required for this run.",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +56,10 @@ def main() -> int:
     """Warm the live server, score one deterministic stream, and persist raw evidence."""
 
     args = parse_args()
+    if len(args.expected_output_sha1) != 12 or any(
+        character not in "0123456789abcdef" for character in args.expected_output_sha1.lower()
+    ):
+        raise ValueError("--expected-output-sha1 must be a 12-character hexadecimal fingerprint")
     problem, answer = load_problem(args.aime, args.problem)
     sampling, sampling_source = resolve_sampling(args.model, greedy=True)
     with urllib.request.urlopen(args.base_url.rstrip("/") + "/v1/models", timeout=10) as response:
@@ -89,9 +101,9 @@ def main() -> int:
         "prompt_tokens": result["usage"]["prompt_tokens"],
         "completion_tokens": completion_tokens,
         "metrics": metrics,
-        "expected_output_sha1": REFERENCE_SHA1,
+        "expected_output_sha1": args.expected_output_sha1.lower(),
         "output_sha1": output_sha1,
-        "status": "passed" if output_sha1 == REFERENCE_SHA1 else "failed",
+        "status": "passed" if output_sha1 == args.expected_output_sha1.lower() else "failed",
         "text": text,
     }
     args.artifact.parent.mkdir(parents=True, exist_ok=True)
