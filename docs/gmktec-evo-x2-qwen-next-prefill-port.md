@@ -95,6 +95,14 @@ reconstructing the vector dot sequence from the tiled values or by proving and
 repairing a remaining tile-layout discrepancy. It must retain the Q8-sum
 correction and remain default-off until exact tensor equality is demonstrated.
 
+C134 rebuilt the Q8-sum-repaired grouped path with four routed waves rather
+than eight in a fresh isolated extension. Its single-expert real-weight
+differential reproduced C131's Q4 gate/up, Q5 down, and final residual counts
+and magnitudes exactly. The residual therefore does not originate from the
+four-versus-eight routed-wave launch choice. The next diagnostic must compare
+the common Q4_K and Q5_K tile-scale unpacking and the primary quantized-dot
+sequence against the corresponding vector helpers, one packed block at a time.
+
 ## Required implementation sequence
 
 1. Build a component differential harness that runs the qualified vector path
