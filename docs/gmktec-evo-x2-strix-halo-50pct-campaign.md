@@ -1807,3 +1807,36 @@ dependency or NVIDIA architecture requirement.
 or porting a CUDA-oriented attention dependency would be a separate runtime
 project, not a safe configuration candidate within this ROCm-only scope. The
 normal Qwen API was independently responsive when this read-only check ended.
+
+### C96-C97: cache-neutral four-client prefill control
+
+The remaining question was whether FreeToken's lower cold single-request
+prefill rate was caused by scheduler admission failing to form a useful ragged
+prefill batch. C96 and C97 therefore released one synchronized four-client
+round with a distinct early nonce for every request. Each prompt contained
+1,223 server-reported prompt tokens. C96 recorded four distinct prompt hashes;
+its cached-token field was absent. C97 explicitly reported zero cached tokens
+on every request. Both controllers preserved the usual quality and recovery
+gates, restoring a normal Qwen completion after 463 and 460 probes.
+
+| Runtime and C4 condition | Aggregate prefill TPS | Per-request prefill TPS, mean | C4 p99 TTFT | Cache evidence |
+| --- | ---: | ---: | ---: | --- |
+| FreeToken Q4, C96 | 327.282 | 82.575 | 14.947 s | Four unique prompt hashes; cached-token field absent |
+| ROCm 10 llama.cpp Q4_K_M, C97 | 997.260 | 251.603 | 4.905 s | Four unique prompt hashes; explicit zero cached tokens |
+
+Each runtime completed its four prompts over roughly one common first-token
+interval, so the aggregate rate is about four times its per-request rate. This
+is evidence that the scheduler did form concurrent prefill work, not evidence
+of serialized admissions. The aggregate rates also closely track the earlier
+single-client cache-neutral rates: FreeToken about 307 TPS after its retained
+first-use sample, and llama.cpp about 979 TPS. Therefore the remaining gap is
+inside the core Q4 prefill execution path, not an artifact of C4 admission or
+full user-prompt cache reuse.
+
+**Decision: close ragged-admission tuning as a primary candidate.** Retain the
+qualified four-request cap and focus future work on an exact-arithmetic grouped
+GGUF kernel or a new exact vector-kernel implementation. Preserve
+`q4-c96-cold-concurrent-freetoken-20260902T112843Z` and
+`q4-c97-cold-concurrent-llamacpp-20260902T113840Z`, including raw SSE events,
+usage blocks, prompt hashes, per-request timing, controller logs, cleanup
+records, and normal-service completion proof.
