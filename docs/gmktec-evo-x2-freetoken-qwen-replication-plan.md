@@ -314,7 +314,11 @@ check.  Accept only when all apply:
   explicitly a decode-only mode.
 - p99 token gap does not materially worsen.
 - No quality, determinism, memory-safety, crash, or resource-leak regression.
-- The improvement persists in a second clean-host matrix.
+- A second clean-host matrix is required only for a cross-host generalization
+  claim. The authorized porting campaign is restricted to one GMKtec EVO-X2,
+  so its acceptance evidence must instead identify the exact host, software
+  state, telemetry, and repeat runs. It must not claim that the policy is
+  proven on other hardware.
 
 ## Phase 5: HIP and ROCm kernel program
 
@@ -454,7 +458,7 @@ AMD support from a single `gfx1151` result.
 | Matched Qwen TPS replication | Five-sample paper-matched result and raw evidence | Not yet complete |
 | Exceeds paper result | Same-model, same-workload, same-metric evidence | Not yet complete |
 | Beats AMD llama.cpp Qwen control | Matched ROCm quality and performance matrix | Not yet complete |
-| UMA policy is beneficial | Complete API matrix, telemetry, second clean-host confirmation | Not yet complete |
+| UMA policy is beneficial on the GMKtec EVO-X2 | Complete API matrix, telemetry, and repeat runs on the same identified host. A second clean-host matrix is outside the authorized campaign scope and remains necessary only for a cross-host claim. | Not yet complete |
 | Long-run reliability | 24-hour isolated endurance artifact | Not yet complete |
 | Upstream-ready documentation | Reviewed, reproducible, secret-safe bundle | Not yet complete |
 
