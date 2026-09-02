@@ -83,9 +83,28 @@ static bool freetoken_moe_k_three_rows_enabled() {
 // separate from the lower-row candidates because four live accumulators can
 // change register pressure and occupancy even though it preserves the exact
 // per-row arithmetic sequence.  Normal serving never selects it by default.
-static bool freetoken_moe_k_four_rows_enabled() {
-  const char* value = std::getenv("FREETOKEN_GGUF_MOE_K_FOUR_ROWS");
+static bool freetoken_moe_k_env_enabled(const char* value) {
   return value != nullptr && (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0);
+}
+
+static bool freetoken_moe_k_four_rows_enabled() {
+  return freetoken_moe_k_env_enabled(std::getenv("FREETOKEN_GGUF_MOE_K_FOUR_ROWS"));
+}
+
+// Allow the component and API gates to apply four-row sharing to Q4_K alone.
+// The optional format-specific value takes precedence, including explicit zero,
+// so a clean benchmark cannot inherit an unrelated parent-process setting.
+static bool freetoken_q4_k_four_rows_enabled() {
+  const char* value = std::getenv("FREETOKEN_GGUF_Q4_K_FOUR_ROWS");
+  return value == nullptr ? freetoken_moe_k_four_rows_enabled() : freetoken_moe_k_env_enabled(value);
+}
+
+// Q5_K follows the global candidate unless an isolated gate explicitly selects
+// a format-specific value. This mirrors the Q4_K control and keeps the two
+// independent projections auditable in every generated artifact.
+static bool freetoken_q5_k_four_rows_enabled() {
+  const char* value = std::getenv("FREETOKEN_GGUF_Q5_K_FOUR_ROWS");
+  return value == nullptr ? freetoken_moe_k_four_rows_enabled() : freetoken_moe_k_env_enabled(value);
 }
 
 // The HIP launcher is defined after the CUDA-compatible wrapper so the
@@ -582,7 +601,7 @@ static void moe_vec_q4_K_q8_1_cuda(
     const int token_stride,
     cudaStream_t stream) {
 #if defined(USE_ROCM)
-  if (freetoken_moe_k_four_rows_enabled()) {
+  if (freetoken_q4_k_four_rows_enabled()) {
     moe_vec_q_k_hip_four_rows_cuda<
         scalar_t, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1,
         FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS>(
@@ -624,7 +643,7 @@ static void moe_vec_q5_K_q8_1_cuda(
     const int token_stride,
     cudaStream_t stream) {
 #if defined(USE_ROCM)
-  if (freetoken_moe_k_four_rows_enabled()) {
+  if (freetoken_q5_k_four_rows_enabled()) {
     moe_vec_q_k_hip_four_rows_cuda<
         scalar_t, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1,
         FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS>(
