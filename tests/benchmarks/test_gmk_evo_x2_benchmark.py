@@ -178,6 +178,41 @@ class DpmPolicyWrapperTests(unittest.TestCase):
         self.assertNotIn('source-qwen-harness-d6ee8ce', contents)
 
 
+class EnduranceSummaryTests(unittest.TestCase):
+    """Keep the long-run postflight summary tied to emitted artifact names."""
+
+    def test_four_digit_session_telemetry_name_is_retained(self) -> None:
+        """A controller-style ``session-0001`` artifact must not become ``session-01``."""
+
+        with TemporaryDirectory() as temporary_directory:
+            artifact_root = Path(temporary_directory)
+            sessions = artifact_root / "sessions"
+            sessions.mkdir()
+            (sessions / "session-0001.json").write_text(
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "results": [{"id": "remember", "status": "passed"}],
+                        "tail_metrics": {
+                            "max_ttft_seconds": 0.25,
+                            "max_token_gap_seconds": 0.02,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (sessions / "session-0001-telemetry.txt").write_text(
+                "runner_swap_kib=0\nwhole_host_swap_kib=1024\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(artifact_root, expected_sessions=1)
+
+        self.assertTrue(summary["passed"], summary["failures"])
+        self.assertEqual(summary["runner_swap_kib"]["max"], 0)
+        self.assertEqual(summary["whole_host_swap_kib"]["max"], 1024)
+
+
 class QwenRecoveryContextTests(unittest.TestCase):
     """Protect the recovery server's validated long-context cache allocation."""
 

@@ -84,7 +84,13 @@ def summarize(artifact_root: Path, expected_sessions: int) -> dict[str, Any]:
         except (KeyError, TypeError, ValueError) as error:
             failures.append(f"session {session:02d} missing tail metric: {error}")
 
-        telemetry = sessions_dir / f"session-{session:02d}-telemetry.txt"
+        # Preserve the filename's original zero padding instead of rebuilding
+        # it from the parsed integer session number. The long-run controller
+        # writes four-digit names such as ``session-0001-telemetry.txt``;
+        # formatting integer ``1`` as ``:02d`` would incorrectly seek
+        # ``session-01-telemetry.txt`` and turn a valid endurance run into a
+        # false missing-telemetry failure.
+        telemetry = session_path.with_name(f"{session_path.stem}-telemetry.txt")
         if not telemetry.is_file():
             failures.append(f"session {session:02d} missing telemetry")
             continue
