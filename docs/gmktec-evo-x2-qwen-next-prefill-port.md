@@ -77,6 +77,16 @@ matrix-dot scale and reduction sequence against the vector Q4_K and Q5_K dot
 functions, one quantized block at a time, while retaining the vector output as
 the exact reference.
 
+C131 tested the first arithmetic repair: the grouped Q4_K and Q5_K min term
+now recomputes the packed Q8_1 integer sum and applies the primary Q8 scale in
+FP32, rather than consuming the precomputed rounded half-precision sum term.
+The Q4 gate/up maximum difference fell from 0.031250 to 0.00390625 and its
+mean difference fell to 0.0000000297. Q5 down with the identical vector
+intermediate fell to 0.00024414 maximum and 0.00000000171 mean difference.
+The output is still not storage-equal, so this candidate cannot enter API
+quality or TPS testing. The next repair must preserve this Q8-sum correction
+and isolate the remaining packed-dot or FP32 accumulation-order difference.
+
 ## Required implementation sequence
 
 1. Build a component differential harness that runs the qualified vector path
