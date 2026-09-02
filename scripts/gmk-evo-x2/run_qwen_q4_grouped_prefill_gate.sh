@@ -25,7 +25,8 @@ readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
 readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
 # Select the candidate family without changing the normal serving default.
 # ``grouped`` retains the original route-sort experiment. ``two_rows`` and
-# ``three_rows``, ``four_rows``, ``four_rows_q4_only``, and ``five_rows`` select isolated HIP row-sharing vector experiments. Every
+# ``three_rows``, ``four_rows``, ``four_rows_q4_only``, ``four_rows_q5_only``,
+# and ``five_rows`` select isolated HIP row-sharing vector experiments. Every
 # option remains component-only and none changes recovery or production defaults.
 readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
 # Keep occupancy selection explicit in evidence. One is the qualified two-row
@@ -42,8 +43,8 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
     echo "FREETOKEN_Q4_GROUPED_MODE must be both, gate_up, or down" >&2
     exit 2
 }
-[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" || "${COMPONENT_CANDIDATE}" == "three_rows" || "${COMPONENT_CANDIDATE}" == "four_rows" || "${COMPONENT_CANDIDATE}" == "four_rows_q4_only" || "${COMPONENT_CANDIDATE}" == "five_rows" ]] || {
-    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped, two_rows, three_rows, four_rows, four_rows_q4_only, or five_rows" >&2
+[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" || "${COMPONENT_CANDIDATE}" == "three_rows" || "${COMPONENT_CANDIDATE}" == "four_rows" || "${COMPONENT_CANDIDATE}" == "four_rows_q4_only" || "${COMPONENT_CANDIDATE}" == "four_rows_q5_only" || "${COMPONENT_CANDIDATE}" == "five_rows" ]] || {
+    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped, two_rows, three_rows, four_rows, four_rows_q4_only, four_rows_q5_only, or five_rows" >&2
     exit 2
 }
 [[ "${TWO_ROWS_MIN_BLOCKS}" == "1" || "${TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
@@ -151,6 +152,13 @@ else
         row_flag=(--vector-four-rows-q4-only)
         row_env="FREETOKEN_GGUF_Q4_K_FOUR_ROWS=1"
         row_name="four-rows-q4-only"
+    elif [[ "${COMPONENT_CANDIDATE}" == "four_rows_q5_only" ]]; then
+        # C118 ruled out Q4_K-only grouping.  This complementary exact-output
+        # screen retains generic Q4_K and attributes any timing change solely
+        # to the Q5_K down projection.
+        row_flag=(--vector-four-rows-q5-only)
+        row_env="FREETOKEN_GGUF_Q5_K_FOUR_ROWS=1"
+        row_name="four-rows-q5-only"
     elif [[ "${COMPONENT_CANDIDATE}" == "five_rows" ]]; then
         # Keep both projections together while testing the next exact-output
         # wave grouping after the four-row component winner.

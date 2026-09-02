@@ -91,6 +91,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--vector-four-rows-q5-only",
+        action="store_true",
+        help=(
+            "Apply the four-output-row HIP candidate only to Q5_K while Q4_K "
+            "uses the generic vector kernel. This is an isolated exact-output "
+            "component screen and is never a normal serving default."
+        ),
+    )
+    parser.add_argument(
         "--vector-five-rows",
         action="store_true",
         help=(
@@ -213,9 +222,10 @@ def main() -> int:
     os.environ[_MOE_K_FIVE_ROWS_ENV] = "1" if args.vector_five_rows else "0"
     # Set both format selectors explicitly so the component process never
     # inherits a stale parent value. The all-format candidate enables both;
-    # the Q4-only candidate enables only the profiled Q4_K projection.
+    # per-format candidates enable exactly one projection so timing can show
+    # whether the Q4_K or Q5_K portion is responsible for a combined result.
     os.environ[_Q4_K_FOUR_ROWS_ENV] = "1" if (args.vector_four_rows or args.vector_four_rows_q4_only) else "0"
-    os.environ[_Q5_K_FOUR_ROWS_ENV] = "1" if args.vector_four_rows else "0"
+    os.environ[_Q5_K_FOUR_ROWS_ENV] = "1" if (args.vector_four_rows or args.vector_four_rows_q5_only) else "0"
     os.environ[_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV] = args.two_rows_min_blocks
     os.environ[_Q4_K_TWO_ROWS_MIN_BLOCKS_ENV] = (
         args.q4_two_rows_min_blocks or args.two_rows_min_blocks
@@ -298,7 +308,7 @@ def main() -> int:
         "moe_k_four_rows": args.vector_four_rows,
         "moe_k_five_rows": args.vector_five_rows,
         "q4_k_four_rows": args.vector_four_rows_q4_only or args.vector_four_rows,
-        "q5_k_four_rows": args.vector_four_rows,
+        "q5_k_four_rows": args.vector_four_rows_q5_only or args.vector_four_rows,
         "moe_k_two_rows_min_blocks": int(args.two_rows_min_blocks),
         "q4_k_two_rows_min_blocks": int(args.q4_two_rows_min_blocks or args.two_rows_min_blocks),
         "q5_k_two_rows_min_blocks": int(args.q5_two_rows_min_blocks or args.two_rows_min_blocks),
