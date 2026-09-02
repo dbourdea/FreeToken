@@ -1981,3 +1981,35 @@ service recovered after 485 completion probes.
 Preserve `q4-c104-q5-two-block-component-r1-20260902`, including compiler
 settings, raw samples, output hashes, exact-parity record, controller logs,
 cleanup record, and normal-service completion evidence.
+
+### C105: quality-qualified two-row prefill trace
+
+C105 profiled one bounded 6,010-token Q4_K_M prefill through the isolated,
+default-off two-row candidate. The server inherited
+`FREETOKEN_GGUF_MOE_K_TWO_ROWS=1`, used the same Q4_K/Q5_K one-block
+configuration qualified by C98 through C104, and saved the exact request,
+response, ROCprof SQLite database, and inspected trace summary. The regular
+Qwen endpoint was recovered through the controller's completion gate after the
+isolated profile exited.
+
+This is a diagnostic trace, not a TPS result. ROCprof changes queue and memory
+collection behavior, so its wall-clock rates cannot be compared with the
+unprofiled acceptance harness. It does, however, provide an evidence-based
+ordering of device work in the captured window:
+
+| Captured kernel family | Calls | Aggregate device time | Implication |
+| --- | ---: | ---: | --- |
+| Q4_K two-row MoE vector | 40 | 5,809.917 ms | Primary remaining quantized MoE target |
+| Q5_K two-row MoE vector | 37 | 3,565.542 ms | Second primary quantized MoE target |
+| BF16 direct-copy kernels | 220 | 2,019.232 ms | Secondary data-movement target |
+| Gated delta-rule solve | 30 | 1,931.956 ms | Secondary recurrent-model target |
+| Q8_0 matrix-vector | 160 | 975.811 ms | Lower-priority quantized projection target |
+
+The two Q4_K/Q5_K vector families account for 9,375.459 ms combined in this
+captured kernel accounting, well ahead of any single secondary family. This
+confirms that the next bounded experiment should remain in the exact-output
+quantized MoE-vector path, rather than revisiting request admission or cache
+controls that C91 through C97 already ruled out. Preserve
+`q4-c105-two-rows-rocprof-prefill-r1-20260902`, including the SQLite database,
+trace summary, exact workload JSON, response, profiler log, prewarm record,
+and normal-service health evidence.
