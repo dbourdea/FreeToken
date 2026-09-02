@@ -14,6 +14,12 @@ set -euo pipefail
 readonly ARTIFACT_ROOT="${1:?usage: run_qwen_gguf_timeshare_endurance.sh ARTIFACT_ROOT [SESSION_COUNT] [INTERVAL_SECONDS]}"
 readonly SESSION_COUNT="${2:-1440}"
 readonly INTERVAL_SECONDS="${3:-60}"
+# Keep the exact HIP row-selector state explicit. Endurance lasts long enough
+# that an inherited environment would make the resulting evidence ambiguous.
+# These controls match the isolated full API gate and default to the qualified
+# generic vector route, so normal invocations do not change behavior.
+readonly Q4_K_FOUR_ROWS="${FREETOKEN_Q4_Q4_K_FOUR_ROWS:-0}"
+readonly Q5_K_FOUR_ROWS="${FREETOKEN_Q4_Q5_K_FOUR_ROWS:-0}"
 
 # Keep every host-specific path explicit so an invocation cannot silently
 # operate on another machine's service or an arbitrary source checkout.
@@ -33,6 +39,8 @@ readonly RECOVERY_ARTIFACT="${ARTIFACT_ROOT}/recovery-health.json"
 case "${SESSION_COUNT}" in ''|*[!0-9]*) echo "session count must be positive" >&2; exit 2;; esac
 case "${INTERVAL_SECONDS}" in ''|*[!0-9]*) echo "interval must be non-negative" >&2; exit 2;; esac
 (( SESSION_COUNT > 0 )) || { echo "session count must be positive" >&2; exit 2; }
+[[ "${Q4_K_FOUR_ROWS}" == "0" || "${Q4_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q4_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
+[[ "${Q5_K_FOUR_ROWS}" == "0" || "${Q5_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q5_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
 [[ ! -e "${ARTIFACT_ROOT}" ]] || { echo "artifact root already exists: ${ARTIFACT_ROOT}" >&2; exit 2; }
 [[ "${Q4_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "Q4 source must be under ${ROOT_DIR}" >&2; exit 2; }
 [[ "${RECOVERY_SOURCE_DIR}" == "${ROOT_DIR}/source-qwen-"* ]] || { echo "recovery source must be under ${ROOT_DIR}" >&2; exit 2; }
@@ -85,13 +93,21 @@ restore_normal_service() {
 
 mkdir -p "${ARTIFACT_ROOT}"
 printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${ARTIFACT_ROOT}/controller.txt"
-printf 'session_count=%s\ninterval_seconds=%s\n' "${SESSION_COUNT}" "${INTERVAL_SECONDS}" >>"${ARTIFACT_ROOT}/controller.txt"
+printf 'session_count=%s\ninterval_seconds=%s\nq4_k_four_rows=%s\nq5_k_four_rows=%s\n' \
+    "${SESSION_COUNT}" "${INTERVAL_SECONDS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" \
+    >>"${ARTIFACT_ROOT}/controller.txt"
 trap 'restore_normal_service' EXIT INT TERM
 
 # The stopper refuses an unmanaged legacy tree. That fail-closed behavior
 # prevents this controller from guessing at child ownership on a shared host.
 bash "${RECOVERY_STOPPER}"
-FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_LAUNCHER}" start "${Q4_ARTIFACT_DIR}" 0.25
+# Pass both selectors to the isolated launcher explicitly. This keeps the
+# normal recovery service free of experimental settings and makes the long-run
+# candidate precisely reproducible from controller.txt alone.
+FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" \
+FREETOKEN_GGUF_Q4_K_FOUR_ROWS="${Q4_K_FOUR_ROWS}" \
+FREETOKEN_GGUF_Q5_K_FOUR_ROWS="${Q5_K_FOUR_ROWS}" \
+    bash "${Q4_LAUNCHER}" start "${Q4_ARTIFACT_DIR}" 0.25
 wait_for_serving 1922 "${ARTIFACT_ROOT}/q4-health.json"
 FREETOKEN_Q4_SOURCE_DIR="${Q4_SOURCE_DIR}" bash "${Q4_BATTERY}" "${BATTERY_ARTIFACT_DIR}" "${SESSION_COUNT}" "${INTERVAL_SECONDS}"
 # Ask the summarizer to write its own explicit artifact.  Redirecting stdout
