@@ -18,6 +18,7 @@ from pathlib import Path
 
 import torch
 
+from freetoken.distributed import set_tp_info, try_get_tp_info
 from freetoken.models.qwen3_5_moe.config import parse_gguf_config
 from freetoken.models.qwen3_5_moe.gguf import load_q4_k_q5_k_expert_sources
 from freetoken.moe.offload_cache import OffloadMoeCache
@@ -71,6 +72,12 @@ def main() -> int:
         raise RuntimeError("this component gate requires the native ROCm GPU")
     if args.warmup < 0 or args.repetitions < 1:
         raise ValueError("warmup must be non-negative and repetitions must be positive")
+
+    # This standalone component process does not create the engine's distributed
+    # bootstrap.  The GGUF bank loader still validates the same TP=1 contract as
+    # serving, so establish that explicit one-device context before loading it.
+    if try_get_tp_info() is None:
+        set_tp_info(rank=0, size=1)
 
     device = torch.device("cuda", torch.cuda.current_device())
     config = parse_gguf_config(cached_load_hf_config(args.model))
