@@ -1345,3 +1345,76 @@ repeat run.
 samples, exact-quality file, cache-resolution server log, recovery-progress
 heartbeat, and cleanup proof.  Further work should move to a distinct
 profiler-directed mechanism rather than expanding this cache budget again.
+
+### C64 and C65: real-weight fused mapped-host prefill-copy component gate
+
+The prefill-focused ROCprof capture identified full routed-expert bank movement
+as a large cost.  The legacy overlap path issued one asynchronous `copy_` for
+each bank in every full expert layer.  C65 tested an isolated opt-in alternative
+that uses the existing multi-bank mapped-host copy kernel with a device-side
+identity row map.  The destination offsets are the two established prefill
+double-buffer regions, so the candidate neither changes source weights nor
+cache ownership.
+
+C64 stopped before timing because the standalone component process had not
+initialized its required single-device tensor-parallel context.  It produced no
+candidate performance or quality claim.  The benchmark was corrected to create
+that explicit TP=1 context, and C65 loaded the actual Q4_K_M pinned expert
+banks, transferred one complete 256-expert layer, retained a byte reference
+from the legacy route, and tested the mapped route against every resulting byte.
+
+| Component path | Full-layer bytes | Median transfer time | Exact byte parity |
+| --- | ---: | ---: | --- |
+| Legacy per-bank copies | 486,539,264 | 88.862 ms | Reference |
+| Fused mapped-host copy | 486,539,264 | 86.001 ms | Yes |
+
+The component result is a 3.22 percent transfer-time reduction with an exact
+byte match.  It is meaningful diagnostic evidence, but a component timing is
+not a serving throughput claim: it omits interaction with attention, compute,
+the prefill copy stream, and the rest of the API lifecycle.  C65 restored the
+normal NVFP4 API and verified a real HTTP 200 completion after 463 recovery
+probes.
+
+**Decision: admit the fused copy only to the isolated end-to-end API gate.** It
+is not a default, production, or upstream-facing optimization until the same
+model, quality control, and scheduler suite prove a repeatable user-visible
+benefit.  Preserve `q4-c64-prefill-fused-copy-20260902T051850Z` as the rejected
+setup attempt and `q4-c65-prefill-fused-copy-20260902T052618Z` for the valid
+real-weight byte-parity and timing result.
+
+### C66 and C67: fused mapped-host copy API gate
+
+C66 exposed a controller defect before candidate startup: the older scheduler
+controller assumed that its caller had already created the artifact directory.
+The normal service remained healthy and the controller was repaired to create
+and exclusively own a new evidence directory before preflight or recovery
+writes.  C67 then tested the C65 mapped-copy implementation with the promoted
+30 percent cache budget, mixed Q4_K/Q6_K prefill overlap, one-wave GDN control,
+the same fixed scheduler workload, and the same deterministic output reference
+used by C58 and C59.
+
+The candidate passed same-source output parity, with observed SHA1
+`3302eda43396` exactly matching the qualified reference.  The quality tool's
+absolute-answer status remained failed for both this configuration and its
+reference, so the valid admission condition here is the explicit complete
+output-hash equality, not an invented claim of absolute task accuracy.
+
+| Setting | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| Promoted 30 percent overlap baseline, C58+C59 | 3,118.903 | 49.137 | 0.388612 s | Exact in both runs |
+| Fused mapped-host copy, C67 | 2,906.430 | 49.167 | 0.417010 s | Exact, `3302eda43396` |
+
+Although C67's component transfer was faster, client-visible prefill regressed
+by 6.81 percent and warm TTFT increased by 7.31 percent relative to the
+repeated C58+C59 baseline.  Decode changed by only 0.06 percent, which is far
+below a meaningful promotion threshold.  The difference shows that direct
+mapped reads may contend with useful prefill compute or lose copy-engine
+behavior even when their isolated byte movement is faster.
+
+**Decision: reject fused mapped-host full-layer copies for this platform's
+serving path and retain legacy asynchronous per-bank copies.** Keep the flag
+explicitly opt-in for future profiling only.  Preserve
+`q4-c67-prefill-fused-copy-api-20260902T053732Z`, including byte-parity and
+component records, quality-parity file, all three scheduler JSON samples,
+summary, server logs, controller lifecycle records, and normal-service recovery
+evidence.
