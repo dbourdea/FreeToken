@@ -871,6 +871,65 @@ two independent throughput matrices before promotion.  Preserve
 database, workload response, controller logs, and normal-service recovery
 evidence.
 
+### C68: grouped Q4_K/Q5_K long-prefill component gate
+
+The prefill profile showed that the mixed Q4_K gate/up and Q5_K down expert
+projections remained on a vector route even for long prompts. The vendored HIP
+extension already includes a grouped matrix-style GGUF MoE kernel, but the Qwen
+path did not invoke it. C68 added an explicitly disabled-by-default prefill-only
+dispatch behind `FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS`. The route aligner
+groups flattened token-to-expert assignments for the native kernel but writes
+every result back to its original route position, preserving the existing
+SwiGLU and router-weight reduction.
+
+The component screen used the actual first Qwen Q4_K_M expert layer: 256
+experts, Q4_K gate/up banks shaped `[256, 1024, 1152]`, Q5_K down banks shaped
+`[256, 2048, 352]`, 1,024 prefill tokens, and the model's actual top-k value of
+eight. Native extension compilation and Triton route-alignment warmup occurred
+before the twenty timed samples. The grouped output differed only within the
+explicit numerical gate: maximum absolute difference `0.001343`, mean absolute
+difference `0.0000938`, with `rtol=0.001` and `atol=0.01`.
+
+| Component path | Median device time | Numerical result |
+| --- | ---: | --- |
+| Established vector path | 81.288 ms | Reference |
+| Grouped matrix path | 9.278 ms | Passed configured tolerance |
+
+The grouped component reduced this isolated device interval by 88.59 percent.
+That is a substantial mechanism-level result, but it is not an API-TPS claim
+and it is not a quality pass. The normal NVFP4 API was restored and verified
+with a real HTTP 200 completion after 485 recovery probes. Preserve
+`q4-c68-grouped-prefill-component-20260902T055720Z`, including both timing
+JSON files, the saved vector output, grouped numerical-delta evidence, compiler
+provenance, and cleanup record.
+
+### C69: grouped Q4_K/Q5_K full-service quality gate
+
+C69 tested the same grouped prefill mechanism in the isolated Q4 API with the
+promoted 30 percent cache capacity, mixed-cache prefill overlap, and one-wave
+GDN configuration. The grouped threshold was 32 prompt tokens and decode was
+explicitly kept on the established vector path. The deterministic quality
+fixture contained 54 prompt tokens, so its server log confirms that this was a
+real grouped-prefill quality test rather than a fallback-vector result.
+
+The candidate changed the complete deterministic response hash from the
+qualified same-source reference `3302eda43396` to `c6d77205c0de`. It therefore
+failed before scheduler TPS collection. No prefill, decode, TTFT, or throughput
+result is claimed for C69. The difference is consistent with the small
+component-level floating-point divergence being sufficient to change a greedy
+generated sequence, which is unacceptable for this exact-output campaign.
+
+**Decision: reject grouped Q4_K/Q5_K MoE for the serving path in its current
+form.** Retain the existing vector dispatch as the qualified output reference.
+The implementation remains opt-in diagnostic code only and must not be
+promoted, enabled for the normal API, or proposed upstream without a new
+bitwise-equivalent kernel or an explicitly approved quality criterion. The
+normal NVFP4 API was restored by the controller and verified with a real HTTP
+200 completion after 475 recovery probes. Preserve
+`q4-c69-grouped-prefill-api-20260902T061103Z`, including the quality fixture,
+observed and reference hashes, candidate server log, recovery-progress record,
+and cleanup evidence.
+
 ### C33-C34: four-row MMV screen admission and residency gate
 
 The trace-driven intermediate four-row screen was initially rejected before
