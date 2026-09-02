@@ -26,10 +26,12 @@ readonly ROOT_DIR="/home/david/freetoken-amd"
 readonly RECOVERY_SOURCE="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
 readonly BENCHMARK="${SOURCE_DIR}/benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_differential.py"
-# A unique extension cache prevents a candidate build from reusing or changing
-# a production cache entry. The harness itself does not need an API server.
-readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-differential"
-readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-differential"
+# A commit-qualified cache prevents a header-level arithmetic candidate from
+# reusing a previously compiled HIP module. It also keeps all test products
+# separate from the protected normal-service cache.
+readonly CANDIDATE_REVISION="$(git -C "${SOURCE_DIR}" rev-parse --short HEAD)"
+readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-differential-${CANDIDATE_REVISION}"
+readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-differential-${CANDIDATE_REVISION}"
 readonly NATIVE_BUILD_LOG="${ARTIFACT_DIR}/native-extension-build.log"
 readonly NATIVE_IMPORT_LOG="${ARTIFACT_DIR}/native-extension-import.txt"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":512,"temperature":0,"stream":false}'
