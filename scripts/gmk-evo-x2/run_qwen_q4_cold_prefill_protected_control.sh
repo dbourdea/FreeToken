@@ -16,6 +16,7 @@ readonly SOURCE_DIR="${FREETOKEN_Q4_SOURCE_DIR:-${ROOT_DIR}/source-qwen-gdn-isol
 readonly RECOVERY_SOURCE="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly LAUNCHER="${SOURCE_DIR}/scripts/gmk-evo-x2/launch_qwen_gguf_qualified.sh"
 readonly HARNESS="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_long_context_control.py"
+readonly QUALITY_SUITE="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_quality_suite.py"
 readonly MODEL="qwen36-35b-a3b-q4km-gguf-amd"
 # This component-qualified candidate is opt-in for the isolated process only.
 # It never changes the recovery server or the default Q4 launch profile.
@@ -27,7 +28,7 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
     echo "FREETOKEN_Q4_MOE_K_TWO_ROWS must be 0 or 1" >&2
     exit 2
 }
-for required in "${LAUNCHER}" "${HARNESS}" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"; do
+for required in "${LAUNCHER}" "${HARNESS}" "${QUALITY_SUITE}" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"; do
     [[ -f "${required}" ]] || { echo "missing required file: ${required}" >&2; exit 2; }
 done
 mkdir -p "${ARTIFACT_DIR}"
@@ -86,6 +87,15 @@ for _ in $(seq 1 480); do
 done
 [[ -s "${ARTIFACT_DIR}/q4-ready-probe.json" ]] || { echo "Q4 server did not reach real completion readiness" >&2; exit 1; }
 
+# Require the candidate to preserve deterministic arithmetic, JSON, and the
+# streamed OpenAI response contract before collecting any TPS evidence.  This
+# suite is distinct from the marker retrieval workload below, preventing a
+# throughput-only result from being mistaken for a quality qualification.
+PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" "${QUALITY_SUITE}" \
+    --base-url http://127.0.0.1:1922/v1 --model "${MODEL}" \
+    --expected-host david-Gmktec-x2-2 --artifact "${ARTIFACT_DIR}/quality-suite.json" \
+    >"${ARTIFACT_DIR}/quality-suite.log" 2>&1
+
 PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" "${HARNESS}" \
     --base-url http://127.0.0.1:1922/v1 --model "${MODEL}" \
     --expected-host david-Gmktec-x2-2 --filler-repetitions 48 --sample-variation prefix_nonce \
@@ -102,4 +112,4 @@ if [[ "${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" == "1" ]]; then
         --sample-variation prefix_nonce --artifact "${ARTIFACT_DIR}/cold-concurrent-c4.json" \
         >"${ARTIFACT_DIR}/cold-concurrent-c4.log" 2>&1
 fi
-printf 'q4_cold_prefill_control=passed moe_k_two_rows=%s\n' "${MOE_K_TWO_ROWS}" >"${ARTIFACT_DIR}/result.txt"
+printf 'q4_quality_and_cold_prefill_control=passed moe_k_two_rows=%s\n' "${MOE_K_TWO_ROWS}" >"${ARTIFACT_DIR}/result.txt"
