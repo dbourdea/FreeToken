@@ -36,6 +36,10 @@ _HIP_GGUF_Q6_MMV_WARPS_ENV = "FREETOKEN_GGUF_Q6_MMV_WARPS"
 # Q5_K routed-expert decode kernels.  It is intentionally restricted to the
 # established eight-wave path and the isolated four-wave component candidate.
 _HIP_GGUF_MOE_K_WARPS_ENV = "FREETOKEN_GGUF_MOE_K_WARPS"
+# This optional switch packs independent Q4_K/Q5_K routed vectors into one HIP
+# thread block.  It does not alter a route's arithmetic, lane ownership, or
+# XOR reduction and is intentionally limited to a binary component-gated test.
+_HIP_GGUF_MOE_ROUTE_BLOCK_ENV = "FREETOKEN_GGUF_MOE_ROUTE_BLOCK"
 
 
 def _hip_target_arch() -> str | None:
@@ -102,12 +106,23 @@ def _hip_gguf_cflags() -> list[str]:
         raise RuntimeError(
             f"{_HIP_GGUF_MOE_K_WARPS_ENV} must be 4 or 8, got {moe_k_warps!r}"
         )
+    # Current llama.cpp batches several independent routed vectors in a block
+    # for long-running HIP kernels.  FreeToken's default keeps one route per
+    # block.  Permit only the reviewed eight-route candidate, while preserving
+    # one as the default and rejecting arbitrary block sizes that have not
+    # received numerical and device-time screening.
+    moe_route_block = os.environ.get(_HIP_GGUF_MOE_ROUTE_BLOCK_ENV, "1").strip()
+    if moe_route_block not in {"1", "8"}:
+        raise RuntimeError(
+            f"{_HIP_GGUF_MOE_ROUTE_BLOCK_ENV} must be 1 or 8, got {moe_route_block!r}"
+        )
     return [
         "-O3",
         f"-DGGML_CUDA_MMV_Y={mmv_y}",
         f"-DGGML_CUDA_Q8_MMV_WARPS={q8_mmv_warps}",
         f"-DGGML_CUDA_Q6_MMV_WARPS={q6_mmv_warps}",
         f"-DGGML_CUDA_MOE_K_WARPS={moe_k_warps}",
+        f"-DGGML_CUDA_MOE_ROUTE_BLOCK={moe_route_block}",
     ]
 
 

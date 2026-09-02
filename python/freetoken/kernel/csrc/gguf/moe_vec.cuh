@@ -51,6 +51,90 @@ static __global__ void moe_vec_q(
   }
 }
 
+#if defined(USE_ROCM) && GGML_CUDA_MOE_ROUTE_BLOCK == 8
+// HIP-only route-block specialization derived from the current llama.cpp MoE
+// MMVQ scheduling pattern.  One Wave32 still owns one routed vector and uses
+// the original loop, packed data accesses, and XOR reduction.  The only change
+// is that eight independent route waves share a physical thread block, which
+// can reduce scheduler and launch overhead without changing any route result.
+template <typename scalar_t, int qk, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot_q_cuda>
+__launch_bounds__(WARP_SIZE * GGML_CUDA_MOE_ROUTE_BLOCK, 1)
+static __global__ void moe_vec_q_route_block_hip(
+    const void* __restrict__ vx,
+    const void* __restrict__ vy,
+    scalar_t* __restrict__ dst,
+    const int* __restrict__ topk_ids,
+    const int topk,
+    const int total_routes,
+    const int ncols,
+    const int nrows,
+    const int token_stride) {
+  // A row pair is handled per route wave.  This retains the established
+  // per-lane sequence for each row while using the neighboring lane only for
+  // the second row's final store after both independent XOR reductions.
+  const int row0 = 2 * blockIdx.x;
+  const int route = blockIdx.y * GGML_CUDA_MOE_ROUTE_BLOCK + threadIdx.y;
+  if (row0 >= nrows || route >= total_routes) {
+    return;
+  }
+
+  const int token = route / topk;
+  const int expert = topk_ids[route];
+  const int blocks_per_row = ncols / qk;
+  const int blocks_per_warp = vdr * WARP_SIZE / qi;
+  const block_q_t* x = ((const block_q_t*)vx) + expert * nrows * blocks_per_row;
+  const block_q8_1* y = (const block_q8_1*)(((const int*)vy) + token * token_stride);
+  float tmp0 = 0.0f;
+  float tmp1 = 0.0f;
+
+  // This loop is deliberately textually equivalent to two instances of the
+  // reference vector body.  Do not alter its lane-to-quant mapping or the
+  // accumulation order: exact output parity is the admission condition.
+  for (int i = threadIdx.x / (qi / vdr); i < blocks_per_row; i += blocks_per_warp) {
+    const int iby = i * (qk / QK8_1);
+    const int iqs = vdr * (threadIdx.x % (qi / vdr));
+    tmp0 += vec_dot_q_cuda(&x[row0 * blocks_per_row + i], &y[iby], iqs);
+    if (row0 + 1 < nrows) {
+      tmp1 += vec_dot_q_cuda(&x[(row0 + 1) * blocks_per_row + i], &y[iby], iqs);
+    }
+  }
+#pragma unroll
+  for (int mask = WARP_SIZE / 2; mask > 0; mask >>= 1) {
+    tmp0 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp0, mask);
+    tmp1 += SGLANG_SHFL_XOR_SYNC(uint32_t(-1), tmp1, mask);
+  }
+  if (threadIdx.x == 0) {
+    dst[route * nrows + row0] = tmp0;
+  }
+  if (threadIdx.x == 1 && row0 + 1 < nrows) {
+    dst[route * nrows + row0 + 1] = tmp1;
+  }
+}
+
+template <typename scalar_t, int qk, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot_q_cuda>
+static void moe_vec_q_route_block_hip_cuda(
+    const void* vx,
+    const void* vy,
+    scalar_t* dst,
+    const int* topk_ids,
+    const int top_k,
+    const int tokens,
+    const int ncols,
+    const int nrows,
+    const int token_stride,
+    cudaStream_t stream) {
+  const int total_routes = tokens * top_k;
+  const dim3 block_nums(
+      (nrows + 1) / 2,
+      (total_routes + GGML_CUDA_MOE_ROUTE_BLOCK - 1) / GGML_CUDA_MOE_ROUTE_BLOCK,
+      1);
+  const dim3 block_dims(WARP_SIZE, GGML_CUDA_MOE_ROUTE_BLOCK, 1);
+  moe_vec_q_route_block_hip<scalar_t, qk, qi, block_q_t, vdr, vec_dot_q_cuda>
+      <<<block_nums, block_dims, 0, stream>>>(
+          vx, vy, dst, topk_ids, top_k, total_routes, ncols, nrows, token_stride);
+}
+#endif
+
 #if defined(USE_ROCM)
 // The HIP launcher is defined after the CUDA-compatible wrapper so the
 // generic wrappers remain grouped by quantization format below.
@@ -304,11 +388,17 @@ static void moe_vec_q4_K_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM) && GGML_CUDA_MOE_ROUTE_BLOCK == 8
+  moe_vec_q_route_block_hip_cuda<scalar_t, QK_K, QI4_K, block_q4_K,
+      VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1>(
+      vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   moe_vec_q<scalar_t, QK_K, QI4_K, block_q4_K, VDR_Q4_K_Q8_1_MMVQ, vec_dot_q4_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
+#endif
 }
 
 template <typename scalar_t>
@@ -323,11 +413,17 @@ static void moe_vec_q5_K_q8_1_cuda(
     const int nrows,
     const int token_stride,
     cudaStream_t stream) {
+#if defined(USE_ROCM) && GGML_CUDA_MOE_ROUTE_BLOCK == 8
+  moe_vec_q_route_block_hip_cuda<scalar_t, QK_K, QI5_K, block_q5_K,
+      VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1>(
+      vx, vy, dst, topk_ids, top_k, tokens, ncols, nrows, token_stride, stream);
+#else
   const int block_num_y = (nrows + GGML_CUDA_MMV_Y - 1) / GGML_CUDA_MMV_Y;
   const dim3 block_nums(block_num_y, 1, tokens * top_k);
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   moe_vec_q<scalar_t, QK_K, QI5_K, block_q5_K, VDR_Q5_K_Q8_1_MMVQ, vec_dot_q5_K_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, topk_ids, top_k, ncols, nrows, token_stride);
+#endif
 }
 
 template <typename scalar_t>
