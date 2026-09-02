@@ -30,6 +30,8 @@ readonly BENCHMARK="${SOURCE_DIR}/benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_di
 # a production cache entry. The harness itself does not need an API server.
 readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-differential"
 readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-differential"
+readonly NATIVE_BUILD_LOG="${ARTIFACT_DIR}/native-extension-build.log"
+readonly NATIVE_IMPORT_LOG="${ARTIFACT_DIR}/native-extension-import.txt"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":512,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
@@ -91,6 +93,19 @@ normal_completion "${ARTIFACT_DIR}/preflight.json" \
 "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
     >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 mkdir -p "${EXTENSION_CACHE}" "${TRITON_CACHE}"
+
+# A clean candidate checkout has no generated HIP extension. Build it in that
+# checkout, with the candidate's Python package first on the import path, and
+# preserve both build and import evidence before executing the GPU diagnostic.
+if ! PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
+    'import freetoken.kernel._pinned_tensor' >/dev/null 2>&1; then
+    ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/setup.py" build_ext --inplace >"${NATIVE_BUILD_LOG}" 2>&1
+fi
+PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
+    'import freetoken.kernel._pinned_tensor as pinned; print(pinned.__file__)' \
+    >"${NATIVE_IMPORT_LOG}"
 
 # The direct process sees only its own source checkout and caches. Its output
 # JSON is the sole numerical evidence emitted by this controller.
