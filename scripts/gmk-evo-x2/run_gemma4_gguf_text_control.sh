@@ -6,7 +6,10 @@ set -euo pipefail
 readonly CHECKOUT="${1:?usage: run_gemma4_gguf_text_control.sh ISOLATED_CHECKOUT}"
 readonly MODE="${2:-text}"
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly PRODUCTION_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
+# Bind recovery to the maintained Qwen source tree. The historical harness
+# checkout was intentionally retired, so referring to it would let a Gemma
+# control finish with the protected API still unavailable.
+readonly PRODUCTION_DIR="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"
 readonly MODEL_PATH="${ROOT_DIR}/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf"
 readonly TEST_PORT="1923"
 readonly PRODUCTION_PORT="1919"
