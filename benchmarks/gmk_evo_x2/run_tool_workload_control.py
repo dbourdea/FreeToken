@@ -42,38 +42,99 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def request_json(base_url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], float, float]:
-    """Submit one non-streaming API request and return body plus monotonic timings."""
+def request_json(base_url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], float, float, dict[str, Any]]:
+    """Stream one API request and reconstruct its OpenAI message safely.
+
+    Visible-content events supply true TTFT and token-gap data. Tool-call SSE
+    fragments have no visible tokens, so their first fragment is separately
+    retained as first-tool-call latency rather than mislabeled as visible TTFT.
+    """
+    # Force SSE and request the final usage event needed for per-turn TPS.
+    payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions", data=encoded,
-        headers={"Content-Type": "application/json"}, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream"}, method="POST",
     )
-    started = time.monotonic()
+    # Use one monotonic clock for all offsets in this response.
+    started = time.perf_counter()
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    visible_events: list[dict[str, Any]] = []
+    tool_parts: dict[int, dict[str, Any]] = {}
+    first_tool_call_seconds: float | None = None
+    usage: dict[str, Any] = {}
+    finish_reason: str | None = None
+    done = False
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            for raw_line in response:
+                offset = time.perf_counter() - started
+                line = raw_line.decode("utf-8", errors="strict").rstrip("\r\n")
+                if not line.startswith("data:"):
+                    continue
+                event_text = line[5:].lstrip()
+                if event_text == "[DONE]":
+                    done = True
+                    continue
+                event = json.loads(event_text)
+                if isinstance(event.get("usage"), dict):
+                    usage = event["usage"]
+                for choice in event.get("choices", []):
+                    delta = choice.get("delta", {})
+                    if delta.get("content"):
+                        piece = str(delta["content"])
+                        content_parts.append(piece)
+                        visible_events.append({"offset_seconds": offset, "content": piece})
+                    if delta.get("reasoning_content"):
+                        reasoning_parts.append(str(delta["reasoning_content"]))
+                    for tool_delta in delta.get("tool_calls", []):
+                        index = int(tool_delta.get("index", 0))
+                        current = tool_parts.setdefault(index, {"index": index, "type": "function", "function": {"name": "", "arguments": ""}})
+                        if first_tool_call_seconds is None:
+                            first_tool_call_seconds = offset
+                        if tool_delta.get("id"):
+                            current["id"] = tool_delta["id"]
+                        function = tool_delta.get("function", {})
+                        if function.get("name"):
+                            current["function"]["name"] += str(function["name"])
+                        if function.get("arguments"):
+                            current["function"]["arguments"] += str(function["arguments"])
+                    if choice.get("finish_reason") is not None:
+                        finish_reason = choice["finish_reason"]
     except urllib.error.HTTPError as error:
         raise RuntimeError(f"API HTTP {error.code}: {error.read().decode('utf-8', 'replace')}") from error
-    finished = time.monotonic()
-    return body, started, finished
+    finished = time.perf_counter()
+    if not done:
+        raise RuntimeError("SSE stream ended without [DONE]")
+    tool_calls = [tool_parts[index] for index in sorted(tool_parts)]
+    for call in tool_calls:
+        if "id" not in call:
+            raise RuntimeError(f"tool-call stream omitted call identifier: {call!r}")
+    body = {"choices": [{"message": {"content": "".join(content_parts), "reasoning_content": "".join(reasoning_parts), "tool_calls": tool_calls}, "finish_reason": finish_reason}], "usage": usage}
+    timing = {"visible_events": visible_events, "first_tool_call_seconds": first_tool_call_seconds}
+    return body, started, finished, timing
 
 
-def observe(label: str, body: dict[str, Any], started: float, finished: float) -> dict[str, Any]:
-    """Normalize one API result without inventing unavailable stream timestamps."""
+def observe(label: str, body: dict[str, Any], started: float, finished: float, timing: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one reconstructed stream with accurately scoped latency fields."""
     choice = body["choices"][0]
     message = choice["message"]
     usage = body.get("usage", {})
     completion_tokens = int(usage.get("completion_tokens", 0))
     elapsed = finished - started
-    # A non-streaming API response cannot expose true first-token arrival, so
-    # elapsed is recorded as end-to-end latency and not mislabeled as TTFT.
+    visible_events = timing["visible_events"]
+    token_gaps = [visible_events[index]["offset_seconds"] - visible_events[index - 1]["offset_seconds"] for index in range(1, len(visible_events))]
     return {
         "label": label,
         "elapsed_seconds": elapsed,
         "prompt_tokens": int(usage.get("prompt_tokens", 0)),
         "completion_tokens": completion_tokens,
         "end_to_end_tps": completion_tokens / elapsed if elapsed else None,
+        "ttft_seconds": visible_events[0]["offset_seconds"] if visible_events else None,
+        "token_gap_seconds": token_gaps,
+        "first_tool_call_seconds": timing["first_tool_call_seconds"],
+        "visible_events": visible_events,
         "finish_reason": choice.get("finish_reason"),
         "content": message.get("content", ""),
         "reasoning_content": message.get("reasoning_content", ""),
@@ -122,8 +183,8 @@ def main() -> int:
     messages: list[dict[str, Any]] = [{"role": "user", "content": "Inspect calculator.py with read_fixture. Do not answer in plain text."}]
     observations: list[dict[str, Any]] = []
     # Turn one must create a structured read request.
-    body, started, finished = request_json(args.base_url, {"model": args.model, "messages": messages, "tools": tools, "tool_choice": "required", "temperature": 0, "max_tokens": args.max_tokens, "stream": False})
-    read_observation = observe("read_call", body, started, finished)
+    body, started, finished, timing = request_json(args.base_url, {"model": args.model, "messages": messages, "tools": tools, "tool_choice": "required", "temperature": 0, "max_tokens": args.max_tokens})
+    read_observation = observe("read_call", body, started, finished, timing)
     read_call = one_required_call(read_observation, "read_fixture")
     if json.loads(read_call["function"]["arguments"]) != {"path": path}:
         raise RuntimeError("read tool arguments differ from constrained fixture")
@@ -131,8 +192,8 @@ def main() -> int:
     messages += [{"role": "assistant", "content": read_observation["content"], "tool_calls": [read_call]}, {"role": "tool", "tool_call_id": read_call["id"], "content": json.dumps({"path": path, "content": fixture_path.read_text(encoding="utf-8")})}, {"role": "user", "content": "Repair the addition bug using apply_exact_patch. Do not answer in plain text."}]
     # Turn two must request the constrained patch. The runner then performs the
     # requested replacement in the sandbox, which is genuine tool-side state.
-    body, started, finished = request_json(args.base_url, {"model": args.model, "messages": messages, "tools": tools, "tool_choice": "required", "temperature": 0, "max_tokens": args.max_tokens, "stream": False})
-    patch_observation = observe("patch_call", body, started, finished)
+    body, started, finished, timing = request_json(args.base_url, {"model": args.model, "messages": messages, "tools": tools, "tool_choice": "required", "temperature": 0, "max_tokens": args.max_tokens})
+    patch_observation = observe("patch_call", body, started, finished, timing)
     patch_call = one_required_call(patch_observation, "apply_exact_patch")
     patch_args = json.loads(patch_call["function"]["arguments"])
     if patch_args != {"path": path, "before": before, "after": after}:
@@ -146,17 +207,20 @@ def main() -> int:
     observations.append(patch_observation)
     messages += [{"role": "assistant", "content": patch_observation["content"], "tool_calls": [patch_call]}, {"role": "tool", "tool_call_id": patch_call["id"], "content": json.dumps({"path": path, "applied": True, "content": expected})}, {"role": "user", "content": "Confirm the verified repair by replying exactly PATCH_APPLIED."}]
     # The final model response is a visible correctness check after tool output.
-    body, started, finished = request_json(args.base_url, {"model": args.model, "messages": messages, "temperature": 0, "max_tokens": args.max_tokens, "stream": False})
-    final_observation = observe("final_confirmation", body, started, finished)
+    body, started, finished, timing = request_json(args.base_url, {"model": args.model, "messages": messages, "temperature": 0, "max_tokens": args.max_tokens})
+    final_observation = observe("final_confirmation", body, started, finished, timing)
     if final_observation["content"].strip() != suite["expected_final"]:
         raise RuntimeError(f"unexpected final content: {final_observation['content']!r}")
     observations.append(final_observation)
-    # Compute only metrics legitimately available from the non-streaming control.
+    # Compute end-to-end, visible TTFT, token-gap, and tool-call timing only
+    # where the corresponding SSE events were actually present.
     durations = [row["elapsed_seconds"] for row in observations]
+    visible_ttft = [row["ttft_seconds"] for row in observations if row["ttft_seconds"] is not None]
+    token_gaps = [gap for row in observations for gap in row["token_gap_seconds"]]
     # Hash the mutated fixture so later evidence consumers can verify the
     # successful tool side effect without trusting a prose summary alone.
     fixture_sha256 = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
-    result = {"schema_version": 1, "passed": True, "scope": suite["description"], "fixture_path": str(fixture_path), "fixture_sha256": fixture_sha256, "observations": observations, "summary": {"turn_count": len(observations), "mean_end_to_end_seconds": statistics.mean(durations), "max_end_to_end_seconds": max(durations), "total_prompt_tokens": sum(row["prompt_tokens"] for row in observations), "total_completion_tokens": sum(row["completion_tokens"] for row in observations), "aggregate_end_to_end_tps": sum(row["completion_tokens"] for row in observations) / sum(durations), "ttft_available": False, "p99_token_gap_available": False}}
+    result = {"schema_version": 2, "passed": True, "scope": suite["description"], "fixture_path": str(fixture_path), "fixture_sha256": fixture_sha256, "observations": observations, "summary": {"turn_count": len(observations), "mean_end_to_end_seconds": statistics.mean(durations), "max_end_to_end_seconds": max(durations), "total_prompt_tokens": sum(row["prompt_tokens"] for row in observations), "total_completion_tokens": sum(row["completion_tokens"] for row in observations), "aggregate_end_to_end_tps": sum(row["completion_tokens"] for row in observations) / sum(durations), "mean_visible_ttft_seconds": statistics.mean(visible_ttft) if visible_ttft else None, "max_visible_ttft_seconds": max(visible_ttft) if visible_ttft else None, "p99_visible_token_gap_seconds": max(token_gaps) if token_gaps else None, "tool_call_turns": sum(row["first_tool_call_seconds"] is not None for row in observations)}}
     args.artifact.parent.mkdir(parents=True, exist_ok=True)
     args.artifact.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return 0
