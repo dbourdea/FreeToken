@@ -12,7 +12,10 @@ set -euo pipefail
 # identity visible in the command itself so the comparison can be reproduced
 # without guessing which llama.cpp build or Qwen quantization was selected.
 readonly ROOT_DIR="/home/david/freetoken-amd"
-readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
+# Permit the protected controller to use the same current isolated source for
+# this server and its benchmark harness, while retaining the old checkout as
+# the compatibility default for existing direct invocations.
+readonly SOURCE_DIR="${FREETOKEN_LLAMA_CONTROL_SOURCE_DIR:-${ROOT_DIR}/source-qwen-harness-d6ee8ce}"
 readonly LLAMA_SERVER="${ROOT_DIR}/llama.cpp-rocm10-b10141/build-rocm10-clang/bin/llama-server"
 readonly MODEL_DIR="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6"
 readonly MODEL_FILE="${MODEL_DIR}/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
