@@ -14,6 +14,7 @@ stops, or reconfigures a server.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import socket
 import statistics
@@ -155,6 +156,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
+    parser.add_argument(
+        "--sample-variation",
+        choices=("none", "prefix_nonce"),
+        default="none",
+        help="Use a unique early prefix for each request so repeated prompts cannot share a full cache entry.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args(argv)
     if args.concurrency < 1:
@@ -178,13 +185,13 @@ def require_expected_host(expected_host: str) -> str:
     return actual_host
 
 
-def request_args(args: argparse.Namespace) -> argparse.Namespace:
+def request_args(args: argparse.Namespace, prompt: str) -> argparse.Namespace:
     """Build the compatible greedy throughput request consumed by shared code."""
 
     return argparse.Namespace(
         base_url=args.base_url,
         model=args.model,
-        prompt=args.prompt,
+        prompt=prompt,
         max_tokens=args.max_tokens,
         timeout_seconds=args.timeout_seconds,
         reasoning_effort="none",
@@ -205,20 +212,40 @@ def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
     return value if isinstance(value, int) and value > 0 else None
 
 
+def usage_cached_tokens(usage: dict[str, Any] | None) -> int | None:
+    """Extract the optional API-reported cache hit count without guessing.
+
+    The cache-neutral mode uses this only as an integrity gate. A missing field
+    remains visible in the raw usage record, while a positive value proves that
+    the per-request nonce was insufficient for this server's cache semantics.
+    """
+
+    details = usage.get("prompt_tokens_details") if isinstance(usage, dict) else None
+    value = details.get("cached_tokens") if isinstance(details, dict) else None
+    return value if isinstance(value, int) and value >= 0 else None
+
+
 def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dict[str, Any]:
     """Release one synchronized request group and retain every request result."""
 
     barrier = threading.Barrier(args.concurrency)
-    workload_args = request_args(args)
     suite_started = time.perf_counter()
 
     def one_request(request_index: int) -> dict[str, Any]:
         """Wait for the group, then record one independent streamed completion."""
 
+        prompt = args.prompt
+        if args.sample_variation == "prefix_nonce":
+            # This nonce is deliberately before the fixed prompt. A radix cache
+            # can still reuse system/template tokens, but it cannot reuse the
+            # expensive user-prompt prefix from an earlier client or round.
+            prompt = f"Concurrent cold prefix nonce: c{round_index}-r{request_index}\n{args.prompt}"
+        workload_args = request_args(args, prompt)
         barrier.wait(timeout=30.0)
         observations, text, started, finished, errors, usage = stream_completion(workload_args)
         generated_tokens = len(tokenizer.encode(text, add_special_tokens=False))
         prompt_tokens = usage_prompt_tokens(usage)
+        cached_tokens = usage_cached_tokens(usage)
         ttft = observations[0].offset_seconds if observations else None
         last = observations[-1].offset_seconds if observations else None
         first_output_offset = started - suite_started + ttft if ttft is not None else None
@@ -239,6 +266,8 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
             errors.append("server did not provide a positive prompt-token count and TTFT for prefill TPS")
         if decode_tps is None:
             errors.append("fewer than two generated tokens or no positive decode interval")
+        if args.sample_variation == "prefix_nonce" and cached_tokens not in {0, None}:
+            errors.append(f"cache-neutral request reported cached_tokens={cached_tokens}")
         return {
             "request_index": request_index,
             "started_offset_seconds": started - suite_started,
@@ -247,6 +276,8 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
             "ttft_seconds": ttft,
             "first_output_offset_seconds": first_output_offset,
             "prompt_tokens": prompt_tokens,
+            "cached_tokens": cached_tokens,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "prefill_tps": prefill_tps,
             "decode_seconds": decode_seconds,
             "decode_tps": decode_tps,
@@ -334,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
             "rounds": args.rounds,
             "max_tokens": args.max_tokens,
             "prompt": args.prompt,
+            "sample_variation": args.sample_variation,
             "reasoning_effort": "none",
             "temperature": 0.0,
             "top_p": 1.0,

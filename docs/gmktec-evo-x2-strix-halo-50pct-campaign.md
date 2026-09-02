@@ -1731,22 +1731,26 @@ the timed harness began. It ran three unique-prefix samples on the qualified
 one-wave, Q4/Q6-overlap, four-request Q4 profile. C92 ran the same harness,
 model file, tokenizer, ROCm 10 stack, loopback API contract, and greedy marker
 retrieval through a four-slot llama.cpp control. Both artifacts report 1,016
-prompt tokens, zero cached prompt tokens per sample, and the exact `azure-17`
-answer for all three samples. The normal Qwen service recovered after 536 C91
-probes and 473 C92 probes respectively.
+prompt tokens and the exact `azure-17` answer for all three samples. C92
+explicitly reports zero cached prompt tokens per sample. C91 does not emit the
+optional cached-token field, so its cache-neutral evidence is the unique early
+nonce and preserved distinct prompt hashes rather than a server counter. The
+normal Qwen service recovered after 536 C91 probes and 473 C92 probes
+respectively.
 
 | Runtime and cache-neutral condition | Cold-prefill TPS, mean | Cold-prefill TPS, per sample | TTFT, mean | Quality and cache gate |
 | --- | ---: | --- | ---: | --- |
-| FreeToken Q4, C91 | 234.359 | 88.783, 307.484, 306.809 | 6.020 s | Three exact `azure-17` results; 0 cached tokens each |
+| FreeToken Q4, C91 | 234.359 | 88.783, 307.484, 306.809 | 6.020 s | Three exact `azure-17` results; distinct early nonces and prompt hashes; cached-token field absent |
 | ROCm 10 llama.cpp Q4_K_M, C92 | 978.625 | 983.153, 961.507, 991.214 | 1.038 s | Three exact `azure-17` results; 0 cached tokens each |
 
 The first C91 request is retained as an initialization-sensitive outlier rather
 than discarded. Its next two requests were still only about 307 TPS despite
-the forced cache miss. C92's samples were consistently about 962 to 991 TPS.
-This proves the C89 prefill difference cannot be dismissed as repeated-prompt
-cache accounting. It does not establish a universal runtime conclusion, since
-the implementations use different serving internals, but it makes
-cache-neutral FreeToken prefill the next optimization target.
+the unique early prompt prefix. C92's samples were consistently about 962 to
+991 TPS with an explicit zero-cache report. This proves the C89 prefill
+difference cannot be dismissed as full repeated-user-prompt cache accounting.
+It does not establish a universal runtime conclusion, since the implementations
+use different serving internals, but it makes cache-neutral FreeToken prefill
+the next optimization target.
 
 **Decision: do not promote a serving configuration from this diagnostic alone.**
 Use the paired artifacts to profile and gate only real Q4 prefill candidates:
