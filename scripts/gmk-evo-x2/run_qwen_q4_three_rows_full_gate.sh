@@ -33,6 +33,7 @@ readonly CANDIDATE_URL="http://127.0.0.1:1922/v1"
 readonly MOE_K_TWO_ROWS="${FREETOKEN_Q4_MOE_K_TWO_ROWS:-0}"
 readonly MOE_K_THREE_ROWS="${FREETOKEN_Q4_MOE_K_THREE_ROWS:-0}"
 readonly MOE_K_FOUR_ROWS="${FREETOKEN_Q4_MOE_K_FOUR_ROWS:-0}"
+readonly MOE_K_FIVE_ROWS="${FREETOKEN_Q4_MOE_K_FIVE_ROWS:-0}"
 readonly Q4_K_FOUR_ROWS="${FREETOKEN_Q4_Q4_K_FOUR_ROWS:-0}"
 readonly Q5_K_FOUR_ROWS="${FREETOKEN_Q4_Q5_K_FOUR_ROWS:-0}"
 readonly GROUPED_PREFILL_MIN_TOKENS="${FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS:-0}"
@@ -43,11 +44,12 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
 [[ "${MOE_K_TWO_ROWS}" == "0" || "${MOE_K_TWO_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_TWO_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${MOE_K_THREE_ROWS}" == "0" || "${MOE_K_THREE_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_THREE_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${MOE_K_FOUR_ROWS}" == "0" || "${MOE_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
+[[ "${MOE_K_FIVE_ROWS}" == "0" || "${MOE_K_FIVE_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_MOE_K_FIVE_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${Q4_K_FOUR_ROWS}" == "0" || "${Q4_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q4_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
 [[ "${Q5_K_FOUR_ROWS}" == "0" || "${Q5_K_FOUR_ROWS}" == "1" ]] || { echo "FREETOKEN_Q4_Q5_K_FOUR_ROWS must be 0 or 1" >&2; exit 2; }
 # A candidate must use exactly one row grouping. Combining groups would hide
 # causality and makes the quality and TPS evidence impossible to attribute.
-[[ $((MOE_K_TWO_ROWS + MOE_K_THREE_ROWS + MOE_K_FOUR_ROWS)) -le 1 ]] || { echo "select at most one Q4 row-sharing candidate" >&2; exit 2; }
+[[ $((MOE_K_TWO_ROWS + MOE_K_THREE_ROWS + MOE_K_FOUR_ROWS + MOE_K_FIVE_ROWS)) -le 1 ]] || { echo "select at most one Q4 row-sharing candidate" >&2; exit 2; }
 [[ "${GROUPED_PREFILL_MIN_TOKENS}" =~ ^[0-9]+$ ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS must be a non-negative integer" >&2; exit 2; }
 [[ "${GROUPED_PREFILL_MODE}" == "both" || "${GROUPED_PREFILL_MODE}" == "gate_up" || "${GROUPED_PREFILL_MODE}" == "down" ]] || { echo "FREETOKEN_Q4_GROUPED_PREFILL_MODE must be both, gate_up, or down" >&2; exit 2; }
 for required in "${LAUNCHER}" "${QUALITY}" "${SCHEDULER}" "${CONCURRENT}" "${TOKENIZER}" \
@@ -104,6 +106,7 @@ FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_PREFILL_OVERLAP=1 \
 FREETOKEN_GGUF_MOE_K_TWO_ROWS="${MOE_K_TWO_ROWS}" \
 FREETOKEN_GGUF_MOE_K_THREE_ROWS="${MOE_K_THREE_ROWS}" \
 FREETOKEN_GGUF_MOE_K_FOUR_ROWS="${MOE_K_FOUR_ROWS}" \
+FREETOKEN_GGUF_MOE_K_FIVE_ROWS="${MOE_K_FIVE_ROWS}" \
 FREETOKEN_GGUF_Q4_K_FOUR_ROWS="${Q4_K_FOUR_ROWS}" \
 FREETOKEN_GGUF_Q5_K_FOUR_ROWS="${Q5_K_FOUR_ROWS}" \
 FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS="${GROUPED_PREFILL_MIN_TOKENS}" \
@@ -142,5 +145,5 @@ PYTHONPATH="${SOURCE_DIR}/python" "${VENV_PYTHON}" "${CONCURRENT}" \
     --expected-host david-Gmktec-x2-2 --concurrency 4 --rounds 3 --max-tokens 256 \
     --artifact "${ARTIFACT_DIR}/concurrent-c4.json" >"${ARTIFACT_DIR}/concurrent-c4.log" 2>&1
 
-printf 'q4_candidate_quality_scheduler_and_c4=passed moe_k_two_rows=%s moe_k_three_rows=%s moe_k_four_rows=%s q4_k_four_rows=%s q5_k_four_rows=%s grouped_prefill_min_tokens=%s grouped_prefill_mode=%s\n' \
-    "${MOE_K_TWO_ROWS}" "${MOE_K_THREE_ROWS}" "${MOE_K_FOUR_ROWS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" "${GROUPED_PREFILL_MIN_TOKENS}" "${GROUPED_PREFILL_MODE}" >"${ARTIFACT_DIR}/result.txt"
+printf 'q4_candidate_quality_scheduler_and_c4=passed moe_k_two_rows=%s moe_k_three_rows=%s moe_k_four_rows=%s moe_k_five_rows=%s q4_k_four_rows=%s q5_k_four_rows=%s grouped_prefill_min_tokens=%s grouped_prefill_mode=%s\n' \
+    "${MOE_K_TWO_ROWS}" "${MOE_K_THREE_ROWS}" "${MOE_K_FOUR_ROWS}" "${MOE_K_FIVE_ROWS}" "${Q4_K_FOUR_ROWS}" "${Q5_K_FOUR_ROWS}" "${GROUPED_PREFILL_MIN_TOKENS}" "${GROUPED_PREFILL_MODE}" >"${ARTIFACT_DIR}/result.txt"
