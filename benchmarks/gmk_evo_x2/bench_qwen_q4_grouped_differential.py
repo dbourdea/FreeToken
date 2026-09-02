@@ -69,10 +69,16 @@ def _difference(reference: torch.Tensor, candidate: torch.Tensor) -> dict[str, o
     expected = reference.detach().cpu().contiguous()
     observed = candidate.detach().cpu().contiguous()
     delta = (expected.float() - observed.float()).abs()
+    differing_elements = int(torch.count_nonzero(delta).item())
+    element_count = int(delta.numel())
     return {
         "reference_sha256": _digest(expected),
         "candidate_sha256": _digest(observed),
         "storage_equal": bool(torch.equal(expected, observed)),
+        # Counts keep a tiny residual visible without hiding it behind a mean
+        # across millions of output elements. Exact quality still requires zero.
+        "differing_elements": differing_elements,
+        "element_count": element_count,
         "maximum_absolute_difference": float(delta.max().item()),
         "mean_absolute_difference": float(delta.mean().item()),
     }

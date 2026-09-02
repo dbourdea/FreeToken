@@ -301,6 +301,8 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('"--route-pattern"', contents)
         self.assertIn('"single-expert"', contents)
         self.assertIn('"route_pattern": args.route_pattern', contents)
+        self.assertIn('"differing_elements": differing_elements', contents)
+        self.assertIn('"element_count": element_count', contents)
 
     def test_grouped_kernels_recompute_the_q8_sum_for_vector_alignment(self) -> None:
         """The grouped Q4 and Q5 candidate must not use the rounded stored Q8 sum term."""
