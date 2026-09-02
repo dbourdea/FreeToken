@@ -39,6 +39,12 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--json", required=True, type=Path, help="new JSON result artifact")
     parser.add_argument("--layer", type=int, default=0, help="routed expert layer to materialize")
     parser.add_argument("--tokens", type=int, default=1024, help="deterministic prefill-shaped activation rows")
+    parser.add_argument(
+        "--route-pattern",
+        choices=("cyclic", "single-expert"),
+        default="cyclic",
+        help="deterministic expert routing used to distinguish route handling from dot-product arithmetic",
+    )
     args = parser.parse_args()
     if not args.model.is_file():
         parser.error("--model must be an existing GGUF file")
@@ -97,6 +103,22 @@ def _materialize_layer(model: Path, layer: int) -> tuple[torch.Tensor, torch.Ten
     return gate_up, down, int(config.hidden_size), int(config.num_experts), int(config.num_experts_per_tok), cache
 
 
+def _topk_ids(tokens: int, top_k: int, expert_count: int, pattern: str, device: torch.device) -> torch.Tensor:
+    """Build route ids with either mixed-expert coverage or one repeated expert.
+
+    The cyclic pattern exercises the normal grouped sort and scatter behavior.
+    The single-expert pattern leaves the same number of tokens and top-k routes
+    intact while removing cross-expert ordering as a possible source of error.
+    """
+
+    if pattern == "cyclic":
+        routes = torch.arange(tokens * top_k, dtype=torch.int32, device=device)
+        return routes.remainder(expert_count).reshape(tokens, top_k).contiguous()
+    if pattern == "single-expert":
+        return torch.zeros((tokens, top_k), dtype=torch.int32, device=device)
+    raise ValueError(f"unsupported route pattern: {pattern}")
+
+
 def main() -> int:
     """Execute vector and grouped projections, compare them, and write raw evidence."""
 
@@ -105,8 +127,7 @@ def main() -> int:
     device = gate_up_weights.device
     generator = torch.Generator(device=device).manual_seed(20260902)
     hidden_states = torch.randn((args.tokens, hidden_size), dtype=torch.bfloat16, device=device, generator=generator)
-    routes = torch.arange(args.tokens * top_k, dtype=torch.int32, device=device)
-    topk_ids = routes.remainder(expert_count).reshape(args.tokens, top_k).contiguous()
+    topk_ids = _topk_ids(args.tokens, top_k, expert_count, args.route_pattern, device)
     topk_weights = torch.full((args.tokens, top_k), 1.0 / top_k, dtype=torch.float32, device=device)
 
     # The reference is the exact qualified vector route used in normal serving.
@@ -129,11 +150,12 @@ def main() -> int:
     torch.cuda.synchronize(device)
 
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "classification": "real-weight grouped-versus-vector numerical differential, not API TPS",
         "model": str(args.model.resolve()),
         "layer": args.layer,
         "tokens": args.tokens,
+        "route_pattern": args.route_pattern,
         "top_k": top_k,
         "num_experts": expert_count,
         "weight_shapes": {"gate_up": list(gate_up_weights.shape), "down": list(down_weights.shape)},

@@ -282,6 +282,17 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn("grep -qx 'stop'", contents)
         self.assertIn('normal_completion "${ARTIFACT_DIR}/preflight.json"', contents)
 
+    def test_grouped_differential_exposes_single_expert_route_isolation(self) -> None:
+        """The numerical gate must be able to remove mixed-expert sorting from its diagnosis."""
+
+        repository_root = Path(__file__).resolve().parents[2]
+        harness = repository_root / "benchmarks" / "gmk_evo_x2" / "bench_qwen_q4_grouped_differential.py"
+        contents = harness.read_text(encoding="utf-8")
+
+        self.assertIn('"--route-pattern"', contents)
+        self.assertIn('"single-expert"', contents)
+        self.assertIn('"route_pattern": args.route_pattern', contents)
+
     def test_dense_q8_timeshare_controller_owns_detached_recovery(self) -> None:
         """A lost SSH parent must not leave the normal service stopped after Q8 screening."""
 
