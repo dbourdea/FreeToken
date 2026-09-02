@@ -2013,3 +2013,48 @@ controls that C91 through C97 already ruled out. Preserve
 `q4-c105-two-rows-rocprof-prefill-r1-20260902`, including the SQLite database,
 trace summary, exact workload JSON, response, profiler log, prewarm record,
 and normal-service health evidence.
+
+### C106-C107: exact Q4_K/Q5_K HIP three-row vector candidate
+
+C106 extended the retained row-sharing experiment from two adjacent output rows
+to three. One 32-lane HIP wave accumulates three neighboring Q4_K or Q5_K
+output rows, while every row preserves its established packed vector-dot call
+order, lane ownership, XOR reduction order, and destination address. The
+candidate is selected only by `FREETOKEN_GGUF_MOE_K_THREE_ROWS=1`; it is
+default-off and mutually exclusive with the two-row experiment.
+
+The real-weight component screen used the first Qwen expert layer, 1,024
+deterministic BF16 activations, all 256 experts, top-k eight routing, eight
+warmups, and twenty device-timed repetitions. C106 exactly matched the saved
+generic-vector output, including SHA-256
+`46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d`.
+
+| Configuration | Median component device time | Exact output result |
+| --- | ---: | --- |
+| C106 same-run generic vector | 80.848 ms | Reference |
+| Prior qualified two-row candidate, C98 | 74.488 ms | Same hash |
+| Three-row candidate, C106 | 72.805 ms | Same hash |
+
+C107 advanced the candidate to the isolated OpenAI API quality and
+cache-neutral cold-prefill gate. It passed the exact canary, exact arithmetic,
+and JSON-schema responses. It then returned `azure-17` exactly for all three
+unique-prefix, 1,016-token marker-retrieval requests. The protected normal
+Qwen API recovered through a real completion after 425 probes.
+
+| Cold-prefill configuration | Samples, TPS | Mean TPS | p99 TTFT | Quality |
+| --- | --- | ---: | ---: | --- |
+| Two-row candidate, C100 | 332.798 to 338.715 | 336.599 | 3.019 s | API suite passed |
+| Three-row candidate, C107 | 352.640, 360.634, 360.580 | 357.951 | 2.881 s | API suite and marker retrieval passed |
+
+C107 is a 6.34 percent cold-prefill increase over C100's same-model,
+same-shape two-row API result, with the required visible-output checks passing.
+It is not yet the complete serving qualification: scheduler decode, C4
+aggregate prefill and decode, and tail-latency gates remain before any default
+promotion decision.
+
+**Decision: retain the three-row implementation as the leading default-off
+candidate and advance it to the complete scheduler and concurrent gate.**
+Preserve `q4-c106-three-rows-component-r1-20260902` and
+`q4-c107-three-rows-api-quality-r1-20260902`, including output reference and
+parity records, timed samples, quality-suite responses, unique prompt hashes,
+raw SSE events, recovery logs, and normal-service completion evidence.
