@@ -25,7 +25,7 @@ readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
 readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
 # Select the candidate family without changing the normal serving default.
 # ``grouped`` retains the original route-sort experiment. ``two_rows`` and
-# ``three_rows`` select isolated HIP row-sharing vector experiments. Every
+# ``three_rows`` and ``four_rows`` select isolated HIP row-sharing vector experiments. Every
 # option remains component-only and none changes recovery or production defaults.
 readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
 # Keep occupancy selection explicit in evidence. One is the qualified two-row
@@ -42,8 +42,8 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
     echo "FREETOKEN_Q4_GROUPED_MODE must be both, gate_up, or down" >&2
     exit 2
 }
-[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" || "${COMPONENT_CANDIDATE}" == "three_rows" ]] || {
-    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped, two_rows, or three_rows" >&2
+[[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" || "${COMPONENT_CANDIDATE}" == "three_rows" || "${COMPONENT_CANDIDATE}" == "four_rows" ]] || {
+    echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped, two_rows, three_rows, or four_rows" >&2
     exit 2
 }
 [[ "${TWO_ROWS_MIN_BLOCKS}" == "1" || "${TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
@@ -139,6 +139,12 @@ else
         row_flag=(--vector-three-rows)
         row_env="FREETOKEN_GGUF_MOE_K_THREE_ROWS=1"
         row_name="three-rows"
+    elif [[ "${COMPONENT_CANDIDATE}" == "four_rows" ]]; then
+        # Preserve the same strict real-weight reference and compiler knobs as
+        # lower-row trials. Only the candidate's output-row grouping changes.
+        row_flag=(--vector-four-rows)
+        row_env="FREETOKEN_GGUF_MOE_K_FOUR_ROWS=1"
+        row_name="four-rows"
     fi
     env "${row_env}" PYTHONPATH="${SOURCE_DIR}/python" \
     TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" TRITON_CACHE_DIR="${TRITON_CACHE}" \

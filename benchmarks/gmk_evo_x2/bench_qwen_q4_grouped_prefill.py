@@ -33,6 +33,7 @@ _GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
 _GROUPED_PREFILL_MODE_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MODE"
 _MOE_K_TWO_ROWS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS"
 _MOE_K_THREE_ROWS_ENV = "FREETOKEN_GGUF_MOE_K_THREE_ROWS"
+_MOE_K_FOUR_ROWS_ENV = "FREETOKEN_GGUF_MOE_K_FOUR_ROWS"
 _MOE_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS"
 _Q4_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_Q4_K_TWO_ROWS_MIN_BLOCKS"
 _Q5_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_Q5_K_TWO_ROWS_MIN_BLOCKS"
@@ -65,6 +66,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Opt into the HIP Q4_K/Q5_K three-output-row vector candidate. "
             "This is an isolated exact-output component experiment and is "
+            "never selected by the normal serving configuration."
+        ),
+    )
+    parser.add_argument(
+        "--vector-four-rows",
+        action="store_true",
+        help=(
+            "Opt into the HIP Q4_K/Q5_K four-output-row vector candidate. "
+            "It is an isolated exact-output component experiment and is "
             "never selected by the normal serving configuration."
         ),
     )
@@ -105,16 +115,16 @@ def parse_args() -> argparse.Namespace:
         parser.error("reference output is missing")
     if args.rtol < 0 or args.atol < 0 or not torch.cuda.is_available():
         parser.error("tolerances must be non-negative and the native ROCm GPU must be available")
-    if (args.vector_two_rows or args.vector_three_rows) and args.mode != "vector":
+    if (args.vector_two_rows or args.vector_three_rows or args.vector_four_rows) and args.mode != "vector":
         parser.error("row-sharing vector options are valid only with --mode vector")
-    if args.vector_two_rows and args.vector_three_rows:
+    if sum((args.vector_two_rows, args.vector_three_rows, args.vector_four_rows)) > 1:
         parser.error("select at most one row-sharing vector candidate")
     if (
         args.two_rows_min_blocks != "1"
         or args.q4_two_rows_min_blocks not in (None, "1")
         or args.q5_two_rows_min_blocks not in (None, "1")
-    ) and not (args.vector_two_rows or args.vector_three_rows):
-        parser.error("--two-rows-min-blocks=2 requires --vector-two-rows")
+    ) and not (args.vector_two_rows or args.vector_three_rows or args.vector_four_rows):
+        parser.error("--two-rows-min-blocks=2 requires a row-sharing vector candidate")
     return args
 
 
@@ -178,6 +188,7 @@ def main() -> int:
     # time, keeping this candidate unavailable to normal server processes.
     os.environ[_MOE_K_TWO_ROWS_ENV] = "1" if args.vector_two_rows else "0"
     os.environ[_MOE_K_THREE_ROWS_ENV] = "1" if args.vector_three_rows else "0"
+    os.environ[_MOE_K_FOUR_ROWS_ENV] = "1" if args.vector_four_rows else "0"
     os.environ[_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV] = args.two_rows_min_blocks
     os.environ[_Q4_K_TWO_ROWS_MIN_BLOCKS_ENV] = (
         args.q4_two_rows_min_blocks or args.two_rows_min_blocks
@@ -257,6 +268,7 @@ def main() -> int:
         "grouped_prefill_mode": args.grouped_mode if args.mode == "grouped" else "vector",
         "moe_k_two_rows": args.vector_two_rows,
         "moe_k_three_rows": args.vector_three_rows,
+        "moe_k_four_rows": args.vector_four_rows,
         "moe_k_two_rows_min_blocks": int(args.two_rows_min_blocks),
         "q4_k_two_rows_min_blocks": int(args.q4_two_rows_min_blocks or args.two_rows_min_blocks),
         "q5_k_two_rows_min_blocks": int(args.q5_two_rows_min_blocks or args.two_rows_min_blocks),
