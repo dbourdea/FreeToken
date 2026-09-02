@@ -981,3 +981,39 @@ it now derives its active source checkout from its own location rather than a
 deleted disposable checkout.  Preserve
 `nvfp4-c39-api-timing-baseline-20260901T233228Z` and the corresponding
 `candidate/mmv-y4` commits `5cdb7a5` and `a0d59ca`.
+
+### C40-C41: dense Q8_0 component-screen admission and detached recovery
+
+The ROCm profile identified dense Q8_0 vector work as the largest remaining
+single GPU-time category.  Before altering that kernel, the campaign added a
+real-weight microbenchmark that maps the qualified Q4_K_M GGUF's original
+packed Q8_0 tensors and invokes FreeToken's production one-token vector
+operator.  This is deliberately a device-time selection screen, not API TPS:
+model load, prompt processing, routing, scheduling, HTTP, and compilation are
+outside the timed loop.
+
+The first C40 attempt was invalidated.  An interactive controller connection
+ended while the isolated extension was preparing, so its cleanup handler could
+not be relied upon.  Its partial output is retained only as a failure record;
+it makes no timing or performance claim.  The normal service was restored and
+verified before work continued.
+
+C41 replaced that fragile path with a detached controller that owns both the
+normal-service stop and recovery trap.  It requires an explicit exact recovery
+source plus matching native kernel cache, refuses JIT during timed execution,
+and considers recovery successful only after a real completion returns HTTP
+200.  The normal API was restored after 388 readiness probes and returned the
+deterministic `READY.` completion before the controller exited.
+
+| Real packed Q8_0 tensor | Matrix shape, input to output | Mean device time, 300 repetitions |
+| --- | ---: | ---: |
+| `blk.0.attn_qkv.weight` | 2,048 to 8,192 | 25.235 microseconds |
+| `blk.0.ssm_out.weight` | 4,096 to 2,048 | 15.135 microseconds |
+
+**Decision: dense Q8_0 replacement is admitted only to a shape-specific
+component lane.** A modern llama.cpp port must first match these original
+packed-weight outputs and improve at least one traced Q8_0 shape by one percent
+without regressing the other by more than one percent.  Only then may it use a
+quality-gated API window.  Preserve
+`q4-c41-dense-q8-detached-20260901T235234Z`, including its manifest, both raw
+kernel JSON files, controller log, recovery probe, and cleanup record.
