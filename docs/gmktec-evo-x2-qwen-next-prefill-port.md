@@ -91,9 +91,17 @@ scoped repair investigation of an existing native FreeToken ROCm/HIP path.
 C123 reached a terminal zero-swap failure after session 48. Sessions 1 through
 47 had `runner_swap_kib=0`; session 48 preserved all three deterministic
 visible answers but reported 128,376 KiB for the isolated Q4 process group.
-The controller stopped the candidate and restored the normal Qwen service,
-whose health endpoint subsequently returned `status: ok` with
-`maintenance: serving`. The first corrected diagnostic may now run only in a
-new isolated artifact after it captures per-process swap ownership. It must
-retain the strict zero-swap gate and may not claim a 24-hour qualification from
-the C123 partial run.
+The controller stopped the candidate and restored the normal Qwen service.
+
+C124 completed the required per-process follow-up as an isolated 60-session,
+minute-cadence diagnostic. All 60 deterministic three-turn conversations and
+the postflight sample retained `runner_swap_kib=0`, including session 48 and
+later sessions. Per-process telemetry recorded the HTTP parent, worker, and
+helper memory states at every boundary, so a future recurrence is now directly
+attributable. The first post-start request took 52.663 s and remains in the
+all-sample summary; sessions 2 through 60 are separately reported as a
+steady-state view with 414.83 ms maximum TTFT and 26.36 ms p99 token gap. The
+controller restored the normal Qwen service to `status: ok` and
+`maintenance: serving`, followed by a completed OpenAI-compatible
+`RECOVERY_OK` response. C124 is an effective one-hour stability diagnostic,
+not a substitute for the requested 24-hour qualification.
