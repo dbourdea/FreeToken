@@ -1017,3 +1017,29 @@ without regressing the other by more than one percent.  Only then may it use a
 quality-gated API window.  Preserve
 `q4-c41-dense-q8-detached-20260901T235234Z`, including its manifest, both raw
 kernel JSON files, controller log, recovery probe, and cleanup record.
+
+### C42: eight-wave dense Q8_0 parity and component-performance gate
+
+The first modern RDNA4-inspired dense Q8_0 candidate divided each output row
+across eight physical waves and reduced their partial sums before writing the
+result.  It was built in an isolated extension cache and screened only against
+the two real packed tensors admitted in C41.  The candidate met the numerical
+parity gate: its attention output differed from the baseline by at most
+0.0009765625 with the declared relative tolerance of 0.001 and absolute
+tolerance of 0.01, while its SSM output was bit-identical.
+
+That correctness result did not translate into a speed improvement.  The
+attention projection rose from 27.790 to 37.708 microseconds, a 35.69 percent
+regression.  The SSM projection rose from 15.301 to 17.543 microseconds, a
+14.65 percent regression.  Both measurements used 30 warmup calls and 300
+timed production-kernel calls on the same device, source model, and input
+shapes.
+
+**Decision: reject the eight-wave Q8_0 variant before API testing.** It fails
+the component admission rule because neither traced shape improves and both
+regress by substantially more than one percent.  The normal NVFP4 API was
+recovered by the detached controller and returned a real HTTP 200 completion
+after 389 readiness attempts.  Preserve
+`q4-c42-q8-multiwave-parity-20260902T000752Z`, including the four raw kernel
+JSON records, reference outputs, candidate parity evidence, controller log,
+and recovery cleanup record.
