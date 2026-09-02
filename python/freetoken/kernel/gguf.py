@@ -80,9 +80,13 @@ def _hip_gguf_cflags() -> list[str]:
     # the wider reduction changes floating accumulation order and must pass a
     # real packed-weight equivalence screen before it can reach API testing.
     q8_mmv_warps = os.environ.get(_HIP_GGUF_Q8_MMV_WARPS_ENV, "1").strip()
-    if q8_mmv_warps not in {"1", "8"}:
+    # The Q8 dense-vector implementation has one-, two-, four-, and eight-wave
+    # launch specializations. Keep the selectable set finite so each geometry
+    # remains independently reproducible and eligible for real-tensor parity
+    # screening before any caller can use it for a serving experiment.
+    if q8_mmv_warps not in {"1", "2", "4", "8"}:
         raise RuntimeError(
-            f"{_HIP_GGUF_Q8_MMV_WARPS_ENV} must be 1 or 8, got {q8_mmv_warps!r}"
+            f"{_HIP_GGUF_Q8_MMV_WARPS_ENV} must be 1, 2, 4, or 8, got {q8_mmv_warps!r}"
         )
     # Keep the Q6_K experiment a binary, reviewed launch choice.  Wider Q6
     # reductions alter accumulation order and therefore require the component

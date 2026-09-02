@@ -255,7 +255,7 @@ static void mul_mat_vec_q8_0_q8_1_cuda(
   const dim3 block_dims(WARP_SIZE, GGML_CUDA_MMV_Y, 1);
   mul_mat_vec_q<scalar_t, QK8_0, QI8_0, block_q8_0, VDR_Q8_0_Q8_1_MMVQ, vec_dot_q8_0_q8_1>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
-#elif GGML_CUDA_Q8_MMV_WARPS == 8
+#elif GGML_CUDA_Q8_MMV_WARPS == 2 || GGML_CUDA_Q8_MMV_WARPS == 4 || GGML_CUDA_Q8_MMV_WARPS == 8
   // One output row per block and eight waves per row match the selected modern
   // RDNA4 Q8_0 strategy while leaving every non-Q8 dispatch unchanged.
   const dim3 block_nums(nrows, nvecs, 1);
@@ -263,7 +263,7 @@ static void mul_mat_vec_q8_0_q8_1_cuda(
   mul_mat_vec_q8_0_q8_1_warped<scalar_t, GGML_CUDA_Q8_MMV_WARPS>
       <<<block_nums, block_dims, 0, stream>>>(vx, vy, dst, ncols, nrows, nvecs);
 #else
-#error "GGML_CUDA_Q8_MMV_WARPS must be 1 or 8"
+#error "GGML_CUDA_Q8_MMV_WARPS must be 1, 2, 4, or 8"
 #endif
 }
 
