@@ -1956,3 +1956,28 @@ candidate as the only qualified Q4_K/Q5_K row-pair implementation.** Preserve
 `q4-c103-two-rows-occupancy2-component-r1-20260902`, including both compiler
 configurations, timing samples, output hashes, exact-parity record, controller
 logs, cleanup record, and normal-service completion evidence.
+
+### C104: Q5_K-only two-block occupancy closure
+
+The combined C103 occupancy result could have concealed an opposite response
+from the Q4_K and Q5_K kernels. C104 therefore separated their compile-time
+residency targets: Q4_K remained at the qualified one-block target and only
+Q5_K compiled for two resident blocks per compute unit. It used the same real
+Qwen component geometry, deterministic activations, exact vector-output
+reference, and twenty timed samples as C103.
+
+| Q4_K minimum blocks | Q5_K minimum blocks | Median device time | Exact output SHA-256 |
+| ---: | ---: | ---: | --- |
+| 1 | 1, qualified two-row kernel | 74.488 ms | `46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d` |
+| 1 | 2, C104 candidate | 74.505 ms | Same |
+
+The C104 output was bit-identical, but its 0.02 percent timing difference is
+within ordinary run variation and does not establish an improvement. C104 is
+therefore rejected before API testing. Along with C103, it closes the one-versus
+two-block occupancy family for both routed formats. The protected normal Qwen
+service recovered after 485 completion probes.
+
+**Decision: retain one-block residency for both Q4_K and Q5_K two-row kernels.**
+Preserve `q4-c104-q5-two-block-component-r1-20260902`, including compiler
+settings, raw samples, output hashes, exact-parity record, controller logs,
+cleanup record, and normal-service completion evidence.
