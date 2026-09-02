@@ -188,3 +188,14 @@ decode reduction. The guarded controller then restored the normal service only
 after a real `READY` completion at recovery attempt 439. The candidate has met
 the quality and matched API performance admission criteria; extended-tail and
 endurance qualification remain required before a default change.
+
+C140 attempted the required endurance configuration but was rejected at
+preflight because the isolated candidate HTTP parent already owned 351,704 KiB
+of swapped pages. It ran no quality session, so it supplies no TPS or
+stability claim. C141 then validated a reversible repair without relaxing that
+gate: after a controlled swap drain, the candidate parent and each worker had
+zero swap, the exact three-turn state suite passed, and postflight remained at
+zero candidate swap. The controller restored configured swap before rebuilding
+the protected normal service. The next run is the same configuration under the
+full 1,440-session, minute-cadence endurance contract; only that completed
+artifact can satisfy the remaining long-duration qualification.
