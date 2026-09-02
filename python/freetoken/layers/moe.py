@@ -460,13 +460,48 @@ class OffloadMoELayer(MoELayer):
         topk_weights: torch.Tensor,
         topk_ids: torch.Tensor,
     ) -> torch.Tensor:
-        """Prefill exceptional Q6_K layers without mixed-cache overlap choreography."""
-        if cache.prefill_overlap or auxiliary.prefill_overlap:
-            raise NotImplementedError(
-                "Qwen GGUF Q6_K down layers require --disable-moe-prefill-overlap"
-            )
+        """Run an exceptional Q6_K prefill layer with two independent cache layouts.
+
+        The main cache owns Q4_K gate/up rows and Q5_K placeholder down rows, while
+        the auxiliary cache owns the byte-exact Q6_K down rows.  When overlap is
+        enabled, both caches use their own two-buffer regions.  They must be started,
+        prefetched, waited on, and released together so neither cache can reuse a
+        buffer before the mixed-format fused kernel has finished reading it.
+        """
         auxiliary_layer_id = self.auxiliary_layer_id
         assert auxiliary_layer_id is not None
+        if cache.prefill_overlap:
+            # The primary cache's layer ids are the model MoE layer ids.  Its normal
+            # helper starts the chunk at model layer zero and queues this plus next
+            # primary layer before returning read-safe Q4_K gate/up views.
+            primary_views = self._wait_prefill_overlap(cache)
+            # Auxiliary ids are dense only over exceptional Q6_K layers.  Starting at
+            # id zero therefore fences this independent copy stream exactly once per
+            # prefill chunk, even when the first exceptional layer is late in the model.
+            if auxiliary_layer_id == 0:
+                auxiliary.begin_prefill()
+            auxiliary.prefetch_prefill_layer(auxiliary_layer_id)
+            auxiliary.prefetch_prefill_layer(auxiliary_layer_id + 1)
+            auxiliary_views = auxiliary.wait_prefill_layer(auxiliary_layer_id)
+            try:
+                from freetoken.moe.fused_q4_k_q6_k import fused_experts_gguf_q4_k_q6_k
+
+                gate_up, _unused_down = primary_views
+                (down,) = auxiliary_views
+                return fused_experts_gguf_q4_k_q6_k(
+                    hidden_states,
+                    gate_up,
+                    down,
+                    topk_weights,
+                    topk_ids,
+                    topk_ids,
+                    self.activation,
+                )
+            finally:
+                # Record compute-stream completion before either copy stream may reuse
+                # its parity-selected buffer for a later expert layer.
+                cache.release_prefill_layer(self.layer_id)
+                auxiliary.release_prefill_layer(auxiliary_layer_id)
         cache.materialize_layer(self.layer_id)
         auxiliary.materialize_layer(auxiliary_layer_id)
         cache.copy_missing()

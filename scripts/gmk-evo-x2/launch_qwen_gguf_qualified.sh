@@ -26,6 +26,10 @@ readonly MEMORY_RATIO="${3:-0.25}"
 # baseline therefore retain the exact eager-decode behavior.  A value of one
 # captures only the single-stream decode shape used by this Q4 benchmark.
 readonly CUDA_GRAPH_MAX_BS="${4:-0}"
+# Keep the historically qualified synchronous Q6 prefill path as the default.
+# An isolated candidate may set this to one only after its mixed-cache parity
+# gate passes, which omits the disabling CLI flag and enables double buffering.
+readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
 
 # Keep durable models, kernel caches, and artifacts separate from the checked
 # out source so source switching cannot delete benchmark evidence or weights.
@@ -116,6 +120,10 @@ validate_paths() {
     [[ -x "${ROOT_DIR}/.venv/bin/python" ]] || { echo "missing benchmark Python" >&2; return 1; }
     [[ "${MEMORY_RATIO}" =~ ^0\.[0-9]+$|^1\.0+$ ]] || { echo "invalid memory ratio: ${MEMORY_RATIO}" >&2; return 1; }
     [[ "${CUDA_GRAPH_MAX_BS}" =~ ^[0-9]+$ ]] || { echo "invalid CUDA graph max batch size: ${CUDA_GRAPH_MAX_BS}" >&2; return 1; }
+    [[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
+        echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
+        return 1
+    }
     [[ "${EXTENSION_CACHE}" == "${ROOT_DIR}/cache/"* ]] || { echo "extension cache must be under ${ROOT_DIR}/cache" >&2; return 1; }
 }
 
@@ -145,17 +153,23 @@ case "${ACTION}" in
         # stack, while PYTHONPATH and TORCH_EXTENSIONS_DIR select the reviewed
         # Q4 source and prebuilt extension cache without changing the login
         # shell or normal service environment.
+        # Construct the final server arguments as an array so the opt-in overlap
+        # mode can remove exactly one safety-default flag without shell splitting.
+        serve_args=(
+            --model-path "${MODEL_PATH}" --served-model-name "${SERVED_MODEL}"
+            --host 127.0.0.1 --port "${PORT}" --max-running-requests 4
+            --attention-backend triton --moe-backend offload --nvfp4-backend triton
+            --expert-load serial --moe-cache-auto --memory-ratio "${MEMORY_RATIO}"
+            --max-seq-len-override 8192 --kv-reserve-tokens 8192
+            --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" --disable-pynccl
+        )
+        if [[ "${PREFILL_OVERLAP}" == "0" ]]; then
+            serve_args+=(--disable-moe-prefill-overlap)
+        fi
         ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
         PYTHONPATH=python TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
         setsid nohup "${ROOT_DIR}/.venv/bin/python" -m freetoken.cli serve \
-            --model-path "${MODEL_PATH}" \
-            --served-model-name "${SERVED_MODEL}" \
-            --host 127.0.0.1 --port "${PORT}" \
-            --max-running-requests 4 \
-            --attention-backend triton --moe-backend offload --nvfp4-backend triton \
-            --expert-load serial --moe-cache-auto --memory-ratio "${MEMORY_RATIO}" \
-            --max-seq-len-override 8192 --kv-reserve-tokens 8192 \
-            --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" --disable-pynccl --disable-moe-prefill-overlap \
+            "${serve_args[@]}" \
             >"${LOG_FILE}" 2>&1 &
         echo "$!" >"${PID_FILE}"
         ;;

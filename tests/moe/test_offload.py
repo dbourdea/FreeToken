@@ -208,6 +208,58 @@ def test_offload_moe_layer_prefill_overlap_prefetches_layers_into_two_buffers(mo
     assert prefill_down_buffer.data_ptr() == cache.bank_caches["down"].data_ptr()
 
 
+def test_q6_prefill_overlap_keeps_primary_and_auxiliary_buffers_independent(monkeypatch):
+    """The mixed Q4_K/Q6_K route must wait and release both cache layouts exactly once."""
+    from freetoken.layers.moe import OffloadMoELayer
+    from freetoken.moe.offload_cache import OffloadMoeCache
+
+    _init_tp()
+    experts = 4
+    layer = OffloadMoELayer(layer_id=0, num_experts=experts, top_k=2, hidden_size=8, intermediate_size=16)
+    primary = OffloadMoeCache(
+        num_layers=1,
+        num_experts=experts,
+        cache_size=2 * experts,
+        device=torch.device("cpu"),
+        prefill_overlap=True,
+    )
+    auxiliary = OffloadMoeCache(
+        num_layers=1,
+        num_experts=experts,
+        cache_size=2 * experts,
+        device=torch.device("cpu"),
+        prefill_overlap=True,
+    )
+    primary.set_bank_sources(
+        {"gate_up": [torch.randn(experts, 32, 8)], "down": [torch.randn(experts, 8, 16)]}
+    )
+    # The production side cache registers just its Q6_K down bank.  The CPU test
+    # changes the generic cache schema before source registration to exercise the
+    # same one-view contract without compiling the mixed-format GPU kernel.
+    auxiliary.bank_schema = ("down",)
+    auxiliary.set_bank_sources({"down": [torch.randn(experts, 8, 20)]})
+    layer.offload_cache = primary
+    layer.auxiliary_offload_cache = auxiliary
+    layer.auxiliary_layer_id = 0
+    observed = []
+
+    def fake_fused(hidden, gate_up, down, weights, primary_ids, auxiliary_ids, activation):
+        observed.append((gate_up.clone(), down.clone(), primary_ids.clone(), auxiliary_ids.clone()))
+        return hidden + 1
+
+    monkeypatch.setattr("freetoken.moe.fused_q4_k_q6_k.fused_experts_gguf_q4_k_q6_k", fake_fused)
+    hidden = torch.randn(1, 8)
+    ids = torch.tensor([[1, 3]], dtype=torch.int32)
+    out = layer._prefill_q6_down_routed(primary, auxiliary, hidden, torch.tensor([[0.6, 0.4]]), ids)
+    assert torch.equal(out, hidden + 1)
+    assert len(observed) == 1
+    assert torch.equal(observed[0][0], primary.bank_sources["gate_up"][0])
+    assert torch.equal(observed[0][1], auxiliary.bank_sources["down"][0])
+    assert observed[0][2].tolist() == observed[0][3].tolist() == [[1, 3]]
+    assert primary._prefill_buffer_released == [True, True]
+    assert auxiliary._prefill_buffer_released == [True, True]
+
+
 def test_offload_moe_cache_prefill_overlap_requires_two_layer_slots():
     from freetoken.moe.offload_cache import OffloadMoeCache
 

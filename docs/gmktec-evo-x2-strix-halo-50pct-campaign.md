@@ -1196,3 +1196,40 @@ a real HTTP 200 completion after 481 readiness attempts.  Preserve
 `q4-c54-graph-bs1-parity-tps-20260902T025327Z`, including parity evidence,
 all raw scheduler samples, quality response, controller log, and recovery
 record.
+
+### C55: mixed Q4_K/Q6_K prefill-overlap gate
+
+The Qwen Q4_K_M checkpoint has three late routed-expert layers whose down
+projections use byte-exact Q6_K rows, while the primary routed cache holds
+Q4_K gate/up rows and Q5_K down rows.  The previous implementation disabled
+all asynchronous MoE prefill overlap for this model because the two packed
+layouts require separate caches.  C55 retained those independent caches and
+added matched double-buffer lifecycle handling for each one: begin, prefetch,
+wait, mixed-format fused compute, and release.  It does not convert,
+reinterpret, or approximate any GGUF weight.
+
+The focused unit gate verified that the primary and auxiliary buffers carry the
+expected source tensors, keep identical routed expert IDs, and release both
+cache buffers after the fused call.  The API candidate then produced the exact
+same-source AIME output hash `3302eda43396` as C52 before the scheduler suite
+was allowed to run.  Three warm scored samples used the same fixed prompt and
+Q4 one-wave GDN source as C52.
+
+| Setting | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| Synchronous Q6 cache control, C52 | 2,832.541 | 48.090 | 0.427887 s | Exact, `3302eda43396` |
+| Mixed-cache prefill overlap, C55 | 2,920.936 | 48.620 | 0.415089 s | Exact, `3302eda43396` |
+
+Relative to C52, C55 improves client-visible prefill by 3.12 percent, decode
+by 1.10 percent, and reduces warm TTFT by 2.99 percent.  The result clears the
+quality and repeatability gates and improves every measured serving metric,
+but remains far below the campaign's 50 percent target.
+
+**Decision: retain this candidate for follow-up confirmation, not promotion
+yet.** The normal NVFP4 API was restored and verified with a real HTTP 200
+completion after 482 recovery probes.  C55 also exposed that this expected
+multi-minute reload was hard to observe while in progress, so the controller
+now writes an explicit `recovery-progress.txt` heartbeat.  Preserve
+`q4-c55-q6-prefill-overlap-20260902T031634Z`, including the unit gate, exact
+quality parity file, three raw scheduler samples, summary JSON, recovery log,
+and cleanup evidence.

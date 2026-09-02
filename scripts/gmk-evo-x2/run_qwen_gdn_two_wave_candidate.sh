@@ -20,6 +20,9 @@ readonly GDN_NUM_WARPS="${FREETOKEN_GDN_CANDIDATE_WARPS:-2}"
 # by this benchmark.  Zero preserves eager execution and one captures only the
 # fixed batch-one path, avoiding an unreviewed batch-shape expansion.
 readonly CUDA_GRAPH_MAX_BS="${FREETOKEN_Q4_CUDA_GRAPH_MAX_BS:-0}"
+# Enable the candidate's repaired mixed Q4_K/Q6_K double-buffer prefill path
+# only when this controller is explicitly invoked for that parity-gated study.
+readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
 # Keep all inputs below the host-owned FreeToken root rather than relying on the
 # caller's working directory.
 readonly ROOT_DIR="/home/david/freetoken-amd"
@@ -52,6 +55,10 @@ readonly CANDIDATE_REQUEST='{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[
     echo "FREETOKEN_Q4_CUDA_GRAPH_MAX_BS must be 0 or 1" >&2
     exit 2
 }
+[[ "${PREFILL_OVERLAP}" == "0" || "${PREFILL_OVERLAP}" == "1" ]] || {
+    echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
+    exit 2
+}
 
 # Save a POST response and print only its status code, allowing callers to use
 # the code as an unambiguous readiness gate while retaining the response body.
@@ -67,17 +74,26 @@ completion_status() {
 # This must be idempotent because it is invoked by the EXIT trap after success,
 # failure, interrupt, or a failed candidate startup.
 recover_normal_service() {
+    # Publish recovery state before stopping the candidate so an external monitor
+    # can distinguish a deliberate multi-minute model reload from a stalled job.
+    printf 'recovery_state=starting\n' >"${ARTIFACT_DIR}/recovery-progress.txt"
     FREETOKEN_GDN_NUM_WARPS=1 "${LAUNCHER}" stop "${ARTIFACT_DIR}/candidate" 2>/dev/null || true
     "${NORMAL_START}" >"${ARTIFACT_DIR}/recovery-start.txt" 2>&1 || true
     for attempt in $(seq 1 600); do
         code="$(completion_status http://127.0.0.1:1919/v1/chat/completions "${NORMAL_REQUEST}" "${ARTIFACT_DIR}/recovery-probe.json" || true)"
         if [[ "${code}" == "200" ]]; then
             printf 'normal_api_ready=1 attempts=%s\n' "${attempt}" >"${ARTIFACT_DIR}/cleanup.txt"
+            printf 'recovery_state=complete attempts=%s\n' "${attempt}" >"${ARTIFACT_DIR}/recovery-progress.txt"
             return 0
         fi
+        # Rewrite one small status file each probe so observers have a live,
+        # machine-readable heartbeat without filling the artifact with 503 bodies.
+        printf 'recovery_state=waiting attempt=%s last_http=%s\n' \
+            "${attempt}" "${code:-transport_error}" >"${ARTIFACT_DIR}/recovery-progress.txt"
         sleep 1
     done
     printf 'normal_api_ready=0 attempts=600\n' >"${ARTIFACT_DIR}/cleanup.txt"
+    printf 'recovery_state=failed attempts=600\n' >"${ARTIFACT_DIR}/recovery-progress.txt"
     return 1
 }
 
@@ -106,6 +122,7 @@ preflight_code="$(completion_status http://127.0.0.1:1919/v1/chat/completions "$
 # and the normal service cache untouched.
 FREETOKEN_Q4_EXTENSION_CACHE_DIR="${ROOT_DIR}/cache/torch_extensions-gdn-${GDN_NUM_WARPS}-f1baf13" \
 FREETOKEN_GDN_NUM_WARPS="${GDN_NUM_WARPS}" \
+FREETOKEN_Q4_PREFILL_OVERLAP="${PREFILL_OVERLAP}" \
 bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" 0.25 "${CUDA_GRAPH_MAX_BS}"
 
 # Wait for an actual candidate completion.  A model-list response is explicitly

@@ -642,22 +642,23 @@ class Engine:
                     raise NotImplementedError(
                         "Qwen GGUF Q6_K down layers currently support only GPU offload decode"
                     )
-                if config.moe_prefill_overlap:
-                    raise NotImplementedError(
-                        "Qwen GGUF Q6_K down layers require --disable-moe-prefill-overlap"
-                    )
                 if not banks.auxiliary_layer_ids:
                     raise ValueError("auxiliary expert banks are missing their model-layer mapping")
-                # Each exceptional Qwen layer contains all experts, so a 256-slot
-                # cache makes its prefill bank a direct expert-id mapping and also
-                # avoids reloading a Q6_K row after its first decode use.
+                # The Q6_K rows use a distinct packed geometry, so they retain their
+                # own cache.  Overlap borrows two full expert-layer buffers from that
+                # cache, requiring 2E slots just like the primary cache.  Decode keeps
+                # working because the normal LRU cache is the same unified allocation.
                 auxiliary_cache = OffloadMoeCache(
                     num_layers=len(banks.auxiliary_layer_ids),
                     num_experts=config.model_config.num_experts,
-                    cache_size=config.model_config.num_experts,
+                    cache_size=(
+                        2 * config.model_config.num_experts
+                        if config.moe_prefill_overlap
+                        else config.model_config.num_experts
+                    ),
                     device=self.device,
                     cache_policy=config.moe_cache_policy,
-                    prefill_overlap=False,
+                    prefill_overlap=config.moe_prefill_overlap,
                     prefill_hit_d2d=False,
                     quant_format=banks.auxiliary_quant_format,
                     decode_target="gpu",
