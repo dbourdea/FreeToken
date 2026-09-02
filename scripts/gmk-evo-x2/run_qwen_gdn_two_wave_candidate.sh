@@ -52,6 +52,16 @@ readonly QUALITY_REFERENCE_SHA1="${FREETOKEN_GDN_REFERENCE_SHA1:-}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 readonly CANDIDATE_REQUEST='{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
+# Establish this controller's immutable evidence directory before any preflight
+# request writes a response or the recovery trap takes ownership.  A collision
+# fails closed, while a new directory lets every later lifecycle path retain
+# its own logs rather than assuming callers created it manually.
+[[ ! -e "${ARTIFACT_DIR}" ]] || {
+    echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2
+    exit 2
+}
+mkdir -p "${ARTIFACT_DIR}"
+
 # Reject misspelled or unsupported launch choices before the protected service
 # is stopped, preventing an accidental unreviewed Triton configuration.
 [[ "${GDN_NUM_WARPS}" == "1" || "${GDN_NUM_WARPS}" == "2" ]] || {
