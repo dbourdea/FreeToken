@@ -1262,3 +1262,23 @@ improving prefill, decode, and TTFT.  Preserve
 `q4-c56-q6-prefill-overlap-repeat-20260902T032914Z` beside C55, including its
 quality parity, raw scheduler samples, recovery-progress heartbeat, and
 cleanup result.
+
+### C57: prefill cache-hit D2D capability gate
+
+C57 enabled the existing optional prefill cache-hit reuse flag on top of the
+promoted C55 overlap configuration.  Its purpose was to reuse resident expert
+rows device-to-device on later prefills instead of copying a full expert layer
+from host memory.  The candidate passed exact same-source output parity and
+completed its scheduler lifecycle, but the server log recorded the decisive
+runtime capability result before the scored work: the active ROCm build cannot
+bind `cudaMemcpyBatchAsync`, so FreeToken disabled the requested hit-D2D path
+and fell back to full-layer host copies.
+
+**Decision: reject prefill hit-D2D for this ROCm stack.** It is not an active
+optimization here, so its scheduler values cannot be attributed to D2D reuse.
+Keep the flag opt-in and retain the explicit fallback log as the admission
+gate.  The controller restored and verified the normal NVFP4 API after 479
+recovery probes.  Preserve `q4-c57-prefill-hit-d2d-20260902T034248Z`, including
+the server log lines that identify the unavailable batch-copy binding, exact
+quality parity, raw scheduler artifacts, recovery-progress heartbeat, and
+cleanup evidence.
