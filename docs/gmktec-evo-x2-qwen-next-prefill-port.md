@@ -164,3 +164,14 @@ and Q5 kernels differ from the vector kernels in activation quantization,
 route-index interpretation, and accumulation or conversion order. It must
 preserve the established vector route as the reference and remain default-off
 until exact equality is demonstrated.
+
+C138 separately enabled the exact four-row vector treatment for Q5_K only.
+The Q4_K and every other vector route remained on the qualified generic path.
+Against a same-run generic-vector control, the Q5-only candidate reduced median
+device time from 81.093 ms to 74.634 ms, a 7.97 percent improvement, while
+preserving the real-weight output SHA-256 exactly and recording zero maximum
+and mean absolute tensor difference. It is therefore distinct from the
+non-identical grouped-matrix family and is eligible for the complete API gate.
+The next execution must use the canonical deterministic quality fingerprint,
+then measure cache-neutral prefill, scheduler, C4, TTFT, token-gap tails, and
+protected-service recovery before considering default selection.
