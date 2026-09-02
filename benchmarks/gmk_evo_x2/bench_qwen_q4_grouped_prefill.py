@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Compare real Qwen Q4_K_M long-prefill MoE vector and grouped HIP kernels.
+
+The benchmark materializes the actual first Qwen routed-expert layer through the
+same two-slot ``OffloadMoeCache`` used by serving, then runs the production
+Q4_K/Q5_K fused expert function on a deterministic long-prompt-shaped activation
+batch.  ``vector`` preserves the accepted production dispatch.  ``grouped``
+enables only the experimental route-sort plus matrix-style dispatch.  The gate
+saves the reference output, checks numerical equivalence, and records warmup
+and device-time samples.  It is a real-weight component screen, not API TPS.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import statistics
+from pathlib import Path
+
+import torch
+
+from freetoken.distributed import set_tp_info, try_get_tp_info
+from freetoken.models.qwen3_5_moe.config import parse_gguf_config
+from freetoken.models.qwen3_5_moe.gguf import load_q4_k_q5_k_expert_sources
+from freetoken.moe.fused_q4_k_q5_k import fused_experts_gguf_q4_k_q5_k
+from freetoken.moe.offload_cache import OffloadMoeCache
+from freetoken.utils import cached_load_hf_config
+
+
+_GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse immutable model/evidence locations and bounded timing parameters."""
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--mode", choices=("vector", "grouped"), required=True)
+    parser.add_argument("--layer", type=int, default=0)
+    parser.add_argument("--tokens", type=int, default=1024)
+    parser.add_argument("--warmup", type=int, default=8)
+    parser.add_argument("--repetitions", type=int, default=20)
+    parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--save-output", type=Path)
+    parser.add_argument("--reference-output", type=Path)
+    parser.add_argument("--rtol", type=float, default=0.001)
+    parser.add_argument("--atol", type=float, default=0.01)
+    args = parser.parse_args()
+    if not args.model.is_file():
+        parser.error("model must be an existing GGUF file")
+    if args.tokens <= 1 or args.warmup < 1 or args.repetitions < 1:
+        parser.error("tokens must exceed one and warmup/repetitions must be positive")
+    if args.json.exists() or (args.save_output and args.save_output.exists()):
+        parser.error("refusing to overwrite an existing component artifact")
+    if args.reference_output and not args.reference_output.is_file():
+        parser.error("reference output is missing")
+    if args.rtol < 0 or args.atol < 0 or not torch.cuda.is_available():
+        parser.error("tolerances must be non-negative and the native ROCm GPU must be available")
+    return args
+
+
+def digest(tensor: torch.Tensor) -> str:
+    """Return a stable hash of exact output storage for artifact comparison."""
+
+    return hashlib.sha256(tensor.contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
+
+
+def materialize_layer(
+    model: Path, layer: int
+) -> tuple[torch.Tensor, torch.Tensor, int, int, int, OffloadMoeCache]:
+    """Load one real primary Q4/Q5 expert layer into serving-equivalent GPU banks.
+
+    The cache call intentionally runs outside the timed interval.  This separates
+    streamed-bank transfer from the hypothesis under test: vector versus grouped
+    packed-expert math after the full layer is already resident on the device.
+    Returned views remain valid for this short-lived benchmark process.
+    """
+
+    if try_get_tp_info() is None:
+        set_tp_info(rank=0, size=1)
+    config = parse_gguf_config(cached_load_hf_config(str(model)))
+    if not 0 <= layer < config.num_layers:
+        raise ValueError(f"layer {layer} outside [0, {config.num_layers})")
+    sources = load_q4_k_q5_k_expert_sources(str(model), config)
+    cache = OffloadMoeCache(
+        num_layers=config.num_layers,
+        num_experts=config.num_experts,
+        cache_size=2 * config.num_experts,
+        device=torch.device("cuda", torch.cuda.current_device()),
+        prefill_overlap=True,
+        quant_format="q4_k_q5_k",
+    )
+    cache.set_bank_sources(sources.primary)
+    cache.begin_prefill()
+    cache.prefetch_prefill_layer(layer)
+    gate_up, down = cache.wait_prefill_layer(layer)
+    torch.cuda.synchronize(cache.device)
+    # Keep cache alive by attaching it to the returned view objects.  PyTorch
+    # tensors permit Python attributes only indirectly, so return the cache as
+    # a live local captured by the caller through this tuple's final object.
+    return (
+        gate_up,
+        down,
+        int(config.hidden_size),
+        int(config.num_experts),
+        int(config.num_experts_per_tok),
+        cache,
+    )
+
+
+def main() -> int:
+    """Run component timing, enforce output parity, and write durable evidence."""
+
+    args = parse_args()
+    grouped_threshold = args.tokens if args.mode == "grouped" else 0
+    os.environ[_GROUPED_PREFILL_MIN_TOKENS_ENV] = str(grouped_threshold)
+    gate_up, down, hidden_size, num_experts, top_k, cache = materialize_layer(args.model, args.layer)
+    device = gate_up.device
+    generator = torch.Generator(device=device)
+    generator.manual_seed(20260902)
+    activations = torch.randn(
+        (args.tokens, hidden_size), dtype=torch.bfloat16, device=device, generator=generator
+    )
+    # Use every actual expert across the batch.  This creates a deterministic
+    # long-prefill worklist without substituting synthetic weights or a reduced
+    # expert set, while retaining the model's real top-k cardinality.
+    flat_routes = torch.arange(args.tokens * top_k, device=device, dtype=torch.int32)
+    topk_ids = (flat_routes.remainder(num_experts)).reshape(args.tokens, top_k).contiguous()
+    topk_weights = torch.full(
+        (args.tokens, top_k), 1.0 / top_k, dtype=torch.float32, device=device
+    )
+
+    def kernel() -> torch.Tensor:
+        """Execute precisely the production fused Q4_K/Q5_K expert function."""
+
+        return fused_experts_gguf_q4_k_q5_k(
+            activations, gate_up, down, topk_weights, topk_ids, "silu"
+        )
+
+    for _ in range(args.warmup):
+        output = kernel()
+    torch.cuda.synchronize(device)
+    if not torch.isfinite(output).all():
+        raise RuntimeError("Q4_K/Q5_K prefill component produced non-finite output")
+
+    samples_ms: list[float] = []
+    for _ in range(args.repetitions):
+        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        start.record()
+        output = kernel()
+        end.record()
+        end.synchronize()
+        samples_ms.append(float(start.elapsed_time(end)))
+    output_cpu = output.detach().cpu().contiguous()
+    parity: dict[str, object] | None = None
+    if args.reference_output:
+        reference = torch.load(args.reference_output, map_location="cpu", weights_only=True).contiguous()
+        torch.testing.assert_close(output_cpu, reference, rtol=args.rtol, atol=args.atol)
+        delta = (output_cpu.float() - reference.float()).abs()
+        parity = {
+            "reference_sha256": digest(reference),
+            "rtol": args.rtol,
+            "atol": args.atol,
+            "maximum_absolute_difference": float(delta.max().item()),
+            "mean_absolute_difference": float(delta.mean().item()),
+        }
+    if args.save_output:
+        args.save_output.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(output_cpu, args.save_output)
+    result = {
+        "schema_version": 1,
+        "classification": "real-weight Q4_K/Q5_K grouped-prefill component screen, not API TPS",
+        "mode": args.mode,
+        "model": str(args.model.resolve()),
+        "layer": args.layer,
+        "tokens": args.tokens,
+        "top_k": top_k,
+        "num_experts": num_experts,
+        "weight_shapes": {"gate_up": list(gate_up.shape), "down": list(down.shape)},
+        "warmup": args.warmup,
+        "repetitions": args.repetitions,
+        "device": torch.cuda.get_device_name(device),
+        "hip": torch.version.hip,
+        "torch": torch.__version__,
+        "grouped_prefill_min_tokens": grouped_threshold,
+        "samples_ms": samples_ms,
+        "median_device_ms": statistics.median(samples_ms),
+        "output_sha256": digest(output_cpu),
+        "parity": parity,
+    }
+    args.json.parent.mkdir(parents=True, exist_ok=True)
+    args.json.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Keep the cache alive through all output copies and result serialization.
+    del cache
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
