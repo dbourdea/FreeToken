@@ -83,6 +83,27 @@ runner_swap_kib() {
     printf '%s\n' "${total}"
 }
 
+# Report the individual members of the already-qualified server group.  The
+# aggregate swap count is the pass/fail invariant, while this diagnostic record
+# makes a failure actionable by identifying whether the HTTP parent, a worker,
+# or a helper process owns the swapped pages.  It intentionally reports every
+# member, including zero-swap members, so a later process exit cannot erase the
+# process-tree context from the immutable session telemetry.
+record_runner_process_memory() {
+    local server_pid pgid pid vm_swap vm_rss command
+    server_pid="$(qualified_server_pid)" || return 1
+    pgid="$(ps -o pgid= -p "${server_pid}" | tr -d ' ')"
+    [[ "${pgid}" == "${server_pid}" ]] || return 1
+    while read -r pid; do
+        [[ -r "/proc/${pid}/status" && -r "/proc/${pid}/cmdline" ]] || continue
+        vm_swap="$(awk '/^VmSwap:/{print $2}' "/proc/${pid}/status")"
+        vm_rss="$(awk '/^VmRSS:/{print $2}' "/proc/${pid}/status")"
+        command="$(tr '\0' ' ' < "/proc/${pid}/cmdline")"
+        printf 'runner_process pid=%s vm_swap_kib=%s vm_rss_kib=%s command=%s\n' \
+            "${pid}" "${vm_swap:-0}" "${vm_rss:-0}" "${command}"
+    done < <(ps -eo pid=,pgid= | awk -v group="${pgid}" '$2 == group {print $1}')
+}
+
 # Record whole-host and process-scoped memory facts separately.  Whole-host
 # swap remains useful for diagnosing host contention, but only the runner value
 # is a pass or fail condition for this model-service qualification.
@@ -96,6 +117,7 @@ record_memory() {
     {
         printf 'captured_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'runner_swap_kib=%s\n' "${runner_swap}"
+        record_runner_process_memory
         printf 'whole_host_swap_kib=%s\n' "$(awk '/SwapTotal/{t=$2}/SwapFree/{f=$2} END{print t-f}' /proc/meminfo)"
         awk '/^(MemAvailable|SwapCached|SwapTotal|SwapFree):/{print}' /proc/meminfo
         free -k
