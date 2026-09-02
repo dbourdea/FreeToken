@@ -1147,3 +1147,29 @@ C52.  Preserve `q4-c49-gdn-two-wave-qwen-capable-20260902T015107Z`,
 `q4-c52-gdn-one-wave-parity-tps-20260902T022307Z`, including their raw quality
 responses, parity files, scheduler summaries, controller logs, and recovery
 records.
+
+### C53: dense Q6_K two-wave real-tensor component gate
+
+The next profile-selected candidate was the dense Q6_K vector path, which had
+474.200 ms of aggregate GPU time across 265 calls in the captured ROCprof
+trace.  The qualified Q4_K_M GGUF contains one real two-dimensional Q6_K
+tensor, `output.weight`, with shape 248,320 by 2,048.  C53 timed the production
+one-token vector binding against that original packed tensor with 30 warmups
+and 300 timed calls at each launch shape.
+
+The established one-wave baseline averaged 1,777.113 microseconds per call.
+The two-wave candidate averaged 1,831.008 microseconds, a 3.03 percent
+regression.  It did meet the declared output tolerance, with a maximum absolute
+difference of 0.0078125 against the saved one-wave result, below the 0.01
+absolute threshold.  The raw output digest changed because reordered floating
+point accumulation is not bit-identical, which is why the tolerance evidence is
+preserved rather than treating the hashes as equal.
+
+**Decision: reject the two-wave dense Q6_K geometry before API testing.** It
+fails the component admission rule on measured device time, so no quality,
+prefill, decode, or service-level claim is valid for it.  The detached
+controller restored the normal NVFP4 API and verified a real HTTP 200
+completion after 388 readiness attempts.  Preserve
+`q4-c53-q6-two-wave-component-20260902T024124Z`, including baseline and
+candidate JSON, saved reference output, build caches, controller log, and
+recovery record.
