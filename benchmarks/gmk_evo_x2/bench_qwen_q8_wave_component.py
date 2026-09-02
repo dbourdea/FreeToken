@@ -53,7 +53,11 @@ def _tensor(model: Path, name: str) -> GgufTensor:
 
     for tensor in iter_gguf_tensors(str(model)):
         if tensor.name == name:
-            if tensor.ggml_type != GGML_Q8_0 or tensor.ndim != 2:
+            # ``GgufTensor`` exposes its logical dimensions through ``shape``
+            # rather than a NumPy-style ``ndim`` attribute. Checking the
+            # length prevents a packed one-dimensional payload from reaching
+            # the dense vector binding with an invalid row or column contract.
+            if tensor.ggml_type != GGML_Q8_0 or len(tensor.shape) != 2:
                 raise ValueError(f"{name} must be a two-dimensional Q8_0 tensor")
             return tensor
     raise KeyError(f"GGUF does not contain {name}")
