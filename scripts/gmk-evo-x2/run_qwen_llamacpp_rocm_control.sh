@@ -23,6 +23,9 @@ readonly ARTIFACT_ROOT="${1:-${ROOT_DIR}/artifacts/qwen35b-llamacpp-rocm10-$(dat
 readonly BENCHMARK_DIR="${ARTIFACT_ROOT}/benchmark"
 readonly SERVER_LOG="${ARTIFACT_ROOT}/llama-server.log"
 readonly SERVER_PID_FILE="${ARTIFACT_ROOT}/llama-server.pid"
+# Keep concurrent measurement opt-in so the existing single-client control is
+# unchanged unless a protected time-share controller explicitly requests C4.
+readonly CONCURRENT_CLIENTS="${GMK_EVO_X2_QWEN_CONCURRENT_CLIENTS:-0}"
 
 # Refuse ambiguous or partial input before allocating GPU memory. The matching
 # FreeToken tokenizer counts generated text consistently across both endpoints.
@@ -40,6 +43,10 @@ if [[ ! -d "${TOKENIZER_DIR}" ]]; then
 fi
 if [[ -e "${ARTIFACT_ROOT}" ]]; then
     echo "error: artifact root already exists: ${ARTIFACT_ROOT}" >&2
+    exit 2
+fi
+if [[ "${CONCURRENT_CLIENTS}" != "0" && "${CONCURRENT_CLIENTS}" != "4" ]]; then
+    echo "error: GMK_EVO_X2_QWEN_CONCURRENT_CLIENTS must be 0 or 4" >&2
     exit 2
 fi
 
@@ -113,6 +120,17 @@ GMK_EVO_X2_QWEN_BASE_URL="${BASE_URL}" \
 GMK_EVO_X2_QWEN_MODEL_NAME="${MODEL_NAME}" \
 GMK_EVO_X2_QWEN_TOKENIZER_DIR="${TOKENIZER_DIR}" \
     bash "${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh" "${BENCHMARK_DIR}"
+
+# Use the same synchronized four-client client harness as the FreeToken Q4
+# control when explicitly requested. The JSON retains API usage, aggregate
+# prompt-prefill TPS, aggregate decode TPS, TTFT, and token-gap evidence.
+if [[ "${CONCURRENT_CLIENTS}" == "4" ]]; then
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_control.py" \
+        --base-url "${BASE_URL}" --model "${MODEL_NAME}" \
+        --tokenizer "${TOKENIZER_DIR}" --artifact "${ARTIFACT_ROOT}/concurrent-c4.json" \
+        --concurrency 4 --rounds 3 >"${ARTIFACT_ROOT}/concurrent-c4.log" 2>&1
+fi
 
 if [[ "${GMK_EVO_X2_QWEN_QUALITY_SUITE:-}" == "1" ]]; then
     # The optional suite uses only deterministic visible-output controls.  Keep
