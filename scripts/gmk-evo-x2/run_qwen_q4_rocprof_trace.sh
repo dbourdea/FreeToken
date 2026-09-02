@@ -125,9 +125,10 @@ is_profile_process() {
         [[ "${command}" == *"--port ${Q4_PORT}"* ]]
 }
 
-# Request graceful rocprof finalization first.  The bounded wait protects the
-# normal service from an indefinitely stuck trace while preserving enough time
-# for rocprofv3 to write its SQLite database.
+# Request graceful rocprof finalization first.  The bounded escalation protects
+# the normal service from an indefinitely stuck trace while preserving enough
+# time for rocprofv3 to write its SQLite database.  Every signal is scoped to
+# the verified dedicated candidate process group, never to the normal service.
 finalize_profile() {
     [[ -n "${profile_pid}" ]] || return 0
     kill -0 "${profile_pid}" 2>/dev/null || return 0
@@ -146,7 +147,24 @@ finalize_profile() {
         kill -0 "${profile_pid}" 2>/dev/null || return 0
         sleep 1
     done
-    echo "profiler did not finalize within 90 seconds" >&2
+    # ROCprof can persist after consuming SIGINT even after its database has
+    # been flushed.  Escalate only the process group that is still proven to
+    # belong to this artifact, giving its Python workers a short TERM window.
+    echo "profiler ignored SIGINT for 90 seconds; requesting TERM" >&2
+    kill -TERM -- "-${pgid}" || true
+    for _ in $(seq 1 30); do
+        kill -0 "${profile_pid}" 2>/dev/null || return 0
+        sleep 1
+    done
+    # A hung HIP worker must not hold the GPU and block recovery indefinitely.
+    # The prevalidated group identity above makes this last resort precise.
+    echo "profiler ignored TERM for 30 seconds; forcing candidate group exit" >&2
+    kill -KILL -- "-${pgid}" || true
+    for _ in $(seq 1 30); do
+        kill -0 "${profile_pid}" 2>/dev/null || return 0
+        sleep 1
+    done
+    echo "profiler candidate remained alive after group KILL" >&2
     return 1
 }
 
