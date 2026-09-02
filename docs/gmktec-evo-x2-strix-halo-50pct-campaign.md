@@ -1886,3 +1886,46 @@ full scheduler/decode gate.** Preserve
 tensor, parity hash, timing samples, quality-suite raw responses, cold prompt
 hashes, raw SSE events, controller logs, cleanup records, and normal-service
 completion evidence.
+
+### C101-C102: complete scheduler and decode gate for the two-row candidate
+
+C101 intentionally remains a rejected harness run. Its candidate generated
+the established deterministic AIME output hash `3302eda43396`, but the older
+controller's absolute reference was the stale, incompatible
+`0acef4eab6f4`. It stopped before scheduler measurement and restored the
+normal service after 452 completion probes. This is a recorded controller
+reference mismatch, not a performance or quality result.
+
+C102 repeated the complete candidate gate with the controller's documented
+same-source reference set explicitly to `3302eda43396`. The observed hash
+matched exactly. The controller then completed three fixed scheduler samples
+and three synchronized C4 rounds on the same 30 percent, one-wave,
+prefill-overlap, four-request profile. The protected normal Qwen API recovered
+through a real completion after 430 probes.
+
+| Metric | Prior qualified generic-vector result | Exact HIP two-row result, C102 | Interpretation |
+| --- | ---: | ---: | --- |
+| AIME deterministic output hash | `3302eda43396` | `3302eda43396` | Exact same-source quality parity |
+| Scheduler client prefill TPS, mean | 3,118.903 | 3,079.005 | 1.28 percent lower |
+| Scheduler decode TPS, mean | 49.137 | 48.700 | 0.89 percent lower |
+| Scheduler warm TTFT, mean | 0.388612 s | 0.393638 s | 1.29 percent higher |
+| C4 aggregate prefill TPS, mean | 4,557.900 | 4,759.396 | 4.42 percent higher |
+| C4 aggregate decode TPS, mean | 91.257 | 92.921 | 1.82 percent higher |
+| C4 p99 TTFT | 1.104 s | 1.059 s | 4.07 percent lower |
+| C4 p99 token gap | 44.352 ms | 41.079 ms | 7.38 percent lower |
+
+The exact two-row kernel is a qualified quality-preserving improvement for the
+four-client aggregate path and tail behavior, but not an across-the-board
+winner: its normal single-request scheduler prefill and decode results are
+slightly lower than the prior qualified generic-vector result. Together with
+the cache-neutral C100 result, this shows that the candidate improves a
+specific vector component and cold single-request prefill, while a larger
+end-to-end gain remains constrained by other parts of the serving path.
+
+**Decision: keep the two-row implementation default-off until a promotion
+profile can improve the primary serving metrics without tradeoff.** It is a
+retained exact-output candidate and a proven optimization direction, not the
+campaign's requested 50 percent end-to-end result. Preserve
+`q4-c101-two-rows-full-scheduler-r1-20260902` as rejected reference-mismatch
+evidence and `q4-c102-two-rows-full-scheduler-r1-20260902` as the valid full
+quality, scheduler, concurrency, and recovery evidence.
