@@ -22,6 +22,11 @@ readonly MODEL="qwen36-35b-a3b-q4km-gguf-amd"
 # change the recovery server or the default Q4 launch profile.
 readonly MOE_K_TWO_ROWS="${FREETOKEN_Q4_MOE_K_TWO_ROWS:-0}"
 readonly MOE_K_THREE_ROWS="${FREETOKEN_Q4_MOE_K_THREE_ROWS:-0}"
+# Grouped prefill is a separate, opt-in candidate.  Keep its threshold and
+# scope explicit so an inherited shell setting cannot make an artifact
+# ambiguous or affect the protected recovery launch.
+readonly GROUPED_PREFILL_MIN_TOKENS="${FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS:-0}"
+readonly GROUPED_PREFILL_MODE="${FREETOKEN_Q4_GROUPED_PREFILL_MODE:-both}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
@@ -35,6 +40,14 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
 }
 [[ ! ( "${MOE_K_TWO_ROWS}" == "1" && "${MOE_K_THREE_ROWS}" == "1" ) ]] || {
     echo "select at most one Q4 row-sharing candidate" >&2
+    exit 2
+}
+[[ "${GROUPED_PREFILL_MIN_TOKENS}" =~ ^[0-9]+$ ]] || {
+    echo "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS must be a non-negative integer" >&2
+    exit 2
+}
+[[ "${GROUPED_PREFILL_MODE}" == "both" || "${GROUPED_PREFILL_MODE}" == "q4_gate_up" || "${GROUPED_PREFILL_MODE}" == "q5_down" ]] || {
+    echo "FREETOKEN_Q4_GROUPED_PREFILL_MODE must be both, q4_gate_up, or q5_down" >&2
     exit 2
 }
 for required in "${LAUNCHER}" "${HARNESS}" "${QUALITY_SUITE}" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"; do
@@ -86,6 +99,8 @@ preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_PREFILL_OVERLAP=1 \
 FREETOKEN_GGUF_MOE_K_TWO_ROWS="${MOE_K_TWO_ROWS}" \
 FREETOKEN_GGUF_MOE_K_THREE_ROWS="${MOE_K_THREE_ROWS}" \
+FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS="${GROUPED_PREFILL_MIN_TOKENS}" \
+FREETOKEN_Q4_GROUPED_PREFILL_MODE="${GROUPED_PREFILL_MODE}" \
     "${LAUNCHER}" start "${ARTIFACT_DIR}/q4-server" 0.30 0
 for _ in $(seq 1 480); do
     code="$(candidate_status "${ARTIFACT_DIR}/q4-ready-probe.json" || true)"
@@ -122,5 +137,5 @@ if [[ "${GMK_EVO_X2_QWEN_COLD_CONCURRENT:-0}" == "1" ]]; then
         --sample-variation prefix_nonce --artifact "${ARTIFACT_DIR}/cold-concurrent-c4.json" \
         >"${ARTIFACT_DIR}/cold-concurrent-c4.log" 2>&1
 fi
-printf 'q4_quality_and_cold_prefill_control=passed moe_k_two_rows=%s moe_k_three_rows=%s\n' \
-    "${MOE_K_TWO_ROWS}" "${MOE_K_THREE_ROWS}" >"${ARTIFACT_DIR}/result.txt"
+printf 'q4_quality_and_cold_prefill_control=passed moe_k_two_rows=%s moe_k_three_rows=%s grouped_prefill_min_tokens=%s grouped_prefill_mode=%s\n' \
+    "${MOE_K_TWO_ROWS}" "${MOE_K_THREE_ROWS}" "${GROUPED_PREFILL_MIN_TOKENS}" "${GROUPED_PREFILL_MODE}" >"${ARTIFACT_DIR}/result.txt"
