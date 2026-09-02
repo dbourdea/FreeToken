@@ -30,6 +30,16 @@ normal_status() {
         -d "${NORMAL_REQUEST}" http://127.0.0.1:1919/v1/chat/completions
 }
 
+candidate_status() {
+    # Uvicorn's health route becomes available before the Q4 model worker has
+    # loaded its weights.  A real completion is the readiness condition, just
+    # as it is for protected-service recovery, so the harness never records a
+    # misleading HTTP-503 "benchmark" during asynchronous model startup.
+    curl -sS -m 45 -o "$1" -w '%{http_code}' -H 'Content-Type: application/json' \
+        -d '{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}' \
+        http://127.0.0.1:1922/v1/chat/completions
+}
+
 recover_normal_service() {
     "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" >"${ARTIFACT_DIR}/recovery-start.txt" 2>&1 || true
     for attempt in $(seq 1 600); do
@@ -59,12 +69,14 @@ preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
 FREETOKEN_Q4_SOURCE_DIR="${SOURCE_DIR}" FREETOKEN_Q4_PREFILL_OVERLAP=1 \
     "${LAUNCHER}" start "${ARTIFACT_DIR}/q4-server" 0.30 0
 for _ in $(seq 1 480); do
-    if curl -fsS http://127.0.0.1:1922/health >"${ARTIFACT_DIR}/q4-health.json"; then
+    code="$(candidate_status "${ARTIFACT_DIR}/q4-ready-probe.json" || true)"
+    if [[ "${code}" == "200" ]]; then
         break
     fi
+    printf 'status=%s\n' "${code}" >>"${ARTIFACT_DIR}/q4-ready-progress.txt"
     sleep 1
 done
-[[ -s "${ARTIFACT_DIR}/q4-health.json" ]] || { echo "Q4 server did not become healthy" >&2; exit 1; }
+[[ -s "${ARTIFACT_DIR}/q4-ready-probe.json" ]] || { echo "Q4 server did not reach real completion readiness" >&2; exit 1; }
 
 PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" "${HARNESS}" \
     --base-url http://127.0.0.1:1922/v1 --model "${MODEL}" \
