@@ -1664,3 +1664,54 @@ both the two-stage and four-stage candidates for API serving.** Preserve
 component output and state references, quality parity, scheduler samples,
 concurrent raw responses, controller logs, recovery heartbeats, cleanup
 records, and normal-service completion evidence.
+
+### C86-C89: protected current ROCm llama.cpp control
+
+C86 and C87 are preserved controller failures, not performance results. C86
+showed that the protected wrapper selected an older harness layout for the
+inner scheduler command. C87 then showed that the current scheduler wrapper
+also needed its explicit benchmark-source override. Both controls reached a
+healthy temporary llama.cpp server, created no scheduler or concurrent result
+artifact, and restored the normal Qwen API through their recovery trap.
+
+C88 was the first complete protected ROCm 10 llama.cpp Q4_K_M control. It
+passed the deterministic visible-output quality suite, the three single-request
+scheduler samples, and all three C4 rounds. Its server had only one admitted
+parallel slot, however, so four synchronized clients were serialized. The
+result is useful evidence of that configuration's 16.346 second C4 p99 TTFT,
+but it is not an apples-to-apples four-client comparison and is not used for a
+throughput conclusion.
+
+C89 corrected that configuration by explicitly selecting four llama.cpp slots,
+matching the qualified FreeToken Q4 admission cap. It used the same Qwen
+Q4_K_M GGUF, ROCm 10 llama.cpp server, loopback OpenAI-compatible API shape,
+tokenizer, fixed scheduler prompt, three scheduler samples, three synchronized
+C4 rounds, and deterministic visible-output suite. The normal Qwen API was
+restored with a controller-recorded real completion after 503 probes and a
+separate post-run HTTP 200 completion.
+
+| Runtime and configuration | Single prefill TPS, mean | Single decode TPS, mean | Warm TTFT, mean | Aggregate C4 prefill TPS, mean | Aggregate C4 decode TPS, mean | C4 p99 TTFT | C4 p99 token gap | Quality gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Qualified FreeToken Q4, C58+C59 and C81 | 3,118.903 | 49.137 | 0.388612 s | 4,557.900 | 91.257 | 1.104 s | 44.352 ms | Same-source exact output `3302eda43396` |
+| ROCm 10 llama.cpp Q4_K_M, C89, four slots | 19,114.409 | 47.241 | 0.063411 s | 11,432.050 | 94.787 | 3.901 s | 89.997 ms | Exact canary, arithmetic, and JSON suite passed |
+
+The C89 aggregate prefill mean has substantial round-level variation: 1,242.749,
+16,259.193, and 16,794.208 TPS. The mean is retained rather than selecting the
+largest round. FreeToken's qualified C4 prefill value is materially lower under
+this client-visible metric, while its measured single-request decode is higher
+and its C4 tail TTFT and token-gap values are lower. These are local controls
+with different internal runtimes, cache behavior, and implementation choices;
+they are not an upstream-paper replication or a claim that one implementation
+is universally superior.
+
+**Decision: retain FreeToken's qualified Q4 serving profile while recording
+llama.cpp's strong prompt-prefill control and weaker observed C4 tail behavior
+as separate evidence.** C89 closes the current same-model, same-ROCm-stack
+comparison prerequisite. Preserve
+`q4-c86-llamacpp-rocm10-protected-c4-20260902T093505Z`,
+`q4-c87-llamacpp-rocm10-protected-c4-corrected-source-20260902T094409Z`,
+`q4-c88-llamacpp-rocm10-protected-c4-final-20260902T095306Z`, and
+`q4-c89-llamacpp-rocm10-protected-c4-slots4-20260902T100349Z`, including
+server logs, quality artifacts, scheduler summaries, concurrent raw responses,
+controller errors where applicable, recovery heartbeat, cleanup record, and
+normal-service completion proof.
