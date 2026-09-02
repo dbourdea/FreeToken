@@ -30,6 +30,10 @@ readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
 # meaningful KV reserve while testing whether additional resident experts can
 # reduce routed decode fetches on the unified-memory AMD platform.
 readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.25}"
+# Zero preserves the existing single-request qualification. Four is the only
+# concurrent group admitted here because prior host evidence shows it is the
+# practical aggregate-throughput point before eight clients harm tail latency.
+readonly CONCURRENT_CLIENTS="${FREETOKEN_Q4_CONCURRENT_CLIENTS:-0}"
 # Keep all inputs below the host-owned FreeToken root rather than relying on the
 # caller's working directory.
 readonly ROOT_DIR="/home/david/freetoken-amd"
@@ -88,6 +92,10 @@ mkdir -p "${ARTIFACT_DIR}"
     echo "FREETOKEN_Q4_MEMORY_RATIO must be 0.25, 0.30, or 0.35" >&2
     exit 2
 }
+[[ "${CONCURRENT_CLIENTS}" == "0" || "${CONCURRENT_CLIENTS}" == "4" ]] || {
+    echo "FREETOKEN_Q4_CONCURRENT_CLIENTS must be 0 or 4" >&2
+    exit 2
+}
 
 # Save a POST response and print only its status code, allowing callers to use
 # the code as an unambiguous readiness gate while retaining the response body.
@@ -130,7 +138,8 @@ recover_normal_service() {
 # source or safety helper is absent.
 for required in "${LAUNCHER}" "${NORMAL_STOP}" "${NORMAL_START}" \
     "${SOURCE_DIR}/scripts/gmk-evo-x2/verify_qwen_aime_quality.py" \
-    "${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh"; do
+    "${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh" \
+    "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_control.py"; do
     [[ -f "${required}" ]] || { echo "missing required file: ${required}" >&2; exit 2; }
 done
 
@@ -200,6 +209,18 @@ GMK_EVO_X2_QWEN_MODEL_NAME="${CANDIDATE_MODEL}" \
 GMK_EVO_X2_QWEN_BASE_URL=http://127.0.0.1:1922/v1 \
 bash "${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh" \
     "${ARTIFACT_DIR}/scheduler-tps" >"${ARTIFACT_DIR}/scheduler.log" 2>&1
+
+# A concurrent measurement is a separate aggregate-throughput claim. It uses
+# fixed greedy requests and retains every response, TTFT, token gap, and round
+# result rather than replacing the qualified single-user TPS measurement.
+if [[ "${CONCURRENT_CLIENTS}" == "4" ]]; then
+    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+        "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_concurrent_api_control.py" \
+        --base-url http://127.0.0.1:1922/v1 --model "${CANDIDATE_MODEL}" \
+        --tokenizer "${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4" \
+        --artifact "${ARTIFACT_DIR}/concurrent-c4.json" --concurrency 4 --rounds 3 \
+        >"${ARTIFACT_DIR}/concurrent-c4.log" 2>&1
+fi
 
 # Mark success only after readiness, quality, and both TPS paths complete.
 printf 'candidate_quality_and_scheduler=passed\n' >"${ARTIFACT_DIR}/result.txt"

@@ -33,6 +33,10 @@ readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
 # Keep device-to-device prefill-hit reuse opt-in because it depends on a
 # runtime batch-copy capability that may be unavailable on a given ROCm stack.
 readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
+# Preserve four live requests as the qualified interactive setting. Eight is
+# exposed only to the isolated concurrent-throughput controller below, where
+# tail latency and aggregate TPS are both captured before any conclusion.
+readonly MAX_RUNNING_REQUESTS="${FREETOKEN_Q4_MAX_RUNNING_REQUESTS:-4}"
 
 # Keep durable models, kernel caches, and artifacts separate from the checked
 # out source so source switching cannot delete benchmark evidence or weights.
@@ -135,6 +139,10 @@ validate_paths() {
         echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
         return 1
     }
+    [[ "${MAX_RUNNING_REQUESTS}" == "4" || "${MAX_RUNNING_REQUESTS}" == "8" ]] || {
+        echo "FREETOKEN_Q4_MAX_RUNNING_REQUESTS must be 4 or 8" >&2
+        return 1
+    }
     [[ "${EXTENSION_CACHE}" == "${ROOT_DIR}/cache/"* ]] || { echo "extension cache must be under ${ROOT_DIR}/cache" >&2; return 1; }
 }
 
@@ -168,7 +176,7 @@ case "${ACTION}" in
         # mode can remove exactly one safety-default flag without shell splitting.
         serve_args=(
             --model-path "${MODEL_PATH}" --served-model-name "${SERVED_MODEL}"
-            --host 127.0.0.1 --port "${PORT}" --max-running-requests 4
+            --host 127.0.0.1 --port "${PORT}" --max-running-requests "${MAX_RUNNING_REQUESTS}"
             --attention-backend triton --moe-backend offload --nvfp4-backend triton
             --expert-load serial --moe-cache-auto --memory-ratio "${MEMORY_RATIO}"
             --max-seq-len-override 8192 --kv-reserve-tokens 8192
