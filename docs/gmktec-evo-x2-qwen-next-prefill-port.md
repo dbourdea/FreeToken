@@ -66,6 +66,17 @@ This is not permission to substitute llama.cpp, change the model
 quantization, alter sampling, or relax output equality. It is a narrowly
 scoped repair investigation of an existing native FreeToken ROCm/HIP path.
 
+C130 repeated the real-weight differential with every top-k route assigned to
+one expert. Q4 gate/up still differed before SwiGLU, with 0.031250 maximum and
+0.001667 mean absolute difference; Q5 down also differed when it received the
+identical vector intermediate, with 0.002441 maximum and 0.000133 mean
+absolute difference. The final routed result was not storage-equal. This rules
+out mixed-expert sorting and cross-expert route order as the primary failure
+class. The next diagnostic must compare the grouped tile representation and
+matrix-dot scale and reduction sequence against the vector Q4_K and Q5_K dot
+functions, one quantized block at a time, while retaining the vector output as
+the exact reference.
+
 ## Required implementation sequence
 
 1. Build a component differential harness that runs the qualified vector path
