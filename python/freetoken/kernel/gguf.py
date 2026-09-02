@@ -36,6 +36,10 @@ _HIP_GGUF_Q6_MMV_WARPS_ENV = "FREETOKEN_GGUF_Q6_MMV_WARPS"
 # Q5_K routed-expert decode kernels.  It is intentionally restricted to the
 # established eight-wave path and the isolated four-wave component candidate.
 _HIP_GGUF_MOE_K_WARPS_ENV = "FREETOKEN_GGUF_MOE_K_WARPS"
+# The two-row Q4_K/Q5_K HIP kernel normally reserves one wave-sized block per
+# compute unit. This opt-in occupancy control permits a separately benchmarked
+# two-block residency target without changing the normal extension build.
+_HIP_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS"
 def _hip_target_arch() -> str | None:
     """Return the active AMD GPU target in ``gfxNNNN`` form when HIP exposes it.
 
@@ -103,12 +107,19 @@ def _hip_gguf_cflags() -> list[str]:
         raise RuntimeError(
             f"{_HIP_GGUF_MOE_K_WARPS_ENV} must be 4 or 8, got {moe_k_warps!r}"
         )
+    two_rows_min_blocks = os.environ.get(_HIP_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV, "1").strip()
+    if two_rows_min_blocks not in {"1", "2"}:
+        raise RuntimeError(
+            f"{_HIP_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV} must be 1 or 2, "
+            f"got {two_rows_min_blocks!r}"
+        )
     return [
         "-O3",
         f"-DGGML_CUDA_MMV_Y={mmv_y}",
         f"-DGGML_CUDA_Q8_MMV_WARPS={q8_mmv_warps}",
         f"-DGGML_CUDA_Q6_MMV_WARPS={q6_mmv_warps}",
         f"-DGGML_CUDA_MOE_K_WARPS={moe_k_warps}",
+        f"-DFREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS={two_rows_min_blocks}",
     ]
 
 

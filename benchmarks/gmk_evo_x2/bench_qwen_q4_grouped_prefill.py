@@ -32,6 +32,7 @@ from freetoken.utils import cached_load_hf_config
 _GROUPED_PREFILL_MIN_TOKENS_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS"
 _GROUPED_PREFILL_MODE_ENV = "FREETOKEN_Q4_GROUPED_PREFILL_MODE"
 _MOE_K_TWO_ROWS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS"
+_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV = "FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS"
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +54,15 @@ def parse_args() -> argparse.Namespace:
             "Opt into the HIP Q4_K/Q5_K two-output-row vector candidate. "
             "This is valid only with --mode vector and exists solely for an "
             "isolated real-weight parity and device-time gate."
+        ),
+    )
+    parser.add_argument(
+        "--two-rows-min-blocks",
+        choices=("1", "2"),
+        default="1",
+        help=(
+            "Compiler residency target for --vector-two-rows. Two is an "
+            "isolated occupancy candidate; one remains the qualified default."
         ),
     )
     parser.add_argument("--layer", type=int, default=0)
@@ -77,6 +87,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("tolerances must be non-negative and the native ROCm GPU must be available")
     if args.vector_two_rows and args.mode != "vector":
         parser.error("--vector-two-rows is valid only with --mode vector")
+    if args.two_rows_min_blocks != "1" and not args.vector_two_rows:
+        parser.error("--two-rows-min-blocks=2 requires --vector-two-rows")
     return args
 
 
@@ -139,6 +151,7 @@ def main() -> int:
     # The environment value is consumed by the native HIP wrapper at launch
     # time, keeping this candidate unavailable to normal server processes.
     os.environ[_MOE_K_TWO_ROWS_ENV] = "1" if args.vector_two_rows else "0"
+    os.environ[_MOE_K_TWO_ROWS_MIN_BLOCKS_ENV] = args.two_rows_min_blocks
     gate_up, down, hidden_size, num_experts, top_k, cache = materialize_layer(args.model, args.layer)
     device = gate_up.device
     generator = torch.Generator(device=device)
@@ -210,6 +223,7 @@ def main() -> int:
         "grouped_prefill_min_tokens": grouped_threshold,
         "grouped_prefill_mode": args.grouped_mode if args.mode == "grouped" else "vector",
         "moe_k_two_rows": args.vector_two_rows,
+        "moe_k_two_rows_min_blocks": int(args.two_rows_min_blocks),
         "samples_ms": samples_ms,
         "median_device_ms": statistics.median(samples_ms),
         "output_sha256": digest(output_cpu),

@@ -28,6 +28,9 @@ readonly GROUPED_MODE="${FREETOKEN_Q4_GROUPED_MODE:-both}"
 # the HIP one-wave/two-output-row vector experiment. Both remain component-only
 # gates and neither changes the recovery server or production defaults.
 readonly COMPONENT_CANDIDATE="${FREETOKEN_Q4_COMPONENT_CANDIDATE:-grouped}"
+# Keep occupancy selection explicit in evidence. One is the qualified two-row
+# compile target; two is a single bounded candidate, not a serving default.
+readonly TWO_ROWS_MIN_BLOCKS="${FREETOKEN_Q4_TWO_ROWS_MIN_BLOCKS:-1}"
 readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":4,"temperature":0,"stream":false}'
 
 [[ ! -e "${ARTIFACT_DIR}" ]] || { echo "artifact directory already exists: ${ARTIFACT_DIR}" >&2; exit 2; }
@@ -37,6 +40,10 @@ readonly NORMAL_REQUEST='{"model":"qwen3.6-35b-a3b-nvfp4-amd","messages":[{"role
 }
 [[ "${COMPONENT_CANDIDATE}" == "grouped" || "${COMPONENT_CANDIDATE}" == "two_rows" ]] || {
     echo "FREETOKEN_Q4_COMPONENT_CANDIDATE must be grouped or two_rows" >&2
+    exit 2
+}
+[[ "${TWO_ROWS_MIN_BLOCKS}" == "1" || "${TWO_ROWS_MIN_BLOCKS}" == "2" ]] || {
+    echo "FREETOKEN_Q4_TWO_ROWS_MIN_BLOCKS must be 1 or 2" >&2
     exit 2
 }
 mkdir -p "${ARTIFACT_DIR}"
@@ -116,12 +123,14 @@ else
     PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
     TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
     FREETOKEN_Q4_GROUPED_PREFILL_MIN_TOKENS=0 FREETOKEN_GGUF_MOE_K_TWO_ROWS=1 \
+    FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS="${TWO_ROWS_MIN_BLOCKS}" \
     "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
         --model "${MODEL_PATH}" --mode vector --vector-two-rows \
+        --two-rows-min-blocks "${TWO_ROWS_MIN_BLOCKS}" \
         --tokens 1024 --warmup 8 --repetitions 20 \
         --json "${ARTIFACT_DIR}/two-rows.json" --reference-output "${ARTIFACT_DIR}/vector-output.pt" \
         >"${ARTIFACT_DIR}/two-rows.log" 2>&1
-    printf 'candidate=two_rows\n' >"${ARTIFACT_DIR}/candidate.txt"
+    printf 'candidate=two_rows min_blocks=%s\n' "${TWO_ROWS_MIN_BLOCKS}" >"${ARTIFACT_DIR}/candidate.txt"
 fi
 
 # A passed marker means both runs completed, grouped output matched the saved

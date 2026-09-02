@@ -52,6 +52,10 @@ static __global__ void moe_vec_q(
 }
 
 #if defined(USE_ROCM)
+#ifndef FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS
+#define FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS 1
+#endif
+
 // Return whether the isolated Q4_K/Q5_K two-row candidate is enabled.  This
 // is deliberately a runtime opt-in, not a build-wide default: production
 // remains on the established generic vector kernel until this candidate has
@@ -82,7 +86,11 @@ static void moe_vec_q4_0_q8_1_hip_two_rows_cuda(
 // therefore shares packed activations and route metadata without changing
 // either row's quantized vector-dot implementation or output addressing.
 template <typename scalar_t, int qi, typename block_q_t, int vdr, vec_dot_q_cuda_t vec_dot>
-__launch_bounds__(WARP_SIZE, 1)
+// The default reserves one wave-sized block per compute unit. An isolated
+// compile-time occupancy experiment may request two blocks, but it cannot
+// alter results because the body below preserves every row's original lane
+// reduction and vector-dot order.
+__launch_bounds__(WARP_SIZE, FREETOKEN_GGUF_MOE_K_TWO_ROWS_MIN_BLOCKS)
 static __global__ void moe_vec_q_k_hip_two_rows(
     const void* __restrict__ vx,
     const void* __restrict__ vy,
