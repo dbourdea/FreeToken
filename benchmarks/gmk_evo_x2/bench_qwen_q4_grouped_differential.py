@@ -71,6 +71,19 @@ def _difference(reference: torch.Tensor, candidate: torch.Tensor) -> dict[str, o
     delta = (expected.float() - observed.float()).abs()
     differing_elements = int(torch.count_nonzero(delta).item())
     element_count = int(delta.numel())
+    # Preserve a small, deterministic coordinate sample so sparse residuals can
+    # be tied to a route and output lane without serializing millions of values.
+    # The complete digest and counts remain the authoritative equality result.
+    sample_indices = torch.nonzero(delta, as_tuple=False)[:16]
+    difference_samples = [
+        {
+            "index": [int(component) for component in index.tolist()],
+            "reference": float(expected[tuple(index.tolist())].item()),
+            "candidate": float(observed[tuple(index.tolist())].item()),
+            "absolute_difference": float(delta[tuple(index.tolist())].item()),
+        }
+        for index in sample_indices
+    ]
     return {
         "reference_sha256": _digest(expected),
         "candidate_sha256": _digest(observed),
@@ -79,6 +92,7 @@ def _difference(reference: torch.Tensor, candidate: torch.Tensor) -> dict[str, o
         # across millions of output elements. Exact quality still requires zero.
         "differing_elements": differing_elements,
         "element_count": element_count,
+        "difference_samples": difference_samples,
         "maximum_absolute_difference": float(delta.max().item()),
         "mean_absolute_difference": float(delta.mean().item()),
     }
