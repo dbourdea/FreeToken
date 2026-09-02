@@ -1014,7 +1014,9 @@ static void ggml_moe_q3_K_q8_1_cuda(
 #endif
 
 #if defined(USE_ROCM)
-#define MOE_X_Q4_K 8
+// One routed token is assigned to each physical wave.  Keeping the token group
+// equal to the configured wave count is part of the kernel's indexing contract.
+#define MOE_X_Q4_K GGML_CUDA_MOE_K_WARPS
 #define MOE_Y_Q4_K 128
 #define NWARPS_Q4_K GGML_CUDA_MOE_K_WARPS
 #else
@@ -1137,7 +1139,8 @@ static void ggml_moe_q4_K_q8_1_cuda(
 }
 
 #if defined(USE_ROCM)
-#define MOE_X_Q5_K 8
+// Keep Q5_K's token group coupled to the wave count for the same reason as Q4_K.
+#define MOE_X_Q5_K GGML_CUDA_MOE_K_WARPS
 #define MOE_Y_Q5_K 128
 #define NWARPS_Q5_K GGML_CUDA_MOE_K_WARPS
 #else

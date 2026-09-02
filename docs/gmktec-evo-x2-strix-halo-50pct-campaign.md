@@ -1043,3 +1043,28 @@ after 389 readiness attempts.  Preserve
 `q4-c42-q8-multiwave-parity-20260902T000752Z`, including the four raw kernel
 JSON records, reference outputs, candidate parity evidence, controller log,
 and recovery cleanup record.
+
+### C43-C44: routed-expert four-wave controller and parity gate
+
+C43 is invalid as a performance experiment.  Its first controller derived its
+artifact directory from a controller file placed beside, rather than inside,
+the intended artifact directory.  The baseline files were preserved under the
+C43 invalid-run record, the malformed candidate pathname prevented candidate
+execution, and the recovered normal API returned HTTP 200 after 378 readiness
+attempts.  No C43 timing is used in this campaign.
+
+C44 corrected the controller location, validates all required files before
+stopping the normal service, and records its output inside the dedicated
+artifact directory.  Its eight-wave baseline completed.  The first four-wave
+routed Q4_K and Q5_K candidate was then rejected by the real-output parity
+gate before any performance claim: 9,742 of 16,384 Q4_K output elements
+differed, with a maximum absolute difference of 1.265625 versus the allowed
+0.01.  The failed configuration reduced physical waves but incorrectly kept
+the eight-token group, violating the kernel's one-token-per-wave mapping
+contract.
+
+**Decision: reject the C44 geometry before timing comparison or API testing.**
+The controller recovered the normal NVFP4 API and verified a real HTTP 200
+completion after 387 readiness attempts.  Preserve the invalid C43 record and
+`q4-c44-moe-k-fourwave-20260902T003242Z`; neither is an API-performance
+result.
