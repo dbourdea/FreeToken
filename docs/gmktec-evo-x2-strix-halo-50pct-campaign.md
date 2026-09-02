@@ -2058,3 +2058,44 @@ Preserve `q4-c106-three-rows-component-r1-20260902` and
 `q4-c107-three-rows-api-quality-r1-20260902`, including output reference and
 parity records, timed samples, quality-suite responses, unique prompt hashes,
 raw SSE events, recovery logs, and normal-service completion evidence.
+
+### C108-C109: complete scheduler and C4 gate for the three-row candidate
+
+C108 is preserved as an invalid controller run. The new full-gate controller
+passed the candidate readiness request, then supplied an API base already ending
+in `/v1` to an AIME helper that appends `/v1` by contract. The helper requested
+`/v1/v1/models`, received HTTP 404, and stopped before any quality or TPS
+result. The normal service nevertheless recovered through a real completion
+after 433 probes. C109 corrected only that URL boundary and reran the complete
+gate under a new immutable artifact directory.
+
+C109 matched the canonical same-source AIME fingerprint
+`3302eda43396`, then completed three fixed warm scheduler samples and three
+synchronized C4 rounds. The normal Qwen API recovered through a real completion
+after 477 probes.
+
+| Metric | Qualified generic vector | Two-row candidate, C102 | Three-row candidate, C109 |
+| --- | ---: | ---: | ---: |
+| AIME output hash | `3302eda43396` | Same | Same |
+| Scheduler client prefill TPS, mean | 3,118.903 | 3,079.005 | 3,022.104 |
+| Scheduler decode TPS, mean | 49.137 | 48.700 | 47.735 |
+| Scheduler warm TTFT, mean | 0.388612 s | 0.393638 s | 0.401049 s |
+| C4 aggregate prefill TPS, mean | 4,557.900 | 4,759.396 | 4,613.191 |
+| C4 aggregate decode TPS, mean | 91.257 | 92.921 | 94.688 |
+| C4 p99 TTFT | 1.104 s | 1.059 s | 1.060 s |
+| C4 p99 token gap | 44.352 ms | 41.079 ms | 40.157 ms |
+
+The three-row candidate improves cache-neutral cold prefill and reduces the C4
+token-gap tail by 9.46 percent relative to the generic-vector record, while
+preserving visible and deterministic quality. However, its primary warm
+single-request scheduler prefill is 3.10 percent below the qualified generic
+vector and its C4 aggregate prefill is below the two-row candidate. The result
+therefore does not support default promotion.
+
+**Decision: retain the three-row implementation as a documented default-off
+cold-prefill and tail-latency candidate, but reject it as the primary serving
+default.** Preserve `q4-c108-three-rows-full-scheduler-r1-20260902` as an
+invalid URL-boundary controller record and
+`q4-c109-three-rows-full-scheduler-r2-20260902` as the valid quality,
+scheduler, C4, and recovery evidence. Future work must target the primary
+single-request prefill path without trading away exact quality.
