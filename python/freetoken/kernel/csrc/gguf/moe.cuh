@@ -1009,10 +1009,14 @@ static void ggml_moe_q3_K_q8_1_cuda(
   }
 }
 
+#ifndef GGML_CUDA_MOE_K_WARPS
+#define GGML_CUDA_MOE_K_WARPS 8
+#endif
+
 #if defined(USE_ROCM)
 #define MOE_X_Q4_K 8
 #define MOE_Y_Q4_K 128
-#define NWARPS_Q4_K 8
+#define NWARPS_Q4_K GGML_CUDA_MOE_K_WARPS
 #else
 #define MOE_X_Q4_K 4
 #define MOE_Y_Q4_K 32
@@ -1135,7 +1139,7 @@ static void ggml_moe_q4_K_q8_1_cuda(
 #if defined(USE_ROCM)
 #define MOE_X_Q5_K 8
 #define MOE_Y_Q5_K 128
-#define NWARPS_Q5_K 8
+#define NWARPS_Q5_K GGML_CUDA_MOE_K_WARPS
 #else
 #define MOE_X_Q5_K 4
 #define MOE_Y_Q5_K 32
