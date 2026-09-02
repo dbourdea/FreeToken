@@ -37,6 +37,10 @@ readonly MEMORY_RATIO="${FREETOKEN_Q4_MEMORY_RATIO:-0.30}"
 # Mixed primary and auxiliary cache overlap is the currently qualified Q4
 # baseline.  A zero value is available only for an explicit A/B diagnostic.
 readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-1}"
+# Select a fixed diagnostic shape without changing the qualified serving
+# benchmark.  Decode captures a long generation sequence; prefill captures one
+# long prompt followed by a single token so its trace is not decode dominated.
+readonly PROFILE_WORKLOAD="${FREETOKEN_Q4_ROCPROF_WORKLOAD:-decode}"
 readonly Q4_LAUNCHER="${SOURCE_DIR}/scripts/gmk-evo-x2/launch_qwen_gguf_qualified.sh"
 readonly NORMAL_STARTER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh"
 readonly NORMAL_STOPPER="${NORMAL_SOURCE_DIR}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh"
@@ -203,6 +207,10 @@ esac
     echo "FREETOKEN_Q4_PREFILL_OVERLAP must be 0 or 1" >&2
     exit 2
 }
+[[ "${PROFILE_WORKLOAD}" == "decode" || "${PROFILE_WORKLOAD}" == "prefill" ]] || {
+    echo "FREETOKEN_Q4_ROCPROF_WORKLOAD must be decode or prefill" >&2
+    exit 2
+}
 mkdir -p "${PREWARM_DIR}" "${PROFILE_DIR}" "${EXTENSION_CACHE}"
 
 # Preserve proof that the protected API was healthy before reclaiming the GPU.
@@ -258,10 +266,39 @@ printf '%s\n' "${profile_pid}" >"${PROFILE_PID_FILE}"
 wait_for_models "${Q4_PORT}" 120 "${PROFILE_DIR}/models.json"
 wait_for_scheduler_ready "${PROFILE_LOG}" 120
 
-# Generate one bounded greedy request.  Its fixed shape gives the trace a clear
-# prefill and decode region while avoiding a variable reasoning-stream workload.
-curl -fsS --max-time 120 -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${Q4_MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Write exactly 300 numbered lines. Every line must contain the words cache and expert.\"}],\"temperature\":0,\"top_p\":1,\"max_tokens\":900,\"stream\":false}" \
+# Build the request through Python so the long prefill prompt has exact,
+# reproducible JSON escaping and cannot be changed by shell word splitting.
+# Neither mode affects ordinary API benchmarking: this request exists only in
+# the loopback ROCprof candidate and its exact bytes are retained as evidence.
+"${VENV_PYTHON}" - "${PROFILE_DIR}/workload-request.json" "${Q4_MODEL_NAME}" "${PROFILE_WORKLOAD}" <<'PY'
+import json
+import pathlib
+import sys
+
+destination = pathlib.Path(sys.argv[1])
+model = sys.argv[2]
+mode = sys.argv[3]
+if mode == "prefill":
+    content = "cache expert " * 4096
+    max_tokens = 1
+else:
+    content = "Write exactly 300 numbered lines. Every line must contain the words cache and expert."
+    max_tokens = 900
+payload = {
+    "model": model,
+    "messages": [{"role": "user", "content": content}],
+    "temperature": 0,
+    "top_p": 1,
+    "max_tokens": max_tokens,
+    "stream": False,
+}
+destination.write_text(json.dumps(payload), encoding="utf-8")
+PY
+
+# Submit one bounded greedy request.  The saved request distinguishes a long
+# prompt prefill trace from a long decode trace during later database analysis.
+curl -fsS --max-time 180 -H 'Content-Type: application/json' \
+    --data-binary "@${PROFILE_DIR}/workload-request.json" \
     "http://127.0.0.1:${Q4_PORT}/v1/chat/completions" >"${PROFILE_DIR}/workload-response.json"
 
 # Give asynchronous ROCprof writers a short post-request interval before the
