@@ -39,7 +39,7 @@ metric boundary into an equal comparison.
 | ROCm llama.cpp local control | Same host, recorded model format, API shape, quality suite, and timing matrix | Proven as a practical Q4 control | C89 in the run log; it is not a same-format NVFP4 equivalence claim |
 | Paper-inspired W1 control | Pinned AIME source, complete local request contract, five samples, raw responses, and quality result | Pending after C142 recovery | [`upstream-qwen-paper-protocol.md`](upstream-qwen-paper-protocol.md) pins the public dataset and describes the unresolved paper differences |
 | W2 through W4 strict replication | Authors' exact harnesses, fixtures, versions, policy, and scoring | External evidence unavailable | Public source audit documents that OpenCode SWE-bench, Claude Code, OpenClaw, and raw paper artifacts are not released |
-| 24-hour Q5 endurance | All 1,440 minute-cadence sessions, zero candidate and host swap, final summary, restored swap, and real normal-service completion | In progress | C142 artifact `/home/david/freetoken-amd/artifacts/q4-c142-q5-swapdrain-endurance-20260902T222206Z` |
+| 24-hour Q5 endurance | All 1,440 minute-cadence sessions, zero candidate and host swap, final summary, restored swap, and real normal-service completion | In progress | C142 artifact `/home/david/freetoken-amd/artifacts/q4-c142-q5-swapdrain-endurance-20260902T222206Z`. Per-session records measure state correctness, TTFT, token-gap tails, swap, and thermal telemetry. They intentionally do not claim per-session prefill TPS. |
 | Normal service recovery | Recovered protected Qwen API produces a real completed response with `finish_reason: stop` | Pending C142 terminal cleanup | Verify after C142 controller exits; health alone is insufficient |
 | 284B capacity claim | Model manifest, reserved-memory evidence, load and quality result on comparable resources | External evidence unavailable on this system | The paper's 284B desktop had 192 GiB system memory plus 32 GB VRAM; this GMKtec EVO-X2 has 64 GB system memory |
 | Strict NVIDIA paper comparison | Same model, precision, workload, policy, metric boundary, and NVIDIA reference hardware | External evidence unavailable | The paper protocol still lacks exact released inputs and no reference NVIDIA system is in scope |
@@ -59,6 +59,17 @@ metric boundary into an equal comparison.
 7. Run the pinned paper-inspired W1 control after normal-service recovery, then
    update this matrix with the observed five-sample evidence and its remaining
    strict-paper limitations.
+
+## Performance metric boundaries
+
+C139 is the qualified complete API performance gate. It records client-observed
+prefill TPS, decode TPS, warm TTFT, C4 aggregate prefill and decode TPS, and
+C4 tail latency under the exact Q5-only four-row candidate. C142 has a distinct
+purpose: it establishes long-duration state, swap, thermal, and tail stability
+under minute cadence. Its three-turn state suite has no controlled fixed-size
+input throughput interval, so it must not be presented as a prefill-TPS
+measurement. The final report must show the C139 TPS results and C142 endurance
+results together, with their different measurement boundaries stated plainly.
 
 ## Final reporting rule
 
