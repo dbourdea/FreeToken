@@ -103,6 +103,15 @@ four-versus-eight routed-wave launch choice. The next diagnostic must compare
 the common Q4_K and Q5_K tile-scale unpacking and the primary quantized-dot
 sequence against the corresponding vector helpers, one packed block at a time.
 
+C135 then tested the repaired grouped prefill route at the model level before
+collecting any throughput result. The candidate reached a real OpenAI-compatible
+completion but failed the canonical deterministic greedy AIME fingerprint:
+`e10880eae5f5` rather than `3302eda43396`. The remaining sparse component
+residual is therefore quality-significant, not merely a harmless tolerance
+difference. The grouped route must remain default-off. The next repair must
+achieve exact tensor equality or an independently verified equivalent
+deterministic model output before it can enter any TPS comparison.
+
 ## Required implementation sequence
 
 1. Build a component differential harness that runs the qualified vector path
