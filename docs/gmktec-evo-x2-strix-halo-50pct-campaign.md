@@ -1091,3 +1091,59 @@ restored the normal NVFP4 API and verified a real HTTP 200 completion after
 375 readiness attempts.  Preserve
 `q4-c45-moe-k-fourwave-mapped-20260902T004151Z` with its source-specific
 baseline, failed parity log, native build output, and recovery evidence.
+
+### C46-C48: invalid GDN candidate-source gates
+
+The next profiler-selected target was the fused gated-delta-rule (GDN) kernel.
+C46 is not a performance or quality result because its source checkout also
+contained unrelated rejected experimental changes and its backend exited during
+model load.  C47 failed closed before GPU work because its selected source did
+not include the required qualified Q4 lifecycle helper.  C48 isolated the GDN
+change onto the exact recovery source, but that source did not support the
+Qwen `qwen35moe` GGUF architecture.  It therefore failed during argument
+parsing before the candidate could load.
+
+**Decision: none of C46-C48 may be used for performance or quality claims.**
+They establish the required source-provenance rule: a candidate must start from
+a Qwen-capable qualified revision and contain only the change under test.  C48
+recovery restored the normal NVFP4 service and verified a real completion after
+382 readiness attempts.  Preserve the three invalid-run records as diagnostic
+evidence only.
+
+### C49-C52: fused GDN two-wave quality parity and direct TPS comparison
+
+C49 created a clean Qwen-capable detached worktree from
+`f1baf13979b702957d173d956a5d0be2af795bd1` and applied only the GDN launch
+configuration change.  Its two-wave candidate returned a complete 127-token
+AIME response, but the older absolute expected-output hash did not match this
+qualified Q4 source.  C50 repeated the same gate at the one-wave setting and
+produced the identical captured output hash, `3302eda43396`.  This established
+that the hash mismatch came from an incompatible historical absolute reference,
+not from the two-wave GDN launch choice.
+
+C51 and C52 therefore used the recorded one-wave output hash as an explicit
+same-source parity control.  Both candidates produced that exact hash before
+the scheduler suite was permitted to execute.  Each run then completed three
+warm scored API samples using the fixed scheduler prompt, with client-visible
+prefill TPS, decode TPS, and warm TTFT recorded in immutable JSON.
+
+| Setting | Client-visible prefill TPS, mean | Decode TPS, mean | Warm TTFT, mean | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| GDN one wave, C52 | 2,832.541 | 48.090 | 0.427887 s | Exact, `3302eda43396` |
+| GDN two waves, C51 | 2,814.776 | 48.359 | 0.430586 s | Exact, `3302eda43396` |
+
+Relative to the one-wave control, two waves improved decode by 0.56 percent,
+but reduced client-visible prefill by 0.63 percent and increased warm TTFT by
+0.63 percent.  The tradeoff is far below the campaign promotion threshold and
+does not improve all requested serving metrics.
+
+**Decision: reject two-wave GDN as a default or upstream-facing performance
+change.** It preserves same-source output parity but provides only a small,
+mixed throughput result.  The controller verified normal NVFP4 recovery with
+real HTTP 200 completions after 476 readiness attempts for C51 and 468 for
+C52.  Preserve `q4-c49-gdn-two-wave-qwen-capable-20260902T015107Z`,
+`q4-c50-gdn-one-wave-qwen-control-20260902T020132Z`,
+`q4-c51-gdn-two-wave-parity-tps-20260902T021215Z`, and
+`q4-c52-gdn-one-wave-parity-tps-20260902T022307Z`, including their raw quality
+responses, parity files, scheduler summaries, controller logs, and recovery
+records.
