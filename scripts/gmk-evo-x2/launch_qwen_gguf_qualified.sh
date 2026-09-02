@@ -33,9 +33,10 @@ readonly PREFILL_OVERLAP="${FREETOKEN_Q4_PREFILL_OVERLAP:-0}"
 # Keep device-to-device prefill-hit reuse opt-in because it depends on a
 # runtime batch-copy capability that may be unavailable on a given ROCm stack.
 readonly PREFILL_HIT_D2D="${FREETOKEN_Q4_PREFILL_HIT_D2D:-0}"
-# Preserve four live requests as the qualified interactive setting. Eight is
-# exposed only to the isolated concurrent-throughput controller below, where
-# tail latency and aggregate TPS are both captured before any conclusion.
+# Preserve four live requests as the qualified interactive setting. The
+# measured eight-request candidate did not produce a material, repeatable
+# gain over this setting, so the launcher refuses it until new evidence
+# justifies reopening that experiment.
 readonly MAX_RUNNING_REQUESTS="${FREETOKEN_Q4_MAX_RUNNING_REQUESTS:-4}"
 
 # Keep durable models, kernel caches, and artifacts separate from the checked
@@ -139,8 +140,8 @@ validate_paths() {
         echo "FREETOKEN_Q4_PREFILL_HIT_D2D requires FREETOKEN_Q4_PREFILL_OVERLAP=1" >&2
         return 1
     }
-    [[ "${MAX_RUNNING_REQUESTS}" == "4" || "${MAX_RUNNING_REQUESTS}" == "8" ]] || {
-        echo "FREETOKEN_Q4_MAX_RUNNING_REQUESTS must be 4 or 8" >&2
+    [[ "${MAX_RUNNING_REQUESTS}" == "4" ]] || {
+        echo "FREETOKEN_Q4_MAX_RUNNING_REQUESTS must remain 4 for the qualified profile" >&2
         return 1
     }
     [[ "${EXTENSION_CACHE}" == "${ROOT_DIR}/cache/"* ]] || { echo "extension cache must be under ${ROOT_DIR}/cache" >&2; return 1; }
