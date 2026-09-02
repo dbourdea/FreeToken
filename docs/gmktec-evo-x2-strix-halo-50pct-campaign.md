@@ -1757,3 +1757,33 @@ and attention dispatch. Preserve
 `q4-c92-llamacpp-cold-prefill-20260902T104716Z`, including the failed C90
 controller record, all raw SSE events, usage blocks, prompt hashes, source
 logs, recovery heartbeats, cleanup records, and normal-service proofs.
+
+### C93-C94: grouped-projection numerical-isolation screen
+
+The C68 grouped Q4/Q5 prefill component path was much faster but changed a
+greedy API response. C93 and C94 split it into two default-off diagnostic modes
+that preserve the original vector dispatch for the other projection. Both runs
+used real Q4_K_M weights, 1,024 activations, the actual 256 experts and top-k
+eight routing shape, a saved vector-reference output, twenty timed samples,
+and the same tolerance-only component gate. Both controllers restored a real
+normal Qwen completion after 476 and 489 probes respectively.
+
+| Component mode | Median device time | Maximum absolute difference from vector | Mean absolute difference | Exact output storage |
+| --- | ---: | ---: | ---: | --- |
+| Established vector reference, C68 | 81.288 ms | 0 | 0 | Yes |
+| Grouped Q4 gate/up only, C93 | 40.572 ms | 0.001343 | 0.0000720 | No |
+| Grouped Q5 down only, C94 | 51.629 ms | 0.000679 | 0.0000608 | No |
+
+The gate/up-only result isolates the larger numerical difference, while the
+down-only result also differs from the vector reference. Thus neither
+projection can be enabled independently under the campaign's exact-output
+requirement. The tolerance pass is component diagnostic evidence only, not a
+quality pass and not an API throughput claim.
+
+**Decision: retain the vector Q4/Q5 prefill dispatch and keep all grouped modes
+disabled by default.** A future grouped candidate must reproduce vector-kernel
+arithmetic exactly, not merely meet a numerical tolerance. Preserve
+`q4-c93-grouped-gate-up-component-20260902T110328Z` and
+`q4-c94-grouped-down-component-20260902T111336Z`, including vector reference,
+raw timing samples, output hashes, tolerance deltas, controller logs, and
+normal-service recovery evidence.
