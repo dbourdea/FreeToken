@@ -1787,3 +1787,19 @@ arithmetic exactly, not merely meet a numerical tolerance. Preserve
 `q4-c94-grouped-down-component-20260902T111336Z`, including vector reference,
 raw timing samples, output hashes, tolerance deltas, controller logs, and
 normal-service recovery evidence.
+
+### C95: ROCm attention-backend availability gate
+
+The cache-neutral prefill investigation also considered a backend substitution.
+The live native environment reports PyTorch `2.13.0+rocm10.0.0` with HIP
+`7.15.26333`. Its installed environment has neither `flashinfer` nor
+`sgl_kernel`. FreeToken's registered backend metadata confirms that `fi`
+requires FlashInfer, `fa` requires SGL Kernel, and `trtllm` requires both
+FlashInfer and NVIDIA `sm100` hardware. Triton is the only registered backend
+that supports both full and sliding-window attention with no unavailable
+dependency or NVIDIA architecture requirement.
+
+**Decision: retain Triton attention on this native AMD campaign.** Installing
+or porting a CUDA-oriented attention dependency would be a separate runtime
+project, not a safe configuration candidate within this ROCm-only scope. The
+normal Qwen API was independently responsive when this read-only check ended.
