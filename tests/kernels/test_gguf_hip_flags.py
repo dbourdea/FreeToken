@@ -26,7 +26,7 @@ def test_hip_gguf_flags_keep_the_one_row_default(monkeypatch: pytest.MonkeyPatch
 
     # The default must remain explicit in the compile command and target only
     # the active AMD architecture discovered by the helper.
-    assert flags == ["-O3", "-DGGML_CUDA_MMV_Y=1"]
+    assert flags == ["-O3", "-DGGML_CUDA_MMV_Y=1", "-DGGML_CUDA_Q8_MMV_WARPS=1"]
     assert gguf.os.environ["PYTORCH_ROCM_ARCH"] == "gfx1151"
 
 
@@ -36,19 +36,19 @@ def test_hip_gguf_flags_allow_the_reviewed_row_grouping_candidates(monkeypatch: 
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "2")
     monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1151")
 
-    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=2"]
+    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=2", "-DGGML_CUDA_Q8_MMV_WARPS=1"]
 
     # Four rows are a separately qualified RDNA4 experiment.  This assertion
     # proves the requested compile-time shape becomes part of the extension key.
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "4")
 
-    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=4"]
+    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=4", "-DGGML_CUDA_Q8_MMV_WARPS=1"]
 
     # Preserve the prior eight-row RDNA4 screen while adding the intermediate
     # geometry, so this candidate branch does not narrow test coverage.
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "8")
 
-    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=8"]
+    assert gguf._hip_gguf_cflags() == ["-O3", "-DGGML_CUDA_MMV_Y=8", "-DGGML_CUDA_Q8_MMV_WARPS=1"]
 
 
 def test_hip_gguf_flags_reject_an_unreviewed_row_grouping(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,4 +57,13 @@ def test_hip_gguf_flags_reject_an_unreviewed_row_grouping(monkeypatch: pytest.Mo
     monkeypatch.setenv("FREETOKEN_GGUF_MMV_Y", "3")
 
     with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_MMV_Y must be 1, 2, 4, or 8"):
+        gguf._hip_gguf_cflags()
+
+
+def test_hip_gguf_flags_reject_an_unreviewed_q8_wave_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dense-Q8 candidate must not compile an arbitrary unqualified wave count."""
+
+    monkeypatch.setenv("FREETOKEN_GGUF_Q8_MMV_WARPS", "4")
+
+    with pytest.raises(RuntimeError, match="FREETOKEN_GGUF_Q8_MMV_WARPS must be 1 or 8"):
         gguf._hip_gguf_cflags()

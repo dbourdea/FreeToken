@@ -24,6 +24,10 @@ _CSRC = pathlib.Path(__file__).parent / "csrc" / "gguf"
 # GGUF MMV kernels.  It is intentionally limited to the reviewed values below
 # because arbitrary workgroup shapes require separate kernel review.
 _HIP_GGUF_MMV_Y_ENV = "FREETOKEN_GGUF_MMV_Y"
+# This separate switch exists only for the dense Q8_0 one-token path.  It does
+# not change routed-expert Q4_K or Q5_K kernels, whose independent experiments
+# already rejected wider decode launches on this GPU family.
+_HIP_GGUF_Q8_MMV_WARPS_ENV = "FREETOKEN_GGUF_Q8_MMV_WARPS"
 
 
 def _hip_target_arch() -> str | None:
@@ -65,7 +69,20 @@ def _hip_gguf_cflags() -> list[str]:
         raise RuntimeError(
             f"{_HIP_GGUF_MMV_Y_ENV} must be 1, 2, 4, or 8, got {mmv_y!r}"
         )
-    return ["-O3", f"-DGGML_CUDA_MMV_Y={mmv_y}"]
+    # Current llama.cpp uses eight physical waves for simple Q8_0 MMVQ on
+    # RDNA4.  Keep the candidate binary choice explicit and bounded, because
+    # the wider reduction changes floating accumulation order and must pass a
+    # real packed-weight equivalence screen before it can reach API testing.
+    q8_mmv_warps = os.environ.get(_HIP_GGUF_Q8_MMV_WARPS_ENV, "1").strip()
+    if q8_mmv_warps not in {"1", "8"}:
+        raise RuntimeError(
+            f"{_HIP_GGUF_Q8_MMV_WARPS_ENV} must be 1 or 8, got {q8_mmv_warps!r}"
+        )
+    return [
+        "-O3",
+        f"-DGGML_CUDA_MMV_Y={mmv_y}",
+        f"-DGGML_CUDA_Q8_MMV_WARPS={q8_mmv_warps}",
+    ]
 
 
 def _hip_thrust_include() -> str | None:
