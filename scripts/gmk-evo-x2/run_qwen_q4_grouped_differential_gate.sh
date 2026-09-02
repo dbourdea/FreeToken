@@ -13,7 +13,12 @@ set -euo pipefail
 # Require a caller-chosen, previously nonexistent evidence directory. The
 # controller creates it before service ownership so each invocation remains
 # independently auditable and never overwrites a prior result.
-readonly ARTIFACT_DIR="${1:?usage: run_qwen_q4_grouped_differential_gate.sh ARTIFACT_DIR}"
+readonly ARTIFACT_DIR="${1:?usage: run_qwen_q4_grouped_differential_gate.sh ARTIFACT_DIR [differential arguments...]}"
+shift
+# Keep optional Python-harness parameters explicit and positional. This permits
+# targeted numerical diagnoses, such as one repeated expert, without changing
+# the guarded service ownership or artifact lifecycle in this controller.
+readonly -a DIFFERENTIAL_ARGS=("$@")
 # SOURCE_DIR is deliberately supplied by the caller, allowing the test to use
 # a detached candidate checkout without editing the protected recovery source.
 readonly SOURCE_DIR="${FREETOKEN_Q4_SOURCE_DIR:?set FREETOKEN_Q4_SOURCE_DIR}"
@@ -93,6 +98,7 @@ PYTHONPATH="${SOURCE_DIR}/python" TORCH_EXTENSIONS_DIR="${EXTENSION_CACHE}" \
 TRITON_CACHE_DIR="${TRITON_CACHE}" PYTORCH_ROCM_ARCH=gfx1151 \
 "${ROOT_DIR}/.venv/bin/python" "${BENCHMARK}" \
     --model "${MODEL_PATH}" --json "${ARTIFACT_DIR}/differential.json" \
+    "${DIFFERENTIAL_ARGS[@]}" \
     >"${ARTIFACT_DIR}/differential.log" 2>&1
 
 printf 'grouped_q4_numerical_differential=completed\n' >"${ARTIFACT_DIR}/result.txt"

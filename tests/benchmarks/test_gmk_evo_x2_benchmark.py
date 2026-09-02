@@ -281,6 +281,8 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('["finish_reason"])', contents)
         self.assertIn("grep -qx 'stop'", contents)
         self.assertIn('normal_completion "${ARTIFACT_DIR}/preflight.json"', contents)
+        self.assertIn('readonly -a DIFFERENTIAL_ARGS=("$@")', contents)
+        self.assertIn('"${DIFFERENTIAL_ARGS[@]}"', contents)
 
     def test_grouped_differential_exposes_single_expert_route_isolation(self) -> None:
         """The numerical gate must be able to remove mixed-expert sorting from its diagnosis."""
