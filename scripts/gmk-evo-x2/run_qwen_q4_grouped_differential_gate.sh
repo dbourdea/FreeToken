@@ -99,9 +99,15 @@ mkdir -p "${EXTENSION_CACHE}" "${TRITON_CACHE}"
 # preserve both build and import evidence before executing the GPU diagnostic.
 if ! PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
     'import freetoken.kernel._pinned_tensor' >/dev/null 2>&1; then
-    ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
-    PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
-        "${SOURCE_DIR}/setup.py" build_ext --inplace >"${NATIVE_BUILD_LOG}" 2>&1
+    (
+        # setup.py declares its native source paths relative to its checkout.
+        # Building from SOURCE_DIR keeps a fresh candidate self-contained and
+        # avoids accidentally resolving paths beneath the SSH login directory.
+        cd "${SOURCE_DIR}"
+        ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
+        PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+            setup.py build_ext --inplace
+    ) >"${NATIVE_BUILD_LOG}" 2>&1
 fi
 PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
     'import freetoken.kernel._pinned_tensor as pinned; print(pinned.__file__)' \

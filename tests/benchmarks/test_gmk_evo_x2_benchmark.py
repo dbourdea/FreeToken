@@ -284,7 +284,8 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('readonly -a DIFFERENTIAL_ARGS=("$@")', contents)
         self.assertIn('"${DIFFERENTIAL_ARGS[@]}"', contents)
         self.assertIn('readonly NATIVE_BUILD_LOG="${ARTIFACT_DIR}/native-extension-build.log"', contents)
-        self.assertIn('"${SOURCE_DIR}/setup.py" build_ext --inplace', contents)
+        self.assertIn('cd "${SOURCE_DIR}"', contents)
+        self.assertIn('setup.py build_ext --inplace', contents)
         self.assertIn('native-extension-import.txt', contents)
 
     def test_grouped_differential_exposes_single_expert_route_isolation(self) -> None:
