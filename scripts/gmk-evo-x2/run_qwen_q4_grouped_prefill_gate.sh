@@ -19,6 +19,12 @@ readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6
 readonly BENCHMARK="${SOURCE_DIR}/benchmarks/gmk_evo_x2/bench_qwen_q4_grouped_prefill.py"
 readonly EXTENSION_CACHE="${ROOT_DIR}/cache/torch_extensions-q4-grouped-prefill-f1baf13"
 readonly TRITON_CACHE="${ROOT_DIR}/cache/triton-q4-grouped-prefill-f1baf13"
+# A clean candidate worktree does not contain FreeToken's optional native
+# pinned-memory extension. Keep its build and import proof before service
+# ownership, so a missing extension cannot turn a candidate setup error into
+# an unnecessary protected-model reload.
+readonly NATIVE_BUILD_LOG="${ARTIFACT_DIR}/native-extension-build.log"
+readonly NATIVE_IMPORT_LOG="${ARTIFACT_DIR}/native-extension-import.txt"
 # Keep the original both-projection screen as the default.  A caller can select
 # one grouped projection for a diagnostic component screen; API promotion still
 # requires a separate exact-output gate.
@@ -100,6 +106,25 @@ trap recover_normal_service EXIT
 # Do not interrupt an already unhealthy production service.
 preflight_code="$(normal_status "${ARTIFACT_DIR}/preflight.json" || true)"
 [[ "${preflight_code}" == "200" ]] || { echo "normal API unavailable before grouped gate: ${preflight_code}" >&2; exit 1; }
+
+# Build only in the disposable candidate checkout. setup.py resolves native
+# source paths relative to its current directory, so this cannot accidentally
+# populate the protected recovery checkout. Importing afterward is the
+# authoritative proof that this candidate can use the pinning path required by
+# the real-weight loader.
+if ! PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
+    'import freetoken.kernel._pinned_tensor' >/dev/null 2>&1; then
+    (
+        cd "${SOURCE_DIR}"
+        ROCM_HOME=/opt/rocm-10.0 ROCM_PATH=/opt/rocm-10.0 HIP_PATH=/opt/rocm-10.0 \
+        PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" \
+            setup.py build_ext --inplace
+    ) >"${NATIVE_BUILD_LOG}" 2>&1
+fi
+PYTHONPATH="${SOURCE_DIR}/python" "${ROOT_DIR}/.venv/bin/python" -c \
+    'import freetoken.kernel._pinned_tensor as pinned; print(pinned.__file__)' \
+    >"${NATIVE_IMPORT_LOG}"
+
 "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
     >"${ARTIFACT_DIR}/normal-stop.txt" 2>&1
 mkdir -p "${EXTENSION_CACHE}" "${TRITON_CACHE}"
