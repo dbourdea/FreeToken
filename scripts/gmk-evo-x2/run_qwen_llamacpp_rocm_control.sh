@@ -29,6 +29,10 @@ readonly SERVER_PID_FILE="${ARTIFACT_ROOT}/llama-server.pid"
 # Keep concurrent measurement opt-in so the existing single-client control is
 # unchanged unless a protected time-share controller explicitly requests C4.
 readonly CONCURRENT_CLIENTS="${GMK_EVO_X2_QWEN_CONCURRENT_CLIENTS:-0}"
+# Keep the historical one-slot server as the direct-control default. A protected
+# C4 comparison explicitly selects four slots so llama.cpp does not serialize
+# four arriving clients while FreeToken admits four live requests.
+readonly PARALLEL_SLOTS="${GMK_EVO_X2_LLAMA_PARALLEL_SLOTS:-1}"
 
 # Refuse ambiguous or partial input before allocating GPU memory. The matching
 # FreeToken tokenizer counts generated text consistently across both endpoints.
@@ -50,6 +54,10 @@ if [[ -e "${ARTIFACT_ROOT}" ]]; then
 fi
 if [[ "${CONCURRENT_CLIENTS}" != "0" && "${CONCURRENT_CLIENTS}" != "4" ]]; then
     echo "error: GMK_EVO_X2_QWEN_CONCURRENT_CLIENTS must be 0 or 4" >&2
+    exit 2
+fi
+if [[ "${PARALLEL_SLOTS}" != "1" && "${PARALLEL_SLOTS}" != "4" ]]; then
+    echo "error: GMK_EVO_X2_LLAMA_PARALLEL_SLOTS must be 1 or 4" >&2
     exit 2
 fi
 
@@ -83,7 +91,7 @@ trap cleanup_server EXIT
     --alias "${MODEL_NAME}" \
     -ngl all \
     -c 8192 \
-    -np 1 \
+    -np "${PARALLEL_SLOTS}" \
     -b 2048 \
     -ub 512 \
     -ctk q8_0 \
