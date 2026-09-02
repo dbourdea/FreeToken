@@ -2124,3 +2124,50 @@ testing.** Retain the existing one-block evidence as the reference and preserve
 `q4-c110-three-rows-occupancy2-component-r1-20260902`, including compiler
 settings, raw samples, exact parity record, logs, cleanup evidence, and normal
 service completion proof.
+
+### C116-C117: exact four-row HIP vector candidate
+
+C116 extended the quality-preserving row-sharing strategy to four adjacent
+Q4_K and Q5_K output rows per HIP wave. The implementation remains opt-in and
+keeps each row's vector-dot call sequence, lane ownership, XOR reduction tree,
+and output address unchanged. The test used the same real first-layer Qwen
+expert bytes, 1,024 deterministic BF16 activations, all 256 experts, top-k
+eight routing, eight warmups, and twenty device-timed repetitions as the
+previous component screens.
+
+The component output exactly matched the generic-vector SHA-256
+`46f7495acbbb563b65e75a7bea6b6dab22d4ca16b805b1558d37bc546fff072d`, with
+zero maximum and mean absolute difference.
+
+| Configuration | Median component device time | Exact output result |
+| --- | ---: | --- |
+| C106 same-run generic vector | 80.848 ms | Reference |
+| C106 three-row candidate | 72.805 ms | Same hash |
+| C116 four-row candidate | 70.701 ms | Same hash |
+
+C117 advanced the candidate through the canonical deterministic AIME gate,
+three fixed warm scheduler samples, three synchronized C4 rounds, and a real
+normal-service completion recovery. The AIME output SHA1 was the required
+`3302eda43396`.
+
+| Metric | Qualified generic vector | C109 three-row candidate | C117 four-row candidate |
+| --- | ---: | ---: | ---: |
+| Scheduler client prefill TPS, mean | 3,118.903 | 3,022.104 | 3,050.436 |
+| Scheduler decode TPS, mean | 49.137 | 47.735 | 48.454 |
+| Scheduler warm TTFT, mean | 0.388612 s | 0.401049 s | 0.397321 s |
+| C4 aggregate prefill TPS, mean | 4,557.900 | 4,613.191 | 4,561.196 |
+| C4 aggregate decode TPS, mean | 91.257 | 94.688 | 91.415 |
+| C4 p99 TTFT | 1.104 s | 1.060 s | 1.103 s |
+| C4 p99 token gap | 44.352 ms | 40.157 ms | 42.081 ms |
+
+The four-row kernel is the fastest exact component candidate so far and
+improves the earlier three-row scheduler result. However, its primary warm
+single-request prefill remains below the qualified generic-vector baseline.
+
+**Decision: retain the four-row implementation as a quality-preserving,
+default-off candidate.** It has complete quality, scheduler, C4, tail, and
+recovery evidence, but does not yet justify a primary serving-default change.
+Preserve `q4-c116-four-rows-component-r1-20260902` and
+`q4-c117-four-rows-full-scheduler-r1-20260902`, including raw component and
+API outputs, immutable timing samples, quality response, recovery logs, and
+normal-service completion proof.
