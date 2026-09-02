@@ -105,3 +105,16 @@ controller restored the normal Qwen service to `status: ok` and
 `maintenance: serving`, followed by a completed OpenAI-compatible
 `RECOVERY_OK` response. C124 is an effective one-hour stability diagnostic,
 not a substitute for the requested 24-hour qualification.
+
+C126 completed the first real-weight grouped-versus-vector numerical
+differential on layer zero with 1,024 deterministic BF16 activation rows,
+256 experts, and top-k eight routing. The first observed mismatch is the Q4
+gate/up projection before SwiGLU, with 0.031494 maximum absolute difference.
+The Q5 down projection also differs from the vector path when it receives the
+same vector intermediate, though its maximum difference is smaller at 0.003540.
+The resulting final output differs, so neither projection may be promoted to an
+API candidate. The next repair investigation must isolate how the grouped Q4
+and Q5 kernels differ from the vector kernels in activation quantization,
+route-index interpretation, and accumulation or conversion order. It must
+preserve the established vector route as the reference and remain default-off
+until exact equality is demonstrated.
