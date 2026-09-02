@@ -16,6 +16,10 @@ readonly ARTIFACT_DIR="${1:?usage: run_qwen_gdn_two_wave_candidate.sh ARTIFACT_D
 # to two waves preserves this script's optimization-focused behavior while a
 # one-wave run provides a same-source control when explicitly requested.
 readonly GDN_NUM_WARPS="${FREETOKEN_GDN_CANDIDATE_WARPS:-2}"
+# Keep graph capture opt-in and bounded to the single-stream decode shape used
+# by this benchmark.  Zero preserves eager execution and one captures only the
+# fixed batch-one path, avoiding an unreviewed batch-shape expansion.
+readonly CUDA_GRAPH_MAX_BS="${FREETOKEN_Q4_CUDA_GRAPH_MAX_BS:-0}"
 # Keep all inputs below the host-owned FreeToken root rather than relying on the
 # caller's working directory.
 readonly ROOT_DIR="/home/david/freetoken-amd"
@@ -42,6 +46,10 @@ readonly CANDIDATE_REQUEST='{"model":"qwen36-35b-a3b-q4km-gguf-amd","messages":[
 # is stopped, preventing an accidental unreviewed Triton configuration.
 [[ "${GDN_NUM_WARPS}" == "1" || "${GDN_NUM_WARPS}" == "2" ]] || {
     echo "FREETOKEN_GDN_CANDIDATE_WARPS must be 1 or 2" >&2
+    exit 2
+}
+[[ "${CUDA_GRAPH_MAX_BS}" == "0" || "${CUDA_GRAPH_MAX_BS}" == "1" ]] || {
+    echo "FREETOKEN_Q4_CUDA_GRAPH_MAX_BS must be 0 or 1" >&2
     exit 2
 }
 
@@ -98,7 +106,7 @@ preflight_code="$(completion_status http://127.0.0.1:1919/v1/chat/completions "$
 # and the normal service cache untouched.
 FREETOKEN_Q4_EXTENSION_CACHE_DIR="${ROOT_DIR}/cache/torch_extensions-gdn-${GDN_NUM_WARPS}-f1baf13" \
 FREETOKEN_GDN_NUM_WARPS="${GDN_NUM_WARPS}" \
-bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" 0.25 0
+bash "${LAUNCHER}" start "${ARTIFACT_DIR}/candidate" 0.25 "${CUDA_GRAPH_MAX_BS}"
 
 # Wait for an actual candidate completion.  A model-list response is explicitly
 # insufficient because it can succeed before the model worker finishes loading.

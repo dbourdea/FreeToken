@@ -1173,3 +1173,26 @@ completion after 388 readiness attempts.  Preserve
 `q4-c53-q6-two-wave-component-20260902T024124Z`, including baseline and
 candidate JSON, saved reference output, build caches, controller log, and
 recovery record.
+
+### C54: batch-one CUDA-graph serving gate
+
+The normal Q4 service deliberately runs eager decode with CUDA graph replay
+disabled.  C54 tested the smallest supported capture shape only: a graph batch
+maximum of one, with the same one-wave Q4 source, model, fixed scheduler prompt,
+three scored samples, and same-source AIME output-parity control used by C52.
+The graph candidate returned the exact control output hash `3302eda43396`.
+
+Quality parity did not yield a serving improvement.  Client-visible prefill
+throughput averaged 2,683.628 prompt tokens/s, decode averaged 47.992 tokens/s,
+and warm TTFT averaged 0.451680 seconds.  Against the eager one-wave C52
+control, this is a 5.26 percent prefill regression, a 0.21 percent decode
+regression, and a 5.56 percent TTFT regression.
+
+**Decision: retain eager decode and reject batch-one CUDA graph capture for
+this platform and workload.** The candidate passes output parity but worsens
+all measured serving metrics, so it cannot be a default or upstream-facing
+performance claim.  The controller restored the normal NVFP4 API and verified
+a real HTTP 200 completion after 481 readiness attempts.  Preserve
+`q4-c54-graph-bs1-parity-tps-20260902T025327Z`, including parity evidence,
+all raw scheduler samples, quality response, controller log, and recovery
+record.
