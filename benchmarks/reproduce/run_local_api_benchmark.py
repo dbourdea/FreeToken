@@ -20,6 +20,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Direct execution sets ``sys.path[0]`` to this script's directory rather than
+# the repository root.  Add the root explicitly so this reproducibility tool
+# can import the shared benchmark helpers whether it is launched as a module
+# or by its documented file path.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
 from benchmarks.gmk_evo_x2.run_api_benchmark import (
     StreamObservation,
     iter_sse_events,
