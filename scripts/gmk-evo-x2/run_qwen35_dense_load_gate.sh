@@ -47,7 +47,7 @@ cleanup() {
         local pid pgid
         pid="$(cat "${CANDIDATE_PID_FILE}")"
         if candidate_process "${pid}" && kill -0 "${pid}" 2>/dev/null; then
-            pgid="$(ps -o pgid= -p "${pid}" | tr -d ' ')
+            pgid="$(ps -o pgid= -p ${pid} | tr -d ' ')"
             if [[ "${pgid}" == "${pid}" ]]; then
                 kill -TERM -- "-${pgid}" 2>/dev/null || true
                 for _ in $(seq 1 30); do
