@@ -97,8 +97,9 @@ for _ in $(seq 1 600); do
     sleep 1
 done
 candidate_health >"${ARTIFACT_DIR}/candidate-final-health.json"
+request_body="$(printf '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly 4.\"}],\"max_tokens\":4,\"temperature\":0,\"stream\":false}' "${CANDIDATE_MODEL}")"
 curl -fsS --max-time 120 "http://127.0.0.1:${CANDIDATE_PORT}/v1/chat/completions" \
     -H 'content-type: application/json' \
-    -d "{\"model\":\"${CANDIDATE_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly 4.\"}],\"max_tokens\":4,\"temperature\":0,\"stream\":false}" \
+    -d "${request_body}" \
     >"${ARTIFACT_DIR}/completion.json"
 printf '%s\n' load_and_completion=passed >"${ARTIFACT_DIR}/result.txt"
