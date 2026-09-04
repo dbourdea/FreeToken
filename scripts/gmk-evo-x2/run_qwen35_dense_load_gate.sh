@@ -82,11 +82,12 @@ cleanup() {
             fi
         fi
     fi
-    if ! wait_normal_ready >"${ARTIFACT_DIR}/normal-recovery-wait.log" 2>&1; then
+    if ! (normal_health >"${ARTIFACT_DIR}/normal-recovery-health.json" 2>/dev/null && \
+          grep -q '"maintenance":"serving"' "${ARTIFACT_DIR}/normal-recovery-health.json"); then
         "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \
             >"${ARTIFACT_DIR}/normal-recovery.log" 2>&1 || true
-        wait_normal_ready >"${ARTIFACT_DIR}/normal-recovery-wait.log" 2>&1 || true
     fi
+    wait_normal_ready >"${ARTIFACT_DIR}/normal-recovery-wait.log" 2>&1 || true
     if normal_health >"${ARTIFACT_DIR}/normal-final-health.json" 2>/dev/null && \
        grep -q '"maintenance":"serving"' "${ARTIFACT_DIR}/normal-final-health.json"; then
         printf '%s\n' recovery_health=passed >>"${ARTIFACT_DIR}/result.txt"
