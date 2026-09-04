@@ -228,6 +228,14 @@ def stream_completion(
 def load_tokenizer(path: Path) -> Any:
     """Load the local checkpoint tokenizer for an actual generated-token count."""
 
+    if path.is_file() and path.suffix.lower() == ".gguf":
+        # GGUF checkpoints carry their tokenizer metadata in the file rather
+        # than in a Transformers directory.  Reuse FreeToken's embedded-GGUF
+        # converter so token counts remain tied to the exact tested model.
+        from freetoken.models.gguf.tokenizer import load_gguf_tokenizer
+
+        return load_gguf_tokenizer(str(path))
+
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(path, local_files_only=True, trust_remote_code=False)
