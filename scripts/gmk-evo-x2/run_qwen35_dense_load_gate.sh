@@ -30,7 +30,7 @@ candidate_process() {
     local pid="$1" cmdline
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
     [[ -r "/proc/${pid}/cmdline" ]] || return 1
-    cmdline="$(tr '\0' ' ' <"/proc/${pid}/cmdline")"
+    cmdline="$(tr '\0' ' ' < /proc/${pid}/cmdline)"
     [[ "${cmdline}" == *"freetoken.cli serve"* ]] || return 1
     [[ "${cmdline}" == *"${MODEL_PATH}"* ]] || return 1
     [[ "${cmdline}" == *"--port ${CANDIDATE_PORT}"* ]] || return 1
