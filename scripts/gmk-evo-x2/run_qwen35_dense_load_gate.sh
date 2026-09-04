@@ -38,6 +38,18 @@ wait_normal_ready() {
     done
     return 1
 }
+wait_candidate_ready() {
+    local health
+    for _ in $(seq 1 600); do
+        health="$(candidate_health 2>/dev/null || true)"
+        printf '%s\n' "${health}" >"${ARTIFACT_DIR}/candidate-health.json"
+        if [[ "${health}" == *'"maintenance":"serving"'* ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 candidate_process() {
     local pid="$1" cmdline
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
@@ -70,17 +82,13 @@ cleanup() {
             fi
         fi
     fi
-    if ! normal_health >"${ARTIFACT_DIR}/normal-recovery-health.json" 2>/dev/null; then
+    if ! wait_normal_ready >"${ARTIFACT_DIR}/normal-recovery-wait.log" 2>&1; then
         "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \
             >"${ARTIFACT_DIR}/normal-recovery.log" 2>&1 || true
-        for _ in $(seq 1 600); do
-            if normal_health >"${ARTIFACT_DIR}/normal-recovery-health.json" 2>/dev/null; then
-                break
-            fi
-            sleep 1
-        done
+        wait_normal_ready >"${ARTIFACT_DIR}/normal-recovery-wait.log" 2>&1 || true
     fi
-    if normal_health >"${ARTIFACT_DIR}/normal-final-health.json" 2>/dev/null; then
+    if normal_health >"${ARTIFACT_DIR}/normal-final-health.json" 2>/dev/null && \
+       grep -q '"maintenance":"serving"' "${ARTIFACT_DIR}/normal-final-health.json"; then
         printf '%s\n' recovery_health=passed >>"${ARTIFACT_DIR}/result.txt"
     else
         printf '%s\n' recovery_health=failed >>"${ARTIFACT_DIR}/result.txt"
@@ -102,12 +110,7 @@ setsid nohup env \
     >"${CANDIDATE_LOG}" 2>&1 < /dev/null &
 echo "$!" >"${CANDIDATE_PID_FILE}"
 
-for _ in $(seq 1 600); do
-    if candidate_health >"${ARTIFACT_DIR}/candidate-health.json" 2>/dev/null; then
-        break
-    fi
-    sleep 1
-done
+wait_candidate_ready
 candidate_health >"${ARTIFACT_DIR}/candidate-final-health.json"
 request_body="$(printf '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly 4.\"}],\"max_tokens\":4,\"temperature\":0,\"stream\":false}' "${CANDIDATE_MODEL}")"
 curl -fsS --max-time 120 "http://127.0.0.1:${CANDIDATE_PORT}/v1/chat/completions" \
