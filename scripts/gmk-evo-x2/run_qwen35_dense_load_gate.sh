@@ -112,9 +112,10 @@ echo "$!" >"${CANDIDATE_PID_FILE}"
 
 wait_candidate_ready
 candidate_health >"${ARTIFACT_DIR}/candidate-final-health.json"
-request_body="$(printf '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly 4.\"}],\"max_tokens\":4,\"temperature\":0,\"stream\":false}' "${CANDIDATE_MODEL}")"
+request_body="$(printf '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly 4.\"}],\"max_tokens\":16,\"temperature\":0,\"stream\":false,\"chat_template_kwargs\":{\"enable_thinking\":false}}' "${CANDIDATE_MODEL}")"
 curl -fsS --max-time 120 "http://127.0.0.1:${CANDIDATE_PORT}/v1/chat/completions" \
     -H 'content-type: application/json' \
     -d "${request_body}" \
     >"${ARTIFACT_DIR}/completion.json"
+grep -q '"content":"4"' "${ARTIFACT_DIR}/completion.json"
 printf '%s\n' load_and_completion=passed >"${ARTIFACT_DIR}/result.txt"
