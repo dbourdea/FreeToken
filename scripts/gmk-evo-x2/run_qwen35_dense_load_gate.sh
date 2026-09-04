@@ -26,6 +26,18 @@ test -x "${VENV_PYTHON}"
 
 normal_health() { curl -fsS --max-time 5 "http://127.0.0.1:${NORMAL_PORT}/health"; }
 candidate_health() { curl -fsS --max-time 5 "http://127.0.0.1:${CANDIDATE_PORT}/health"; }
+wait_normal_ready() {
+    local health
+    for _ in $(seq 1 60); do
+        health="$(normal_health 2>/dev/null || true)"
+        printf '%s\n' "${health}" >"${ARTIFACT_DIR}/normal-preflight.json"
+        if [[ "${health}" == *'"maintenance":"serving"'* ]]; then
+            return 0
+        fi
+        sleep 10
+    done
+    return 1
+}
 candidate_process() {
     local pid="$1" cmdline
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
@@ -36,7 +48,7 @@ candidate_process() {
     [[ "${cmdline}" == *"--port ${CANDIDATE_PORT}"* ]] || return 1
 }
 
-normal_health >"${ARTIFACT_DIR}/normal-preflight.json"
+wait_normal_ready
 pgrep -af "freetoken.cli serve.*--port ${NORMAL_PORT}" >"${ARTIFACT_DIR}/normal-preflight-process.txt"
 "${RECOVERY_SOURCE}/scripts/gmk-evo-x2/stop_qwen_recovery_server.sh" \
     >"${ARTIFACT_DIR}/normal-stop.log" 2>&1
