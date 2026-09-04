@@ -168,7 +168,6 @@ def iter_gguf_weights(
     from freetoken.models.gguf.reader import iter_gguf_tensors
     from freetoken.models.gguf.reader import load_gguf_metadata
 
-    assert not include_moe_experts, "Qwen GGUF routed experts are supplied by the offload cache"
     assert include_non_moe
     _require_weight_tp1()
 
@@ -176,6 +175,12 @@ def iter_gguf_weights(
     arch = metadata.get("general.architecture")
     prefix = "qwen35moe" if arch == "qwen35moe" else "qwen35"
     dense_model = prefix == "qwen35"
+    # The generic engine invokes this iterator for both weight phases.  Dense
+    # qwen35 checkpoints have no routed experts, so their expert phase is an
+    # intentional no-op.  Keep rejecting that phase for qwen35moe, whose
+    # routed experts are supplied by the offload cache instead.
+    if include_moe_experts and not dense_model:
+        raise AssertionError("Qwen GGUF routed experts are supplied by the offload cache")
     gdn_num_key_heads = int(metadata[f"{prefix}.ssm.group_count"])
     gdn_num_value_heads = int(metadata[f"{prefix}.ssm.time_step_rank"])
     gdn_inner_size = int(metadata[f"{prefix}.ssm.inner_size"])
