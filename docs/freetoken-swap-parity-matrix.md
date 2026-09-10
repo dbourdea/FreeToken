@@ -23,7 +23,7 @@ Status labels:
 | OpenAI completion and chat completion forwarding | Native request-byte-preserving proxy, including SSE body forwarding | Deterministic HTTP tests cover `/v1/chat/completions`; direct, cold, warm, cancellation, and performance evidence remains required. |
 | OpenAI Responses endpoint | Native route uses the same admission and proxy contract | Add explicit cancellation and response-object lifecycle proof. |
 | Anthropic Messages and token-count routing | Native routes use the same admission and proxy contract | Deterministic HTTP Messages test exists; add token-count and live failure proof. |
-| Unknown-model status and direct upstream access | Integrated only | Native compatible error response and `/upstream/{model}/...` behavior |
+| Unknown-model status and direct upstream access | Native stable unknown-model error and `/upstream/{profile}/...` passthrough through the same lease | Deterministic tests cover GET passthrough, query forwarding, and rejection of unsafe direct `prepare-stop`; add real-engine coverage. |
 | FIFO, priority, exclusive group routing | Integrated only | Native queue and group admission with deterministic tests |
 | Matrix capacity policy and eviction costs | Integrated only | Native validated capacity policy, observable selection, memory-qualified live tests |
 | Persistent resident models | Integrated only | Native capacity admission and protected persistent lifecycle tests |

@@ -215,18 +215,13 @@ def build_app(
             "engineRunning": bool(st.get("running")),
         }
 
-    async def route_inference(request: Request):
+    async def forward_routed(request: Request, model: str, *, path_and_query: str, body: bytes):
         """Select a configured model, then stream the engine response unchanged.
 
         The lease spans the full downstream iterator. If a client disconnects,
         Starlette closes that iterator, which closes the upstream socket and
         releases admission for the next model swap.
         """
-        body = await request.body()
-        try:
-            model = request_model(body)
-        except RequestModelError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             lease = await run(lifecycle_pool, router.acquire, model)
         except RoutingError as exc:
@@ -239,9 +234,10 @@ def build_app(
                 proxy_pool,
                 open_upstream,
                 port=lease.port,
-                path_and_query=request.url.path + (f"?{request.url.query}" if request.url.query else ""),
+                path_and_query=path_and_query,
                 headers=dict(request.headers),
                 body=body,
+                method=request.method,
             )
         except Exception as exc:  # the lease must not strand a pending swap on connect failure
             lease.release()
@@ -264,6 +260,15 @@ def build_app(
             media_type=upstream.headers.get("Content-Type"),
         )
 
+    async def route_inference(request: Request):
+        body = await request.body()
+        try:
+            model = request_model(body)
+        except RequestModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        suffix = f"?{request.url.query}" if request.url.query else ""
+        return await forward_routed(request, model, path_and_query=request.url.path + suffix, body=body)
+
     # FreeToken's supported inference surface. All routes use the same native
     # admission and proxy path so an OpenAI or Anthropic client cannot bypass
     # lifecycle, accounting, readiness, or cancellation ownership.
@@ -274,6 +279,23 @@ def build_app(
     @app.post("/v1/messages/count_tokens", dependencies=[Depends(require_router_key)])
     async def inference_proxy(request: Request):
         return await route_inference(request)
+
+    @app.api_route(
+        "/upstream/{model}/{upstream_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+        dependencies=[Depends(require_router_key)],
+    )
+    async def upstream_proxy(request: Request, model: str, upstream_path: str):
+        # The daemon alone may call prepare-stop. Exposing it through an
+        # arbitrary passthrough would bypass durable accounting and leave a
+        # misleading routing lease behind.
+        normalized = upstream_path.lstrip("/")
+        if normalized == "v1/admin/prepare-stop":
+            raise HTTPException(status_code=403, detail="upstream prepare-stop is daemon-managed")
+        suffix = f"?{request.url.query}" if request.url.query else ""
+        return await forward_routed(
+            request, model, path_and_query="/" + normalized + suffix, body=await request.body()
+        )
 
     @app.get("/router/status", dependencies=auth)
     async def router_status():

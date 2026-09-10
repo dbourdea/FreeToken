@@ -61,12 +61,12 @@ class UpstreamResponse:
 
 
 def open_upstream(*, port: int, path_and_query: str, headers: Mapping[str, str], body: bytes,
-                  timeout_s: float = 900.0) -> UpstreamResponse:
+                  method: str = "POST", timeout_s: float = 900.0) -> UpstreamResponse:
     request = Request(
         f"http://127.0.0.1:{port}{path_and_query}",
         data=body,
         headers=forward_headers(headers),
-        method="POST",
+        method=method,
     )
     try:
         raw = urlopen(request, timeout=timeout_s)

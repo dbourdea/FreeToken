@@ -193,8 +193,15 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
         assert "freetoken_swap_admissions_total 2" in metrics.text
+        passthrough = client.get("/upstream/low/v1/models?limit=3")
+        assert passthrough.status_code == 200
+        blocked = client.post("/upstream/low/v1/admin/prepare-stop")
+        assert blocked.status_code == 403
     assert manager.calls == [("start", "low.gguf")]
-    assert [item["path_and_query"] for item in calls] == ["/v1/chat/completions", "/v1/messages"]
+    assert [item["path_and_query"] for item in calls] == [
+        "/v1/chat/completions", "/v1/messages", "/v1/models?limit=3",
+    ]
+    assert calls[-1]["method"] == "GET"
     assert router.status()["activeRequests"] == 0
 
 
