@@ -52,7 +52,9 @@ For streamed token metrics, request `stream_options: {"include_usage": true}`. A
 
 The private artifact set `freetoken-swap-live-20260910-d` contains the configuration, native kernel build log, proxy/backend log, three raw responses, baseline response, recovery response, and structured results. These raw artifacts are intentionally not committed because they include operational paths and process details.
 
-This candidate still requires broader quality testing, cancellation and recovery testing, and a longer reliability run before production promotion. Existing semaphore-cleanup warnings should be investigated separately. No production configuration was changed or permanently activated, and no change was submitted to llama.cpp or llama-swap.
+An additional approved window passed real Qwen3.6 stream cancellation: the same backend reached zero active requests without increasing its normal-completion count, with observed terminal abort 0.254 seconds after disconnect. Post-cancellation Qwen3.6-to-Qwen3.8-to-Qwen3.6 streaming, concurrent routing, and idle eviction passed. A separate native daemon test rejected a private invalid GGUF fixture, automatically restored Qwen3.6, reached readiness, and generated the expected streamed answer. The prior engine's sealed accounting receipt was complete; the failed loader's crash receipt was explicitly degraded. Both phases restored and verified generation from the protected llama.cpp service. Logical private artifacts are `freetoken-swap-live-20260910-f` and `freetoken-native-recovery-20260910-a`.
+
+Broader quality testing and longer reliability runs remain necessary before broad production promotion. The bounded cancellation and loader-failure recovery results are not guarantees for every failure mode or model. Existing semaphore-cleanup warnings remain a follow-up; final checks found no test listeners or FreeToken multiprocessing workers. No production configuration was changed or permanently activated, and no change was submitted to llama.cpp or llama-swap.
 
 ## Privacy
 
