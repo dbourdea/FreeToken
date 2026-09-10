@@ -279,3 +279,49 @@ def test_persistent_group_protects_the_single_resident_slot_until_unloaded():
     assert manager.calls == [
         ("start", "keep.gguf"), ("stop", 30.0), ("start", "other.gguf"),
     ]
+
+
+def test_explicit_router_cancel_closes_an_inflight_upstream(monkeypatch):
+    class BlockingRaw:
+        def __init__(self):
+            self.read_started = threading.Event()
+            self.closed = threading.Event()
+
+        def read(self, size):
+            self.read_started.set()
+            self.closed.wait(2)
+            return b""
+
+        def close(self):
+            self.closed.set()
+
+    raw = BlockingRaw()
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    def upstream(**kwargs):
+        return UpstreamResponse(200, {"Content-Type": "text/event-stream"}, raw)
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        response = []
+        thread = threading.Thread(target=lambda: response.append(client.post(
+            "/v1/chat/completions", json={"model": "low"}, headers={"X-FT-Request-ID": "cancel-me"},
+        )))
+        thread.start()
+        assert raw.read_started.wait(1)
+        active = client.get("/router/requests").json()["data"]
+        assert active == [{"id": "cancel-me", "profile": "low"}]
+        cancelled = client.post("/router/requests/cancel-me/cancel")
+        assert cancelled.json() == {"cancelled": True, "id": "cancel-me"}
+        thread.join(2)
+        assert not thread.is_alive()
+    assert response[0].status_code == 200
+    assert router.status()["cancellations"] == 1
+    assert router.status()["activeRequests"] == 0

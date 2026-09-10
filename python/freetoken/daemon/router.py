@@ -76,6 +76,7 @@ class RoutingCoordinator:
         self._admissions = 0
         self._activations = 0
         self._activation_failures = 0
+        self._cancellations = 0
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
@@ -167,6 +168,7 @@ class RoutingCoordinator:
                 "admissions": self._admissions,
                 "activations": self._activations,
                 "activationFailures": self._activation_failures,
+                "cancellations": self._cancellations,
                 "scheduler": self._catalog.settings.scheduler,
             }
 
@@ -213,6 +215,7 @@ class RoutingCoordinator:
             "admissions_total": status["admissions"],
             "activations_total": status["activations"],
             "activation_failures_total": status["activationFailures"],
+            "cancellations_total": status["cancellations"],
             "evictions_total": status["evictions"],
         }
         lines = []
@@ -221,6 +224,10 @@ class RoutingCoordinator:
             metric_type = "counter" if name.endswith("_total") else "gauge"
             lines.extend((f"# TYPE {metric} {metric_type}", f"{metric} {value}"))
         return "\n".join(lines) + "\n"
+
+    def record_cancellation(self) -> None:
+        with self._cond:
+            self._cancellations += 1
 
     def evict_idle(self, name: str | None = None) -> bool:
         """Unload a truly idle matching engine, preserving lifecycle accounting.

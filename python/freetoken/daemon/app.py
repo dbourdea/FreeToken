@@ -14,6 +14,8 @@ import functools
 import json
 import os
 import sys
+import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -152,6 +154,8 @@ def build_app(
     router = router or RoutingCoordinator(
         manager, catalog, probe, default_port=default_serve_port
     )
+    inflight_lock = threading.Lock()
+    inflight: dict[str, dict] = {}
 
     if shutdown_hook is not None:
 
@@ -244,16 +248,32 @@ def build_app(
             lease.release()
             return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "upstream_unavailable"}})
 
+        request_id = request.headers.get("x-ft-request-id") or uuid.uuid4().hex
+        if not request_id.isascii() or not request_id or len(request_id) > 128:
+            upstream.close()
+            lease.release()
+            raise HTTPException(status_code=400, detail="X-FT-Request-ID must be 1 to 128 ASCII characters")
+        with inflight_lock:
+            if request_id in inflight:
+                upstream.close()
+                lease.release()
+                return JSONResponse(status_code=409, content={"error": {"message": "request id is already active", "type": "request_conflict"}})
+            inflight[request_id] = {"profile": lease.profile.name, "upstream": upstream}
+
         def stream_response():
             try:
                 yield from upstream.chunks()
             finally:
                 lease.release()
+                with inflight_lock:
+                    if inflight.get(request_id, {}).get("upstream") is upstream:
+                        inflight.pop(request_id, None)
 
         headers = {
             key: value for key, value in upstream.headers.items()
             if key.lower() not in {"content-length", "transfer-encoding"}
         }
+        headers["X-FT-Request-ID"] = request_id
         return StreamingResponse(
             stream_response(),
             status_code=upstream.status,
@@ -301,6 +321,23 @@ def build_app(
     @app.get("/router/status", dependencies=auth)
     async def router_status():
         return router.status()
+
+    @app.get("/router/requests", dependencies=auth)
+    async def router_requests():
+        with inflight_lock:
+            data = [{"id": request_id, "profile": item["profile"]}
+                    for request_id, item in inflight.items()]
+        return {"data": data}
+
+    @app.post("/router/requests/{request_id}/cancel", dependencies=auth)
+    async def router_cancel(request_id: str):
+        with inflight_lock:
+            item = inflight.get(request_id)
+        if item is None:
+            return {"cancelled": False, "reason": "not_found"}
+        item["upstream"].close()
+        router.record_cancellation()
+        return {"cancelled": True, "id": request_id}
 
     @app.get("/metrics", dependencies=auth)
     async def router_metrics():

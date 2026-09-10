@@ -33,7 +33,7 @@ Status labels:
 | API keys | Native daemon token, different header and scope | Router inference and management key policy with authorization tests |
 | Logs and bounded streaming logs | Native engine log snapshot only | Bounded router/proxy/upstream log buffers and SSE log streams |
 | Prometheus and activity/performance metrics | Native `/metrics` exposes bounded router admission, queue, activation, failure, and eviction counters; engine metrics remain separately available | Add TTFT, throughput, cancellation, process, and memory measurements with direct/cold/warm/alternating benchmark evidence. |
-| Inflight cancellation API | Native backend cancellation on client disconnect | Router inflight identifiers and explicit cancel API, with same-instance terminal-abort proof |
+| Inflight cancellation API | Native router issues or accepts opaque `X-FT-Request-ID` values, lists active IDs, and provides `POST /router/requests/{id}/cancel` | Deterministic blocked-stream test proves socket close, lease release, and cancellation metric. Same-instance real-engine terminal-abort proof remains required. |
 | Parameter filters and configuration hooks | Missing | Safe allowlisted parameter transformation and lifecycle hooks, or explicit supported subset policy |
 | Configuration watch/reload | Native authenticated `POST /router/reload` re-parses the catalog atomically | Deterministic tests cover valid replacement, invalid-file rejection, and active-profile redefinition refusal. File watching and real-engine reload evidence remain required. |
 | UI, hardware, captures, MCP, Tailcat | Missing | Assess separately. Native management UI and local hardware view are applicable; captures, MCP, and Tailcat require explicit product-scope decisions |

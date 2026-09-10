@@ -869,6 +869,14 @@ class ServeManager:
 
         with self._cond:
             is_current = self._child is child
+        # Clear durable adoption state before publishing the stopped state. Otherwise callers
+        # can observe running=false and still find a dead pidfile long enough to attempt an
+        # invalid re-adoption or a conflicting recovery.
+        if is_current:
+            self._store.clear()
+
+        with self._cond:
+            is_current = self._child is child
             if is_current:
                 self._child = None
                 self._started_at = None
@@ -877,11 +885,8 @@ class ServeManager:
                     info = ExitInfo(info.code, "stopped")
                 self._last_exit = info
             self._cond.notify_all()
-        # Outside the lock. Clear the persisted state BEFORE waking stop() waiters, so a caller
-        # that sees stop() return also sees an empty pidfile — no window where a racing re-adopt
-        # could latch onto the just-killed pid.
-        if is_current:
-            self._store.clear()
+        # The pidfile was cleared before publishing stopped state, so a caller that sees either
+        # status.running=false or stop() return cannot re-adopt this dead generation.
         child.reaped.set()
         if getattr(child, "tailer", None) is not None:
             try:
