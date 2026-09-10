@@ -115,6 +115,7 @@ def _restore_gdn_value_head_input_blocks(
     packed: torch.Tensor,
     num_key_heads: int,
     head_dim: int,
+    quant_type: int = GGML_Q8_0,
 ) -> torch.Tensor:
     """Restore GDN value-head order along a Q8_0 packed projection input axis.
 
@@ -125,7 +126,7 @@ def _restore_gdn_value_head_input_blocks(
     """
     if packed.ndim != 2:
         raise ValueError(f"Qwen GDN packed output projection must be rank 2, got {tuple(packed.shape)}")
-    bytes_per_head = row_bytes(head_dim, GGML_Q8_0)
+    bytes_per_head = row_bytes(head_dim, quant_type)
     if head_dim <= 0 or packed.shape[1] % bytes_per_head:
         raise ValueError(
             "Qwen GDN packed output projection does not contain complete value-head blocks: "
@@ -168,14 +169,22 @@ def iter_gguf_weights(
     from freetoken.models.gguf.reader import iter_gguf_tensors
     from freetoken.models.gguf.reader import load_gguf_metadata
 
-    assert not include_moe_experts, "Qwen GGUF routed experts are supplied by the offload cache"
-    assert include_non_moe
     _require_weight_tp1()
 
     metadata = load_gguf_metadata(model_path)
     arch = metadata.get("general.architecture")
     prefix = "qwen35moe" if arch == "qwen35moe" else "qwen35"
     dense_model = prefix == "qwen35"
+    if not include_non_moe:
+        if dense_model:
+            return
+        raise AssertionError("Qwen GGUF routed experts are supplied by the offload cache")
+    # The generic engine invokes this iterator for both weight phases.  Dense
+    # qwen35 checkpoints have no routed experts, so their expert phase is an
+    # intentional no-op.  Keep rejecting that phase for qwen35moe, whose
+    # routed experts are supplied by the offload cache instead.
+    if include_moe_experts and not dense_model:
+        raise AssertionError("Qwen GGUF routed experts are supplied by the offload cache")
     gdn_num_key_heads = int(metadata[f"{prefix}.ssm.group_count"])
     gdn_num_value_heads = int(metadata[f"{prefix}.ssm.time_step_rank"])
     gdn_inner_size = int(metadata[f"{prefix}.ssm.inner_size"])
@@ -279,16 +288,27 @@ def iter_gguf_weights(
             continue
 
         if suffix == "attn_q.weight":
-            qkv_buf.setdefault(layer, {})["qg"] = t.packed()
+            if dense_model:
+                yield f"{base}.self_attn.qg_proj.qweight", t.packed()
+            else:
+                qkv_buf.setdefault(layer, {})["qg"] = t.packed()
         elif suffix == "attn_k.weight":
-            qkv_buf.setdefault(layer, {})["k"] = t.packed()
+            if dense_model:
+                yield f"{base}.self_attn.k_proj.qweight", t.packed()
+            else:
+                qkv_buf.setdefault(layer, {})["k"] = t.packed()
         elif suffix == "attn_v.weight":
-            qkv_buf.setdefault(layer, {})["v"] = t.packed()
+            if dense_model:
+                yield f"{base}.self_attn.v_proj.qweight", t.packed()
+            else:
+                qkv_buf.setdefault(layer, {})["v"] = t.packed()
         elif suffix == "attn_output.weight":
             yield f"{base}.self_attn.o_proj.qweight", t.packed()
         elif suffix == "attn_qkv.weight":
             # The Q|K prefix is keyed by the 16 GDN key heads.  The V suffix is
             # keyed by the 32 value heads and is grouped by llama.cpp in GGUF.
+            if t.ggml_type not in (GGML_Q4_K, GGML_Q6_K, GGML_Q8_0):
+                raise ValueError(f"{name} has unsupported packed type {t.ggml_type}")
             packed = t.packed()
             gdn_key_dim = gdn_num_key_heads * gdn_value_head_dim
             qk_rows = packed[: 2 * gdn_key_dim]
@@ -297,13 +317,21 @@ def iter_gguf_weights(
             )
             gdn_buf.setdefault(layer, {})["qkv"] = torch.cat((qk_rows, value_rows), dim=0)
         elif suffix == "attn_gate.weight":
+            if t.ggml_type not in (GGML_Q4_K, GGML_Q6_K, GGML_Q8_0):
+                raise ValueError(f"{name} has unsupported packed type {t.ggml_type}")
             gdn_buf.setdefault(layer, {})["z"] = _restore_gdn_value_head_rows(
                 t.packed(), gdn_num_key_heads, gdn_value_head_dim
             )
         elif suffix == "ssm_out.weight":
-            yield f"{base}.linear_attn.out_proj.qweight", _restore_gdn_value_head_input_blocks(
-                t.packed(), gdn_num_key_heads, gdn_value_head_dim
-            )
+            # Q4_K blocks span two 128-wide value heads. Preserve the packed rows
+            # byte-exact; GatedDeltaNet inversely groups its activation before this
+            # projection instead of reordering block-quantized weight bytes.
+            if dense_model:
+                yield f"{base}.linear_attn.out_proj.qweight", t.packed()
+            else:
+                yield f"{base}.linear_attn.out_proj.qweight", _restore_gdn_value_head_input_blocks(
+                    t.packed(), gdn_num_key_heads, gdn_value_head_dim
+                )
         elif suffix == "ffn_gate_shexp.weight":
             shared_buf.setdefault(layer, {})["gate"] = t.packed()
         elif suffix == "ffn_up_shexp.weight":
@@ -321,10 +349,15 @@ def iter_gguf_weights(
             del qkv_buf[layer]
         slots = gdn_buf.get(layer)
         if slots is not None and all(key in slots for key in ("qkv", "z")):
-            # qkv|z is quantized; b|a are F32 tensors and are loaded below as dense.
-            yield f"{base}.linear_attn.in_proj_qkvz.qweight", torch.cat(
-                [slots["qkv"], slots["z"]], dim=0
-            )
+            # Qwen3.6-27B-Q4_K_M stores qkv as Q6_K and z as Q4_K. Execute
+            # them separately, then concatenate activations in GatedDeltaNet.
+            if dense_model:
+                yield f"{base}.linear_attn.in_proj_qkv.qweight", slots["qkv"]
+                yield f"{base}.linear_attn.in_proj_z.qweight", slots["z"]
+            else:
+                yield f"{base}.linear_attn.in_proj_qkvz.qweight", torch.cat(
+                    [slots["qkv"], slots["z"]], dim=0
+                )
             del slots["qkv"], slots["z"]
             if not slots:
                 del gdn_buf[layer]
@@ -375,7 +408,8 @@ def convert_qwen3_5_to_gguf(model, config: ModelConfig) -> None:
     from freetoken.layers.gguf import GGUFEmbedding, GGUFLinear
 
     dense_model = not config.moe_enabled
-    embed_quant = GGML_Q4_K if dense_model else GGML_Q8_0
+    types = dict(config.gguf_tensor_types)
+    embed_quant = types.get("token_embd.weight", GGML_Q4_K) if dense_model else GGML_Q8_0
     full_output_quant = GGML_Q6_K if dense_model else GGML_Q8_0
 
     def swap_linear(owner, attr: str, quant_type: int, in_features: int, out_features: int):
@@ -390,15 +424,17 @@ def convert_qwen3_5_to_gguf(model, config: ModelConfig) -> None:
         if layer._is_linear:
             g = config.linear_attention_group()
             assert g is not None
-            # The GDN constructor already creates the matching qkv|z GGUF projection
-            # and a dense b|a projection when config.attn_quant is ``gguf_q8``.
-            assert hasattr(layer.linear_attn, "in_proj_qkvz")
+            # The GDN constructor provides separate native packed qkv and z
+            # projections, plus a dense b|a projection.
+            assert hasattr(layer.linear_attn, "in_proj_qkv" if dense_model else "in_proj_qkvz")
+            if dense_model:
+                assert hasattr(layer.linear_attn, "in_proj_z")
             assert hasattr(layer.linear_attn, "in_proj_ba")
             swap_linear(
-                layer.linear_attn, "out_proj", GGML_Q8_0,
+                layer.linear_attn, "out_proj", types[f"blk.{layer._layer_id}.ssm_out.weight"] if dense_model else GGML_Q8_0,
                 layer.linear_attn.value_dim, config.hidden_size,
             )
-        else:
+        elif config.attn_quant != "gguf_mixed":
             swap_linear(
                 layer.self_attn, "qkv_proj", GGML_Q8_0,
                 config.hidden_size, sum(layer.self_attn._qkv_split),
@@ -416,7 +452,8 @@ def convert_qwen3_5_to_gguf(model, config: ModelConfig) -> None:
             intermediate = config.intermediate_size
             mlp_quant = GGML_Q4_K
         swap_linear(owner, "gate_up_proj", mlp_quant, config.hidden_size, 2 * intermediate)
-        swap_linear(owner, "down_proj", mlp_quant, intermediate, config.hidden_size)
+        down_type = types[f"blk.{layer._layer_id}.ffn_down.weight"] if dense_model else mlp_quant
+        swap_linear(owner, "down_proj", down_type, intermediate, config.hidden_size)
     model.lm_head = GGUFLMHead(config.vocab_size, config.hidden_size)
 
 

@@ -324,6 +324,7 @@ class ModelConfig:
     # original layer ids so the exact auxiliary Q6_K cache can be attached only
     # where it is needed.
     gguf_q6_down_layer_ids: Tuple[int, ...] = ()
+    gguf_tensor_types: Tuple[Tuple[str, int], ...] = ()
     swiglu_limit: float | None = None
     hidden_act_alpha: float = 1.702
     # Full DeepseekV4Args payload for the DSV4-specific machinery (MLA sparse attention,

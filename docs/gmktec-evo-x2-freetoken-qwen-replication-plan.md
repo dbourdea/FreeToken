@@ -3,7 +3,7 @@
 ## Decision and success statement
 
 This plan targets only GMKtek EVO-X2, a Ryzen AI Max+ 395 with Radeon 8060S
-(`gfx1151`) and shared LPDDR5X memory.  It does not alter secondary test host, LAN-215,
+(`gfx1151`) and shared LPDDR5X memory.  It does not alter secondary test host, another test host,
 llama-swap, or any production model service.
 
 The first target is the exact model used for FreeToken's documented 8 GB laptop

@@ -54,6 +54,7 @@ class Qwen3_5GatedDeltaNet(BaseOP):
         self, hidden_size, num_k_heads, num_v_heads, head_k_dim, head_v_dim,
         conv_kernel_size, rms_norm_eps, layer_id, expert_quant: str = "none",
         attn_quant: str = "none",
+        config=None,
     ):
         self.layer_id = layer_id
         # The fla chunk/decode kernels read+write the recurrent state and the per-chunk h as
@@ -77,13 +78,24 @@ class Qwen3_5GatedDeltaNet(BaseOP):
         self._block_fp8 = expert_quant == "fp8_block"
         self._pertensor_fp8 = attn_quant == "fp8_pertensor"
         self._fp8 = self._block_fp8 or self._pertensor_fp8
-        # GGUF Qwen stores qkv|z as Q8_0 but recurrence b|a as F32.  It shares the
-        # split-projection dataflow with FP8 without pretending that Q8_0 is FP8.
+        # Older Qwen GGUF exports store qkv|z as Q8_0. Qwen3.6-27B-Q4_K_M uses
+        # Q6_K for qkv and Q4_K for z, so those projections cannot share a packed
+        # qweight tensor.
         self._gguf_q8 = attn_quant == "gguf_q8"
+        self._gguf_mixed = attn_quant == "gguf_mixed"
 
         self._in_proj_split = [self.conv_dim, self.value_dim, num_v_heads, num_v_heads]
-        if self._fp8 or self._gguf_q8:
-            if self._gguf_q8:
+        if self._fp8 or self._gguf_q8 or self._gguf_mixed:
+            if self._gguf_mixed:
+                from freetoken.layers.gguf import GGUFLinear
+
+                types = dict(config.gguf_tensor_types)
+                qkv_type = types[f"blk.{layer_id}.attn_qkv.weight"]
+                self.in_proj_qkv = GGUFLinear(hidden_size, self.conv_dim, qkv_type, has_bias=False)
+                self.in_proj_z = GGUFLinear(
+                    hidden_size, self.value_dim, types[f"blk.{layer_id}.attn_gate.weight"], has_bias=False
+                )
+            elif self._gguf_q8:
                 from freetoken.layers.gguf import GGUFLinear
                 from freetoken.models.gguf.dequant import GGML_Q8_0
 
@@ -120,6 +132,20 @@ class Qwen3_5GatedDeltaNet(BaseOP):
         beta = b.sigmoid()
         g = -self.A_log.exp() * F.softplus(a.float() + self.dt_bias)
         return g, beta
+
+    def _gguf_group_value_heads_for_out_proj(self, x: torch.Tensor) -> torch.Tensor:
+        """Return HF-ordered GDN values to the original GGUF grouped head order.
+
+        Q4_K blocks in ``ssm_out`` span two 128-wide value heads. Reordering the
+        packed weights would invalidate their block metadata, so keep the weights
+        byte-exact and invert the GGUF-to-HF value-head permutation on activations.
+        """
+        if self.num_v_heads % self.num_k_heads:
+            raise ValueError(
+                f"GDN value heads {self.num_v_heads} are not divisible by key heads {self.num_k_heads}"
+            )
+        ratio = self.num_v_heads // self.num_k_heads
+        return x.reshape(-1, self.num_k_heads, ratio, self.head_v_dim).transpose(1, 2).reshape_as(x)
 
     def _conv_weight(self) -> torch.Tensor:
         return self.conv1d.weight.squeeze(1)  # [conv_dim, kernel] for the fused kernel
@@ -172,7 +198,12 @@ class Qwen3_5GatedDeltaNet(BaseOP):
             fla = build_fla_metadata(batch, hidden_states.device)
             batch.fla_metadata = fla
 
-        if self._fp8 or self._gguf_q8:
+        if self._gguf_mixed:
+            conv_in = self.in_proj_qkv.forward(hidden_states)
+            z = self.in_proj_z.forward(hidden_states)
+            ba = self.in_proj_ba.forward(hidden_states)
+            b, a = torch.split(ba, [self.num_v_heads, self.num_v_heads], dim=-1)
+        elif self._fp8 or self._gguf_q8:
             qkvz = self.in_proj_qkvz.forward(hidden_states)
             conv_in, z = torch.split(qkvz, [self.conv_dim, self.value_dim], dim=-1)
             ba = self.in_proj_ba.forward(hidden_states)
@@ -229,6 +260,8 @@ class Qwen3_5GatedDeltaNet(BaseOP):
         core_out = core_out.reshape(-1, self.head_v_dim)
         z = z.reshape(-1, self.head_v_dim)
         out = self.norm.forward(core_out, z).reshape(total, -1)
+        if self._gguf_mixed:
+            out = self._gguf_group_value_heads_for_out_proj(out)
         return self.out_proj.forward(out)
 
 

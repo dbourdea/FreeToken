@@ -53,13 +53,16 @@ def test_qwen_gguf_gdn_value_head_rows_restore_complete_quantized_rows():
         dtype=torch.uint8,
     )
 
+    # Each value head occupies two complete output rows. Eight heads therefore
+    # require sixteen rows; eight rows would describe four heads with ratio 1.
+    grouped = grouped.repeat_interleave(2, dim=0)
     restored = _restore_gdn_value_head_rows(grouped, num_key_heads=4, head_dim=2)
 
     expected = torch.tensor(
         [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 7]],
         dtype=torch.uint8,
     )
-    torch.testing.assert_close(restored, expected)
+    torch.testing.assert_close(restored, expected.repeat_interleave(2, dim=0))
 
 
 def test_qwen_gguf_gdn_output_restores_q8_blocks_without_dequantizing():

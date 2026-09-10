@@ -344,9 +344,12 @@ def parse_gguf_config(shim: "GgufConfigShim") -> ModelConfig:
     # tensor table when available, while allowing metadata-only converter tests
     # to exercise the architecture parser without a 22 GiB model file.
     q6_down_layers: tuple[int, ...] = ()
+    tensor_types: tuple[tuple[str, int], ...] = ()
     try:
         from freetoken.models.gguf.dequant import GGML_Q6_K
         from freetoken.models.gguf.reader import iter_gguf_tensors
+
+        tensor_types = tuple((t.name, int(t.ggml_type)) for t in iter_gguf_tensors(shim.model_path))
 
         q6_down_layers = tuple(
             int(t.name.split(".")[1])
@@ -391,9 +394,10 @@ def parse_gguf_config(shim: "GgufConfigShim") -> ModelConfig:
         expert_quant="q4_k_q5_k" if is_moe else "none",
         moe_weight_format="q4_k_q5_k" if is_moe else "qwen35_dense",
         gguf_q6_down_layer_ids=q6_down_layers,
-        # Dense Q8_0 projections use the native GGUF operator pair.  This is distinct
-        # from modelopt FP8: qkv|z remains packed GGUF while b|a stays F32.
-        attn_quant="gguf_q8",
+        gguf_tensor_types=tensor_types,
+        # Dense Qwen3.6-27B-Q4_K_M has Q6_K qkv and a Q4_K GDN gate. Those
+        # packed layouts have different row widths, while b|a remains F32.
+        attn_quant="gguf_mixed" if not is_moe else "gguf_q8",
     )
 
 
