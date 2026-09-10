@@ -245,6 +245,7 @@ def build_app(
                 headers=dict(request.headers),
                 body=body,
                 method=request.method,
+                timeout_s=router.upstream_timeout_s,
             )
         except Exception as exc:  # the lease must not strand a pending swap on connect failure
             lease.release()

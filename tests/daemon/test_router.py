@@ -207,6 +207,7 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
         "/v1/chat/completions", "/v1/messages", "/v1/models?limit=3",
     ]
     assert calls[-1]["method"] == "GET"
+    assert calls[-1]["timeout_s"] == 900.0
     assert router.status()["activeRequests"] == 0
 
 

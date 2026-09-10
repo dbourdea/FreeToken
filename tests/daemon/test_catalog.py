@@ -159,6 +159,7 @@ def test_router_policy_is_strict_and_public_model_fields_are_safe(tmp_path):
 api_keys = ["one", "two"]
 default_ttl_s = 300
 unload_timeout_s = 45
+upstream_timeout_s = 42
 scheduler = "fifo"
 
 [router.groups.interactive]
@@ -180,6 +181,7 @@ priority = -5
     catalog = ModelCatalog.load(str(path))
     assert catalog.settings.api_keys == ("one", "two")
     assert catalog.settings.default_ttl_s == 300
+    assert catalog.settings.upstream_timeout_s == 42
     assert catalog.settings.groups[0].members == ("coding", "chat")
     public = {item["name"]: item for item in catalog.public()}
     assert public["coding"] == {
@@ -191,6 +193,7 @@ priority = -5
 
 @pytest.mark.parametrize("router, message", [
     ("[router]\nscheduler = 'lifo'", "scheduler"),
+    ("[router]\nupstream_timeout_s = 0", "upstream_timeout_s"),
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),

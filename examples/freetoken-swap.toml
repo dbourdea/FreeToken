@@ -9,6 +9,7 @@
 api_keys = ["replace-with-a-secret"]
 default_ttl_s = 300
 unload_timeout_s = 30
+upstream_timeout_s = 900
 scheduler = "fifo"
 
 [router.groups.interactive]

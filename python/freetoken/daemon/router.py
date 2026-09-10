@@ -183,6 +183,11 @@ class RoutingCoordinator:
         with self._cond:
             return self._catalog
 
+    @property
+    def upstream_timeout_s(self) -> float:
+        with self._cond:
+            return self._catalog.settings.upstream_timeout_s
+
     def replace_catalog(self, catalog: ModelCatalog) -> None:
         """Atomically install a validated catalog without changing a live engine.
 

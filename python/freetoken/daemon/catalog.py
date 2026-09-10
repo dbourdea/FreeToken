@@ -43,6 +43,7 @@ class RouterSettings:
     api_keys: tuple[str, ...] = ()
     default_ttl_s: float = 0.0
     unload_timeout_s: float = 30.0
+    upstream_timeout_s: float = 900.0
     scheduler: str = "fifo"
     groups: tuple[RoutingGroup, ...] = ()
 
@@ -137,7 +138,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         value = {}
     if not isinstance(value, dict):
         raise CatalogError("router must be a table")
-    allowed = {"api_keys", "default_ttl_s", "unload_timeout_s", "scheduler", "groups"}
+    allowed = {"api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s", "scheduler", "groups"}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise CatalogError(f"router: unsupported keys: {', '.join(unknown)}")
@@ -184,6 +185,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         api_keys=tuple(raw_keys),
         default_ttl_s=_finite_seconds(value.get("default_ttl_s", 0), "router.default_ttl_s", minimum=0, maximum=86400),
         unload_timeout_s=_finite_seconds(value.get("unload_timeout_s", 30), "router.unload_timeout_s", minimum=1, maximum=900),
+        upstream_timeout_s=_finite_seconds(value.get("upstream_timeout_s", 900), "router.upstream_timeout_s", minimum=1, maximum=7200),
         scheduler=scheduler,
         groups=tuple(groups),
     )
