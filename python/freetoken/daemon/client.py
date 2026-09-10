@@ -21,10 +21,11 @@ DEFAULT_TIMEOUT = 10.0
 # prepare-stop (15s transport budget) + default SIGTERM grace (10s) + reap wait (10s),
 # with enough HTTP scheduling slack that a valid lifecycle transaction does not look failed.
 DEFAULT_LIFECYCLE_TIMEOUT = 40.0
+DEFAULT_PROFILE_TIMEOUT = 1920.0  # replacement + recovery readiness (2 * 900s), lifecycle margin
 
 # Positional verbs that mean "act as a client"; anything else (bare, or a flag like --host) runs
 # the server. Kept in one place so the server dispatcher and this parser agree.
-CLIENT_VERBS = ("self", "status", "health", "metrics", "stats", "start", "stop", "switch", "logs")
+CLIENT_VERBS = ("self", "status", "health", "metrics", "stats", "models", "start", "stop", "shutdown", "switch", "start-profile", "switch-profile", "logs")
 
 
 class ClientError(Exception):
@@ -36,9 +37,11 @@ class ClientError(Exception):
 def _effective_timeout(verb: str, configured: float | None) -> float:
     if configured is not None:
         return configured
+    if verb in {"start-profile", "switch-profile"}:
+        return DEFAULT_PROFILE_TIMEOUT
     return (
         DEFAULT_LIFECYCLE_TIMEOUT
-        if verb in {"stop", "switch"}
+        if verb in {"stop", "shutdown", "switch", "start-profile", "switch-profile"}
         else DEFAULT_TIMEOUT
     )
 
@@ -124,7 +127,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         "--timeout",
         type=float,
         default=None,
-        help="HTTP timeout (default 10s; stop/switch 40s)",
+        help="HTTP timeout (default 10s; stop/switch 40s; profiles 960s)",
     )
 
     p = argparse.ArgumentParser(prog=prog, description="Control a running ft daemon")
@@ -134,8 +137,15 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     sub.add_parser("health", parents=[common], help="Proxied serve health (GET /engine/health)")
     sub.add_parser("metrics", parents=[common], help="Engine footprint (GET /engine/metrics)")
     sub.add_parser("stats", parents=[common], help="Proxied serve stats (GET /engine/stats)")
+    sub.add_parser("models", parents=[common], help="List named freetoken-swap model profiles (GET /models)")
     stop = sub.add_parser("stop", parents=[common], help="Stop the serve (POST /engine/stop)")
     stop.add_argument(
+        "--force",
+        action="store_true",
+        help="stop even if final accounting cannot be sealed (may lose the unobserved token tail)",
+    )
+    shutdown = sub.add_parser("shutdown", parents=[common], help="Stop the serve and daemon (POST /shutdown)")
+    shutdown.add_argument(
         "--force",
         action="store_true",
         help="stop even if final accounting cannot be sealed (may lose the unobserved token tail)",
@@ -153,6 +163,11 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         # Everything after `--` is forwarded verbatim to ft serve (opaque passthrough):
         #   ft daemon start MODEL --port 1919 -- --moe-cache-auto --graph 256
         sp.add_argument("serve_args", nargs="*", default=[], help="Extra ft serve args (after --)")
+    for name in ("start-profile", "switch-profile"):
+        sp = sub.add_parser(name, parents=[common], help=f"POST /engine/{name}")
+        sp.add_argument("name", help="Named model profile from the daemon catalog")
+        if name == "switch-profile":
+            sp.add_argument("--force", action="store_true", help="replace even if final accounting cannot be sealed")
     lg = sub.add_parser("logs", parents=[common], help="Stream engine logs (SSE, GET /engine/logs)")
     lg.add_argument("--since", type=int, default=0, help="Replay from this seq cursor")
     return p
@@ -171,9 +186,15 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             "health": ("GET", "/engine/health", None),
             "metrics": ("GET", "/engine/metrics", None),
             "stats": ("GET", "/engine/stats", None),
+            "models": ("GET", "/models", None),
             "stop": (
                 "POST",
                 "/engine/stop",
+                {"force": True} if getattr(args, "force", False) else {},
+            ),
+            "shutdown": (
+                "POST",
+                "/shutdown",
                 {"force": True} if getattr(args, "force", False) else {},
             ),
         }
@@ -184,10 +205,17 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             if args.verb == "switch" and args.force:
                 body["force"] = True
             method, path = "POST", f"/engine/{args.verb}"
+        elif args.verb in ("start-profile", "switch-profile"):
+            body = {"name": args.name}
+            if args.verb == "switch-profile" and args.force:
+                body["force"] = True
+            method, path = "POST", f"/engine/{args.verb}"
         else:
             method, path, body = table[args.verb]
         doc = _request_json(method, args.url, path, body=body, token=args.token, timeout=timeout)
         print(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True))
+        if args.verb in {"start-profile", "switch-profile"} and not doc.get("readiness", {}).get("ready"):
+            return 1
         return 0
     except ClientError as exc:
         print(str(exc), file=sys.stderr)

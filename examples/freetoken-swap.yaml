@@ -1,0 +1,23 @@
+# Integration template, not a claim that these placeholder models are qualified.
+# Use a pinned llama-swap build and a FreeToken build containing GET /ready.
+# Do not also manage these processes with ft daemon.
+healthCheckTimeout: 300
+globalTTL: 0
+unloadTimeout: 30
+models:
+  model-a:
+    cmd: >-
+      ft serve --model /models/model-a --host 127.0.0.1 --port ${PORT}
+      --served-model-name ${MODEL_ID}
+      --max-seq-len-override 4096 --num-tokens 4096
+    checkEndpoint: /ready
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 0
+  model-b:
+    cmd: >-
+      ft serve --model /models/model-b --host 127.0.0.1 --port ${PORT}
+      --served-model-name ${MODEL_ID}
+      --max-seq-len-override 4096 --num-tokens 4096
+    checkEndpoint: /ready
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300

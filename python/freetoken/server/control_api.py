@@ -58,6 +58,15 @@ def register_control_routes(
     async def health():
         return build_health(get_state(), app.version)
 
+    @app.get("/ready")
+    async def ready():
+        """HTTP readiness for supervisors that cannot inspect health JSON."""
+        from fastapi.responses import JSONResponse
+
+        doc = build_health(get_state(), app.version)
+        accepting = doc.get("status") == "ok" and doc.get("maintenance") == "serving"
+        return JSONResponse(status_code=200 if accepting else 503, content=doc)
+
     from . import request_ring
 
     @app.get("/v1/requests")

@@ -50,6 +50,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--state-dir", default=_default_state_dir(), help="Lock/pidfile/log directory")
     p.add_argument("--token", default=os.environ.get("FREETOKEN_DAEMON_TOKEN"), help="Optional X-FT-Token shared secret")
     p.add_argument("--default-serve-port", type=int, default=DEFAULT_SERVE_PORT, help="Port used when /engine/start omits one")
+    p.add_argument("--catalog", default=os.environ.get("FREETOKEN_SWAP_CATALOG"), help="TOML named-model catalog (or $FREETOKEN_SWAP_CATALOG)")
     p.add_argument("--serve-python", default=sys.executable, help="Interpreter used to launch ft serve")
     p.add_argument("--grace", type=float, default=10.0, help="SIGTERM→SIGKILL grace seconds on stop")
     p.add_argument("--poll-interval", type=float, default=1.0, help="Adopted-serve liveness / OOM reapply interval")
@@ -109,6 +110,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     )
 
     from .checkpoint import CheckpointManager
+    from .catalog import CatalogError, ModelCatalog
     from .logring import LogRing
     from .metrics import FootprintCache
     from .pidfile import AlreadyRunning, ServeStateStore, SingleInstance
@@ -119,6 +121,12 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     state_dir = args.state_dir
     log_dir = os.path.join(state_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
+
+    try:
+        catalog = ModelCatalog.load(args.catalog) if args.catalog else ModelCatalog.empty()
+    except CatalogError as exc:
+        print(f"ft daemon: invalid model catalog: {exc}", file=sys.stderr)
+        return 2
 
     # The ONE hard refusal: two daemons cannot co-own one engine. Everything else degrades.
     lock = SingleInstance(os.path.join(state_dir, "daemon.pid"))
@@ -197,6 +205,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         checkpoints=checkpoints,
         started_wall=time.time(),
         shutdown_hook=shutdown_hook,
+        catalog=catalog,
+        catalog_path=args.catalog,
     )
 
     import uvicorn

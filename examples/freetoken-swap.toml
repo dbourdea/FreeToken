@@ -1,0 +1,39 @@
+# Native freetoken-swap catalog. This is not a llama-swap YAML file.
+#
+# Migration: map each llama-swap models.<alias>.cmd to one native model path
+# plus argv tokens. Map checkEndpoint /ready to the built-in readiness gate.
+# Never paste shell fragments, ${PORT}, or command substitutions here.
+
+[router]
+# Inference routes require `Authorization: Bearer <key>` when this is nonempty.
+api_keys = ["replace-with-a-secret"]
+default_ttl_s = 300
+unload_timeout_s = 30
+upstream_timeout_s = 900
+scheduler = "fifo"
+
+[router.groups.interactive]
+members = ["coding", "chat"]
+swap = true
+exclusive = true
+persistent = false
+
+[models.coding]
+model = "/models/coding.gguf"
+port = 1919
+args = ["--served-model-name", "coding", "--max-seq-len-override", "32768"]
+ready_timeout_s = 300
+ttl_s = 0
+priority = 10
+group = "interactive"
+# Optional narrow compatibility filter. It removes only named top-level JSON
+# fields from requests for this profile. `model` can never be removed.
+drop_fields = ["metadata"]
+
+[models.chat]
+model = "/models/chat.gguf"
+port = 1919
+args = ["--served-model-name", "chat", "--max-seq-len-override", "16384"]
+ready_timeout_s = 300
+priority = 0
+group = "interactive"
