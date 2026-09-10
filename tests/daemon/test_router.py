@@ -226,6 +226,9 @@ def test_router_inference_requires_configured_bearer_key():
         client = TestClient(app)
         denied = client.post("/v1/chat/completions", json={"model": "low"})
         assert denied.status_code == 401
+        assert client.get("/router/status").status_code == 401
+        allowed = client.get("/router/status", headers={"Authorization": "Bearer key"})
+        assert allowed.status_code == 200
         assert manager.calls == []
 
 

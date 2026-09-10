@@ -170,9 +170,19 @@ def build_app(
             except Exception:  # noqa: BLE001
                 pass
 
-    def require_token(x_ft_token: str | None = Header(default=None)) -> None:
-        if token is not None and x_ft_token != token:
-            raise HTTPException(status_code=401, detail="invalid or missing X-FT-Token")
+    def require_token(
+        x_ft_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        if token is not None:
+            if x_ft_token != token:
+                raise HTTPException(status_code=401, detail="invalid or missing X-FT-Token")
+            return
+        keys = router.catalog.settings.api_keys
+        if keys:
+            supplied = authorization.removeprefix("Bearer ") if authorization else None
+            if supplied not in keys:
+                raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     auth = [Depends(require_token)]
 
