@@ -194,7 +194,7 @@ priority = -5
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),
-    ("[models.a]\ngroup = 'other'", "must match"),
+    ("group = 'other'", "must match"),
 ])
 def test_router_policy_rejects_ambiguous_or_unsafe_configuration(tmp_path, router, message):
     path = tmp_path / "models.toml"
