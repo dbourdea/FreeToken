@@ -47,6 +47,8 @@ ft daemon logs                                 # stream engine logs (SSE)
 ft daemon health                               # proxied serve /health (camelCased)
 ft daemon metrics                              # engine-only RAM(PSS)+VRAM footprint
 ft daemon switch OTHER_MODEL                    # stop old + start new
+ft daemon models                                # list freetoken-swap named profiles
+ft daemon switch-profile coding                 # atomic switch via the local TOML catalog
 ft daemon stop
 # Recovery only: permit a degraded receipt if the failed engine cannot seal final totals.
 ft daemon stop --force
@@ -54,6 +56,10 @@ ft daemon stop --force
 
 Target a non-default daemon with `--url http://host:1900` (or `$FREETOKEN_DAEMON_URL`) and
 `--token`/`$FREETOKEN_DAEMON_TOKEN`.
+
+For named model catalogs and the `start-profile` / `switch-profile` controls, see
+[`docs/freetoken-swap.md`](../../../docs/freetoken-swap.md). Catalog profiles are argument
+vectors for `ft serve`, never shell commands.
 
 ## HTTP API (camelCase JSON, loopback by default)
 
@@ -63,6 +69,8 @@ Target a non-default daemon with `--url http://host:1900` (or `$FREETOKEN_DAEMON
 | `POST /engine/start` `{model,port,args[]}` | Idempotent on the full `(model,port,args)`; a differing config on the same port → `409`. |
 | `POST /engine/stop` `{force?:false}` | Close admission, drain/abort, durably enqueue the final-accounting receipt, then `SIGTERM`→grace→`SIGKILL`. A prepare/outbox failure preserves the engine. |
 | `POST /engine/switch` `{model,port,args[],force?:false}` | One serialized stop-accounting-start transaction. |
+| `GET /models` | Lists local freetoken-swap named profiles. |
+| `POST /engine/start-profile\|switch-profile` `{name,force?:false}` | Starts or atomically replaces the engine using a validated local profile. |
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
 | `GET /engine/metrics` | `{ramBytes,vramBytes}` — the serve tree's own footprint only. |

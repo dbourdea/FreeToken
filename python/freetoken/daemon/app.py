@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
+from .catalog import CatalogError, ModelCatalog
 from .serve_manager import Conflict
 from .version import DAEMON_VERSION
 
@@ -37,6 +38,11 @@ class StopBody(BaseModel):
 
 
 class SwitchBody(StartBody):
+    force: bool = False
+
+
+class ProfileBody(BaseModel):
+    name: str
     force: bool = False
 
 
@@ -127,11 +133,13 @@ def build_app(
     started_wall: float = 0.0,
     wall_now: Callable[[], float] | None = None,
     shutdown_hook: Callable[[], None] | None = None,
+    catalog: ModelCatalog | None = None,
 ) -> FastAPI:
     import time as _time
 
     wall_now = wall_now or _time.time
     app = FastAPI(title="FreeToken daemon", version=DAEMON_VERSION)
+    catalog = catalog or ModelCatalog.empty()
 
     if shutdown_hook is not None:
 
@@ -189,6 +197,15 @@ def build_app(
         }
 
     # ---- engine lifecycle ----
+
+    def profile_request(name: str) -> tuple[str, int, list[str]]:
+        profile = catalog.get(name)
+        return profile.model, resolve_port(profile.port), list(profile.args)
+
+    @app.get("/models", dependencies=auth)
+    async def models():
+        """A small llama-swap-style model listing, backed only by local profiles."""
+        return {"data": catalog.public()}
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):
@@ -250,6 +267,41 @@ def build_app(
             return accounting_error(exc)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"switch failed: {exc}")
+
+    @app.post("/engine/start-profile", dependencies=auth)
+    async def engine_start_profile(body: ProfileBody):
+        try:
+            model, port, args = profile_request(body.name)
+            result = await run(lifecycle_pool, manager.start, model, port, args)
+            return {**result, "profile": body.name}
+        except CatalogError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Conflict as exc:
+            st = manager.status()
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": str(exc),
+                    "code": "serve_conflict",
+                    "currentModel": st.get("model"),
+                    "currentPort": st.get("port"),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"profile start failed: {exc}")
+
+    @app.post("/engine/switch-profile", dependencies=auth)
+    async def engine_switch_profile(body: ProfileBody):
+        try:
+            model, port, args = profile_request(body.name)
+            result = await run(lifecycle_pool, manager.switch, model, port, args, body.force)
+            return {**result, "profile": body.name}
+        except CatalogError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except (AccountingPrepareError, AccountingOutboxError) as exc:
+            return accounting_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"profile switch failed: {exc}")
 
     # ---- durable accounting outbox ----
 
