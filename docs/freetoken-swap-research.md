@@ -66,7 +66,21 @@ At the current safety check, GMKtek EVO-X2 had an active llama.cpp process and a
 
 The next real-model gate is one deterministic completion, repeated after a cold reload, with model identity and raw output retained privately. After that, test A-to-B-to-A routing, ordinary and streamed responses, cancellation, same-model concurrency, conflicting-model admission, idle eviction, forced backend failure, and shutdown. Record peak memory, swap activity, load time, time to first token, and final process cleanup. Stop a failed quality or memory-safety trial without promoting it to production.
 
-CPU contract tests and mocked HTTP tests are valuable regression evidence, but they are not proof of GPU numerical correctness, backend graph readiness, or live swap throughput. Any release checklist must retain those distinctions. No new production activation, protected-service shutdown, or successful live model-swap claim is part of the present evidence.
+CPU contract tests and mocked HTTP tests are valuable regression evidence, but they are not proof of GPU numerical correctness, backend graph readiness, or live swap throughput. Any release checklist must retain those distinctions. The subsequently approved maintenance-window results below supersede the initial restriction on stopping the protected service. No permanent production activation was performed.
+
+## Completed live iterations
+
+The repaired Qwen3.6 and Qwen3.8 files both passed their exact CPU/meta tensor contracts and tokenizer text round-trips. Twenty-one model tests passed, including a matrix of independently typed QKV/gate projections. The daemon suite passed 52 tests with two platform skips; the AMD benchmark/privacy suite passed 27 tests.
+
+The first live startup problem was a qualification-command error: `python -m freetoken` is the legacy direct-server entrypoint and rejects the `serve` subcommand. The corrected invocation is `python -m freetoken.cli serve`. Another attempt stalled behind an abandoned shared PyTorch extension-cache lock. The solution was a private `TORCH_EXTENSIONS_DIR` and native-kernel preflight before stopping the protected service. The shared cache was left untouched.
+
+Two complete A-to-B-to-A passes then succeeded through the pinned, unmodified llama-swap binary. The extended pass returned the deterministic answer `4` for Qwen3.6, Qwen3.8, then Qwen3.6 in 35.99, 44.17, and 33.17 seconds, including loading or switching. It also passed two concurrent requests for the same model, concurrent requests for different models, explicit streamed usage blocks, and five-second idle eviction. These are bounded functional controls, not broad quality benchmarks or isolated decode-throughput measurements.
+
+Both ordinary and SSE responses were checked, including `[DONE]`. Adding `stream_options: {"include_usage": true}` eliminated the missing-usage metrics issue without changing llama-swap. The original stream was valid JSON but lacked the usage block that its metrics parser requires. The final proxy/backend log contained no recorded traceback or streaming-metrics error.
+
+Every maintenance trial restored the protected service and verified a deterministic completion. After the final pass, the service manager reported it active and running, and the test listeners were closed. Raw artifacts remain private under the logical sets `freetoken-swap-live-20260910-d` and `freetoken-swap-live-20260910-e`. FreeToken PR #1 contains the control-plane integration and PR #2 contains the AMD model repair and anonymization.
+
+Remaining limits are explicit: no claim of long-context qualification, comprehensive tool-calling quality, cancellation coverage, automatic rollback, or long-duration reliability is made. The direct integration does not acquire the daemon's durable accounting guarantees. Semaphore-cleanup warnings remain a follow-up investigation even though the service recovery and port cleanup checks passed.
 
 ## Privacy and publication
 
