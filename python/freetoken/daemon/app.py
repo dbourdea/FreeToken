@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from .accounting import AccountingOutboxError, AccountingPrepareError
 from .catalog import CatalogError, ModelCatalog
 from .readiness import wait_for_ready
-from .serve_manager import Conflict
+from .serve_manager import Conflict, SwitchLaunchError
 from .version import DAEMON_VERSION
 
 
@@ -208,10 +208,18 @@ def build_app(
         readiness = wait_for_ready(
             manager, probe, pid=result.get("pid"), port=port, timeout_s=profile.ready_timeout_s
         )
+
         content = {**result, "profile": name, "readiness": readiness}
         if not readiness["ready"]:
             return JSONResponse(status_code=503, content=content)
         return content
+
+    @app.exception_handler(SwitchLaunchError)
+    async def switch_launch_error(request: Request, exc: SwitchLaunchError):
+        return JSONResponse(status_code=503, content={
+            "code": "switch_launch_failed", "error": str(exc),
+            "rollback": exc.rollback, "accounting": exc.accounting,
+        })
 
     @app.get("/models", dependencies=auth)
     async def models():
@@ -277,6 +285,8 @@ def build_app(
         except (AccountingPrepareError, AccountingOutboxError) as exc:
             return accounting_error(exc)
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, SwitchLaunchError):
+                raise
             raise HTTPException(status_code=500, detail=f"switch failed: {exc}")
 
     @app.post("/engine/start-profile", dependencies=auth)
@@ -312,6 +322,8 @@ def build_app(
         except (AccountingPrepareError, AccountingOutboxError) as exc:
             return accounting_error(exc)
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, SwitchLaunchError):
+                raise
             raise HTTPException(status_code=500, detail=f"profile switch failed: {exc}")
 
     # ---- durable accounting outbox ----

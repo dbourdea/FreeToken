@@ -13,7 +13,7 @@ from freetoken.daemon.accounting import (
 )
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.pidfile import ServeState, ServeStateStore
-from freetoken.daemon.serve_manager import Conflict, ExitInfo, ServeManager
+from freetoken.daemon.serve_manager import Conflict, ExitInfo, ServeManager, SwitchLaunchError
 
 
 # --------------------------------------------------------------------------- test doubles
@@ -115,6 +115,45 @@ def make_manager(
 
 
 # --------------------------------------------------------------------------- start / idempotency
+
+
+@pytest.mark.parametrize("recovery_fails", [False, True])
+def test_switch_spawn_failure_restores_exact_previous_launch(tmp_path, recovery_fails):
+    sp = Spawner()
+    calls = []
+
+    def spawn(model, port, args):
+        calls.append((model, port, list(args)))
+        if model == "bad" or (recovery_fails and len(calls) == 3):
+            raise OSError("injected launch failure")
+        return sp(model, port, args)
+
+    mgr, store, _ = make_manager(
+        tmp_path, spawn, signal_fn=lambda pid, sig: sp.by_pid(pid).die()
+    )
+    mgr.start("previous", 1922, ["--example"])
+    with pytest.raises(SwitchLaunchError) as failed:
+        mgr.switch("bad", 1923, [])
+    assert calls == [("previous", 1922, ["--example"]),
+                     ("bad", 1923, []), ("previous", 1922, ["--example"])]
+    assert failed.value.rollback["attempted"] is True
+    assert failed.value.rollback["launched"] is (not recovery_fails)
+    assert failed.value.accounting is not None
+    assert mgr.status()["running"] is (not recovery_fails)
+    if not recovery_fails:
+        assert store.load().model == "previous"
+        mgr.stop()
+
+
+def test_switch_spawn_failure_without_previous_does_not_retry(tmp_path):
+    def spawn(*args):
+        raise OSError("injected launch failure")
+
+    mgr, _, _ = make_manager(tmp_path, spawn)
+    with pytest.raises(SwitchLaunchError) as failed:
+        mgr.switch("bad", 1922)
+    assert failed.value.rollback == {"attempted": False, "launched": False}
+    assert not mgr.status()["running"]
 
 
 def test_start_reports_running(tmp_path):

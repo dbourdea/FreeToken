@@ -40,6 +40,15 @@ class Conflict(RuntimeError):
     """A different serve (model/port/args) is already running; the client should switch()."""
 
 
+class SwitchLaunchError(RuntimeError):
+    """Replacement failed; rollback describes launch recovery, not readiness."""
+
+    def __init__(self, error: Exception, rollback: dict, accounting: dict | None):
+        super().__init__(f"replacement launch failed: {error}")
+        self.rollback = rollback
+        self.accounting = accounting
+
+
 @dataclass
 class ExitInfo:
     code: int | None  # Popen convention: >=0 exit status, <0 == -signal; None if unknowable
@@ -409,8 +418,28 @@ class ServeManager:
         force: bool = False,
     ) -> dict:
         with self._lifecycle:
+            with self._cond:
+                previous = ((self._model, self._port, list(self._args))
+                            if self._child is not None and not self._stopping else None)
             stopped = self._stop(force=force)
-            started = self._start(model, port, args)
+            try:
+                started = self._start(model, port, args)
+            except Exception as exc:
+                rollback = {"attempted": False, "launched": False}
+                # A post-spawn failure may leave an owned child. Never spawn a
+                # second engine or bypass accounting to remove that child.
+                with self._cond:
+                    can_restore = self._child is None and previous is not None
+                if can_restore:
+                    rollback["attempted"] = True
+                    try:
+                        restored = self._start(*previous)
+                        rollback.update(launched=True, pid=restored["pid"])
+                        self._emit("replacement launch failed; previous engine relaunched")
+                    except Exception as recovery_exc:
+                        rollback["error"] = str(recovery_exc)
+                        self._emit(f"replacement launch rollback failed: {recovery_exc}")
+                raise SwitchLaunchError(exc, rollback, stopped["accounting"]) from exc
             return {**started, "accounting": stopped["accounting"]}
 
     def pending_accounting(self) -> list[dict[str, Any]]:

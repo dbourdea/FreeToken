@@ -1,6 +1,7 @@
 """Swap boundary regressions, runnable without the GPU runtime."""
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,37 @@ from freetoken.daemon.catalog import CatalogError, ModelCatalog
 from freetoken.daemon import client as daemon_client
 from freetoken.daemon.readiness import wait_for_ready
 from freetoken.daemon.proxy import ServeProbe
+from freetoken.daemon.app import build_app
+from freetoken.daemon.logring import LogRing
+from freetoken.daemon.serve_manager import SwitchLaunchError
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/engine/switch", {"model": "bad"}),
+    ("/engine/switch-profile", {"name": "bad"}),
+])
+def test_switch_launch_recovery_is_503_not_success(tmp_path, route, body):
+    path = tmp_path / "models.toml"
+    path.write_text("[models.bad]\nmodel = 'bad'\n", encoding="utf-8")
+
+    class Manager:
+        def status(self):
+            return {"port": 1922}
+
+        def switch(self, *args):
+            raise SwitchLaunchError(OSError("failed"),
+                                    {"attempted": True, "launched": True, "pid": 42}, None)
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(manager=Manager(), ring=LogRing(), probe=None,
+                        footprint_fn=lambda pid: {}, lifecycle_pool=lifecycle,
+                        proxy_pool=proxy, catalog=ModelCatalog.load(str(path)))
+        with TestClient(app) as client:
+            response = client.post(route, json=body)
+    assert response.status_code == 503
+    assert response.json()["code"] == "switch_launch_failed"
+    assert response.json()["rollback"]["launched"] is True
+    assert "ready" not in response.json()["rollback"]
 
 
 @pytest.mark.parametrize("arg", ["--model-path", "--model-path=other", "--model-p", "--mod=other", "--por=8", "--"])
