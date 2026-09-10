@@ -1,6 +1,7 @@
 """Swap boundary regressions, runnable without the GPU runtime."""
 
 import ast
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -15,6 +16,57 @@ from freetoken.daemon.proxy import ServeProbe
 from freetoken.daemon.app import build_app
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.serve_manager import SwitchLaunchError
+from tests.daemon.test_daemon_serve_manager import Spawner, make_manager
+
+
+@pytest.mark.parametrize("failure", ["error", "timeout", "operator-stop", "recovery-error"])
+def test_profile_readiness_failure_recovery_end_to_end(tmp_path, failure):
+    sp = Spawner()
+    manager, _, ring = make_manager(tmp_path, sp,
+                                   signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    manager.start("previous", 1922, ["--original"])
+    path = tmp_path / "models.toml"
+    path.write_text("[models.bad]\nmodel = 'replacement'\nport = 1923\nready_timeout_s = 1\n",
+                    encoding="utf-8")
+    entered, release = threading.Event(), threading.Event()
+
+    class Probe:
+        def fresh_health(self, port):
+            if port == 1922:
+                status = "error" if failure == "recovery-error" else "ok"
+            elif failure == "operator-stop":
+                entered.set()
+                assert release.wait(5)
+                status = "error"
+            else:
+                status = "loading" if failure == "timeout" else "error"
+            return {"reachable": True, "status": status, "maintenance": "serving"}
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(manager=manager, ring=ring, probe=Probe(),
+                        footprint_fn=lambda pid: {}, lifecycle_pool=lifecycle,
+                        proxy_pool=proxy, catalog=ModelCatalog.load(str(path)))
+        with TestClient(app) as client, ThreadPoolExecutor(1) as requests:
+            response_task = requests.submit(client.post, "/engine/switch-profile", json={"name": "bad"})
+            if failure == "operator-stop":
+                try:
+                    assert entered.wait(5)
+                    # The only proxy worker is blocked, but lifecycle remains available.
+                    assert client.post("/engine/stop", json={}).status_code == 200
+                finally:
+                    release.set()
+            response = response_task.result(timeout=10)
+    assert response.status_code == 503
+    doc = response.json()
+    assert not doc["readiness"]["ready"]
+    if failure == "operator-stop":
+        assert doc["rollback"]["reason"] == "superseded"
+        assert not manager.status()["running"]
+    else:
+        assert doc["rollback"]["launched"]
+        assert doc["rollback"]["readiness"]["ready"] is (failure != "recovery-error")
+        assert manager.status()["model"] == "previous"
+        manager.stop()
 
 
 @pytest.mark.parametrize("route,body", [
@@ -32,6 +84,8 @@ def test_switch_launch_recovery_is_503_not_success(tmp_path, route, body):
         def switch(self, *args):
             raise SwitchLaunchError(OSError("failed"),
                                     {"attempted": True, "launched": True, "pid": 42}, None)
+
+        switch_for_readiness = switch
 
     with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
         app = build_app(manager=Manager(), ring=LogRing(), probe=None,

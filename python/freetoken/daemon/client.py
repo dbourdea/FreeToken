@@ -21,7 +21,7 @@ DEFAULT_TIMEOUT = 10.0
 # prepare-stop (15s transport budget) + default SIGTERM grace (10s) + reap wait (10s),
 # with enough HTTP scheduling slack that a valid lifecycle transaction does not look failed.
 DEFAULT_LIFECYCLE_TIMEOUT = 40.0
-DEFAULT_PROFILE_TIMEOUT = 960.0  # max catalog readiness (900s) plus lifecycle budget
+DEFAULT_PROFILE_TIMEOUT = 1920.0  # replacement + recovery readiness (2 * 900s), lifecycle margin
 
 # Positional verbs that mean "act as a client"; anything else (bare, or a flag like --host) runs
 # the server. Kept in one place so the server dispatcher and this parser agree.

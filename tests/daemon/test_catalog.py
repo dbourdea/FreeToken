@@ -106,6 +106,9 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
             self.running = True
             return {"switched": True, "model": model, "port": port}
 
+        def switch_for_readiness(self, *args):
+            return self.switch(*args), None
+
     class Probe:
         def fresh_health(self, port):
             return {"reachable": True, "status": "ok", "port": port}

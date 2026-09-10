@@ -156,6 +156,97 @@ def test_switch_spawn_failure_without_previous_does_not_retry(tmp_path):
     assert not mgr.status()["running"]
 
 
+@pytest.mark.parametrize("newer_action", [None, "stop", "switch", "shutdown", "start"])
+def test_readiness_recovery_never_overrides_newer_lifecycle(tmp_path, newer_action):
+    sp = Spawner()
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    mgr.start("previous", 1922, ["--original"])
+    _, ticket = mgr.switch_for_readiness("replacement", 1923)
+    if newer_action == "stop":
+        mgr.stop()
+    elif newer_action == "shutdown":
+        mgr.shutdown()
+    elif newer_action == "switch":
+        mgr.switch("newer", 1924)
+    elif newer_action == "start":
+        mgr.start("replacement", 1923)  # even explicit idempotent intent wins
+    result = mgr.recover_switch(ticket)
+    assert result["launched"] is (newer_action is None)
+    if newer_action is not None:
+        assert result["reason"] == "superseded"
+    else:
+        assert sp.calls[-1] == ("previous", 1922, ["--original"])
+    # Recovery is single-use even when a delayed caller repeats the request.
+    assert mgr.recover_switch(ticket)["reason"] == "superseded"
+    mgr.stop()
+
+
+def test_readiness_recovery_preserves_engine_when_accounting_fails(tmp_path):
+    sp = Spawner()
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    mgr.start("previous", 1922)
+    _, ticket = mgr.switch_for_readiness("replacement", 1923)
+
+    def unavailable(port):
+        raise AccountingPrepareError("injected unavailable accounting")
+
+    mgr._prepare_stop = unavailable
+    result = mgr.recover_switch(ticket)
+    assert result["attempted"] and not result["launched"]
+    assert result["enginePreserved"]
+    assert mgr.status()["model"] == "replacement"
+    mgr._prepare_stop = None
+    mgr.stop()
+
+
+def test_readiness_recovery_can_restore_after_replacement_exits(tmp_path):
+    sp = Spawner()
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    mgr.start("previous", 1922)
+    replacement, ticket = mgr.switch_for_readiness("replacement", 1923)
+    child = sp.by_pid(replacement["pid"])
+    child.die(1)
+    assert child.reaped.wait(3)
+    assert mgr.recover_switch(ticket)["launched"]
+    assert mgr.status()["model"] == "previous"
+    mgr.stop()
+
+
+def test_recovery_waits_for_old_pidfile_cleanup(tmp_path):
+    sp = Spawner()
+    mgr, store, _ = make_manager(tmp_path, sp,
+                                signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    mgr.start("previous", 1922)
+    replacement, ticket = mgr.switch_for_readiness("replacement", 1923)
+    entered, release = threading.Event(), threading.Event()
+    clear = store.clear
+
+    def delayed_clear():
+        entered.set()
+        assert release.wait(5)
+        clear()
+
+    store.clear = delayed_clear
+    sp.by_pid(replacement["pid"]).die(1)
+    assert entered.wait(3)
+    result = {}
+    recovery = threading.Thread(target=lambda: result.update(mgr.recover_switch(ticket)))
+    recovery.start()
+    try:
+        assert len(sp.calls) == 2
+    finally:
+        release.set()
+    recovery.join(3)
+    assert not recovery.is_alive()
+    assert result["launched"]
+    assert store.load().model == "previous"
+    store.clear = clear
+    mgr.stop()
+
+
 def test_start_reports_running(tmp_path):
     sp = Spawner()
     mgr, store, _ = make_manager(tmp_path, sp)

@@ -55,6 +55,13 @@ class ExitInfo:
     source: str  # "exited" | "signalled" | "stopped" | "adopted-vanished" | "unknown"
 
 
+@dataclass(frozen=True)
+class SwitchRecovery:
+    epoch: int
+    child: object
+    previous: tuple[str, int, list[str]] | None
+
+
 # --------------------------------------------------------------------------- child abstractions
 
 
@@ -220,6 +227,7 @@ class ServeManager:
         # Serialize complete lifecycle transactions, including prepare -> durable receipt -> signal.
         # RLock lets switch() compose stop+start without opening an interleaving window.
         self._lifecycle = threading.RLock()
+        self._lifecycle_epoch = 0
         self._cond = threading.Condition(threading.Lock())
         # state guarded by _cond
         self._child: object | None = None
@@ -268,6 +276,7 @@ class ServeManager:
         self, model: str, port: int, args: list[str] | None = None, *, _auto: bool = False
     ) -> dict:
         with self._lifecycle:
+            self._lifecycle_epoch += 1
             return self._start(model, port, args, _auto=_auto)
 
     def _start(
@@ -335,6 +344,7 @@ class ServeManager:
 
     def stop(self, timeout: float | None = None, force: bool = False) -> dict:
         with self._lifecycle:
+            self._lifecycle_epoch += 1
             return self._stop(timeout, force)
 
     def shutdown(self, timeout: float | None = None, force: bool = False) -> dict:
@@ -345,6 +355,7 @@ class ServeManager:
         If accounting/signalling fails, the daemon remains up and normal lifecycle calls reopen.
         """
         with self._lifecycle:
+            self._lifecycle_epoch += 1
             with self._cond:
                 self._shutdown_requested = True
                 self._cond.notify_all()
@@ -418,6 +429,7 @@ class ServeManager:
         force: bool = False,
     ) -> dict:
         with self._lifecycle:
+            self._lifecycle_epoch += 1
             with self._cond:
                 previous = ((self._model, self._port, list(self._args))
                             if self._child is not None and not self._stopping else None)
@@ -441,6 +453,49 @@ class ServeManager:
                         self._emit(f"replacement launch rollback failed: {recovery_exc}")
                 raise SwitchLaunchError(exc, rollback, stopped["accounting"]) from exc
             return {**started, "accounting": stopped["accounting"]}
+
+    def switch_for_readiness(self, model, port, args=None, force=False):
+        """Capture a recovery ticket atomically; never hold the lock during HTTP probes."""
+        with self._lifecycle:
+            with self._cond:
+                previous = ((self._model, self._port, list(self._args))
+                            if self._child is not None and not self._stopping else None)
+            result = self.switch(model, port, args, force)
+            with self._cond:
+                ticket = SwitchRecovery(self._lifecycle_epoch, self._child, previous)
+            return result, ticket
+
+    def recover_switch(self, ticket: SwitchRecovery, force=False):
+        """Recover only this switch, without overriding newer lifecycle intent.
+
+        All stop/accounting safeguards still apply. A failed readiness check is
+        not permission to force-kill an engine or discard its accounting.
+        """
+        with self._lifecycle:
+            with self._cond:
+                superseded = (self._lifecycle_epoch != ticket.epoch
+                              or self._shutdown_requested
+                              or (self._child is not None and self._child is not ticket.child))
+                reaping = self._child is None and ticket.child is not None
+            if superseded:
+                return {"attempted": False, "launched": False, "reason": "superseded"}
+            if ticket.previous is None:
+                return {"attempted": False, "launched": False, "reason": "no-previous-engine"}
+            self._lifecycle_epoch += 1  # consume ticket before any fallible operation
+            try:
+                # The monitor clears _child before clearing its persisted state.
+                # Wait for that cleanup so it cannot erase the restored pidfile.
+                if reaping and not ticket.child.reaped.wait(self._reap_wait_s):
+                    raise RuntimeError("replacement exit cleanup has not completed")
+                stopped = self._stop(force=force)
+                restored = self._start(*ticket.previous)
+            except Exception as exc:
+                self._emit(f"readiness rollback failed: {exc}")
+                return {"attempted": True, "launched": False, "error": str(exc),
+                        "enginePreserved": self.current_pid() is not None}
+            self._emit("replacement readiness failed; previous engine relaunched")
+            return {"attempted": True, "launched": True, "pid": restored["pid"],
+                    "port": ticket.previous[1], "accounting": stopped["accounting"]}
 
     def pending_accounting(self) -> list[dict[str, Any]]:
         return self._accounting.pending()

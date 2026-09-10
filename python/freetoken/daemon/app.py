@@ -315,8 +315,22 @@ def build_app(
     async def engine_switch_profile(body: ProfileBody):
         try:
             model, port, args = profile_request(body.name)
-            result = await run(lifecycle_pool, manager.switch, model, port, args, body.force)
-            return await run(proxy_pool, profile_result, body.name, result, port)
+            result, ticket = await run(
+                lifecycle_pool, manager.switch_for_readiness, model, port, args, body.force
+            )
+            response = await run(proxy_pool, profile_result, body.name, result, port)
+            if not isinstance(response, JSONResponse):
+                return response
+            content = json.loads(response.body)
+            rollback = await run(lifecycle_pool, manager.recover_switch, ticket, body.force)
+            if rollback.get("launched"):
+                profile = catalog.get(body.name)
+                rollback["readiness"] = await run(proxy_pool, functools.partial(
+                    wait_for_ready, manager, probe, pid=rollback["pid"],
+                    port=rollback["port"], timeout_s=profile.ready_timeout_s,
+                ))
+            content["rollback"] = rollback
+            return JSONResponse(status_code=503, content=content)
         except CatalogError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except (AccountingPrepareError, AccountingOutboxError) as exc:

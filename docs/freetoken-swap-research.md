@@ -28,7 +28,7 @@ The added `/ready` endpoint preserves `/health` compatibility. It returns HTTP 2
 
 The manual daemon profile path also had a stale-cache hazard. Its general health probe caches by port, but successive engines can reuse a port. A readiness check now bypasses that cache and rechecks the managed PID after the HTTP request. It also uses the launch port captured for the transaction instead of resolving a potentially changed current port afterward. This reduces false success during replacement, but it is not a request lease or a complete proof against PID reuse and unrelated port ownership.
 
-Readiness failure now returns HTTP 503 from profile operations, and the CLI returns nonzero for unsuccessful readiness responses, including responses from older servers that still use HTTP 200. The default profile transport budget is 960 seconds, covering the catalog's maximum 900-second readiness budget plus lifecycle overhead. A user-specified timeout still takes precedence. Timeout leaves the process under supervision for inspection; automatic rollback is not implemented.
+Readiness failure returns HTTP 503 from profile operations, and the CLI returns nonzero for unsuccessful readiness responses, including responses from older servers that still use HTTP 200. The default profile transport budget is 1920 seconds, covering replacement and recovery readiness windows plus lifecycle overhead. A user-specified timeout still takes precedence. Native `switch-profile` now attempts previous-engine recovery after readiness failure, guarded by a one-use lifecycle epoch so newer operator actions win. Initial starts without a previous engine remain managed for inspection. Recovery retains the accounting safeguards and reports launch and readiness independently.
 
 The catalog validation also rejects the `--model-path` alias and abbreviations of supervisor-owned model and port options. FreeToken uses argparse, whose default abbreviation behavior makes checking only the exact strings `--model` and `--port` insufficient. Validation remains torch-free and accepts argument vectors rather than catalog-supplied shell commands.[6]
 
@@ -50,7 +50,7 @@ Dense checkpoints contain no routed experts. Their expert-only loading phase mus
 
 There are two valid operating modes, with different guarantees. In direct integration mode, a pinned llama-swap binary owns FreeToken processes and supplies automatic routing, streaming proxying, idle eviction, and its existing model-management interfaces. FreeToken supplies `/ready` and inference. The YAML example describes this mode. Do not simultaneously give those processes to `ft daemon`.
 
-In native daemon mode, FreeToken owns process groups, durable state, and final accounting receipts. The current catalog gives operators named start and switch operations. It lacks inference model routing, stream-aware admission, idle eviction, and rollback. Calling this mode a complete llama-swap replacement would overstate the implementation.
+In native daemon mode, FreeToken owns process groups, durable state, and final accounting receipts. The catalog gives operators named start and switch operations with launch-failure and readiness-failure recovery. It lacks inference model routing, stream-aware admission, and idle eviction. Calling this mode a complete llama-swap replacement would overstate the implementation.
 
 The recommended delivery sequence is to qualify the direct integration first, while retaining the native daemon catalog as a separate control-plane feature. If durable accounting is mandatory for automatically routed workloads, add a lifecycle adapter or native routing layer with explicit ownership and receipt semantics. Do not approximate that integration by letting both supervisors kill and restart the same engine. The direct example does not promise the daemon's durable accounting outbox.
 
@@ -80,7 +80,11 @@ Both ordinary and SSE responses were checked, including `[DONE]`. Adding `stream
 
 Every maintenance trial restored the protected service and verified a deterministic completion. After the final pass, the service manager reported it active and running, and the test listeners were closed. Raw artifacts remain private under the logical sets `freetoken-swap-live-20260910-d` and `freetoken-swap-live-20260910-e`. FreeToken PR #1 contains the control-plane integration and PR #2 contains the AMD model repair and anonymization.
 
-Remaining limits are explicit: no claim of long-context qualification, comprehensive tool-calling quality, cancellation coverage, automatic rollback, or long-duration reliability is made. The direct integration does not acquire the daemon's durable accounting guarantees. Semaphore-cleanup warnings remain a follow-up investigation even though the service recovery and port cleanup checks passed.
+Remaining limits are explicit: no claim of long-context qualification, comprehensive tool-calling quality, cancellation coverage, direct-supervisor rollback, or long-duration reliability is made. Native daemon rollback has CPU failure-injection and HTTP integration coverage, not GPU failure-recovery qualification. The direct integration does not acquire the daemon's durable accounting guarantees. Semaphore-cleanup warnings remain a follow-up investigation even though the service recovery and port cleanup checks passed.
+
+### Native recovery regression suite
+
+The daemon suite passes 69 tests with 2 platform skips. Added coverage exercises replacement launch failure, recovery launch failure, readiness error and timeout, recovery readiness failure, accounting failure preservation, replacement exit and persisted-state cleanup, one-use recovery tickets, and invalidation by newer lifecycle operations. An HTTP integration test blocks the only proxy worker during readiness and confirms that an operator stop completes through the separate lifecycle worker without triggering stale recovery. These are controlled CPU tests with fake child processes, not new real-model measurements.
 
 ## Privacy and publication
 
