@@ -38,10 +38,10 @@ claim that the two engines have identical scheduler internals.
 | Aggregate p99 token gap | 132.36 ms | 283.97 ms |
 
 FreeToken artifact:
-`/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260904T150838Z/`
+`/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260904T150838Z/`
 
 llama.cpp artifact:
-`/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260904T152038Z/`
+`/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260904T152038Z/`
 
 ## Four-client concurrency matrix
 
@@ -60,10 +60,10 @@ rate because its tested one-slot configuration serialized concurrent work.
 FreeToken admitted the four clients with substantially lower TTFT.
 
 FreeToken artifact:
-`/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260904T152716Z/`
+`/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260904T152716Z/`
 
 llama.cpp artifact:
-`/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260904T161303Z/`
+`/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260904T161303Z/`
 
 ## Long-context behavior
 

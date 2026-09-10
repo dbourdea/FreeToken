@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 in-scope model inventory
+# GMKtek EVO-X2 in-scope model inventory
 
 This inventory separates the model that is active now from models found in
 archived model-routing qualification configurations. It is based on a
@@ -10,7 +10,7 @@ it is not evidence that the model is currently loaded or production-routed.
 
 | Model identity | Runtime state | Existing evidence |
 | --- | --- | --- |
-| `qwen3.6-35b-a3b-nvfp4-amd` using `/home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4` | Active native ROCm/HIP service | Qwen quality suite, Q5 four-row qualification, ROCm 10 comparison, W1 to W4 bounded controls, recovery, and 1,440-session endurance |
+| `qwen3.6-35b-a3b-nvfp4-amd` using `/home/operator/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4` | Active native ROCm/HIP service | Qwen quality suite, Q5 four-row qualification, ROCm 10 comparison, W1 to W4 bounded controls, recovery, and 1,440-session endurance |
 
 The active command line uses the native Triton attention path, the offload MoE
 backend, automatic expert-cache sizing, serial expert loading, and an 8,192

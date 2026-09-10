@@ -1,7 +1,7 @@
 # DeepSeek-V4-Flash offload feasibility model
 
 This document converts the measured official checkpoint size into a bounded
-feasibility calculation for the GMKtec EVO-X2 Strix Halo. It is a planning
+feasibility calculation for the GMKtek EVO-X2 Strix Halo. It is a planning
 artifact only. It does not download weights, start a model, or change the
 protected service.
 

@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 NVFP4 Marlin parity test
+# GMKtek EVO-X2 NVFP4 Marlin parity test
 
 ## Purpose
 
@@ -9,7 +9,7 @@ path, not an end-to-end throughput claim.
 
 ## Command and environment
 
-The test ran on the GMKtec EVO-X2 using the source checkout's existing Python
+The test ran on the GMKtek EVO-X2 using the source checkout's existing Python
 environment and the native HIP runtime:
 
 ```text

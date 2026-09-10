@@ -1,8 +1,8 @@
-# GMKtec EVO-X2 Qwen router and cache optimization, 2026-08-29
+# GMKtek EVO-X2 Qwen router and cache optimization, 2026-08-29
 
 ## Scope
 
-This record covers only the isolated FreeToken server on GMKtec EVO-X2's Radeon 8060S
+This record covers only the isolated FreeToken server on GMKtek EVO-X2's Radeon 8060S
 (`gfx1151`). It did not start, stop, unmask, or reconfigure llama-swap or the
 production llama.cpp service. All server instances bound only to `127.0.0.1:1919`.
 
@@ -10,7 +10,7 @@ production llama.cpp service. All server instances bound only to `127.0.0.1:1919
 
 FreeToken's vendored Triton softmax top-k router was evaluated on ROCm.
 Qwen3.6 NVFP4 uses 256 experts and selects eight experts per token. On
-GMKtec EVO-X2, the candidate matched the PyTorch reference in the isolated router
+GMKtek EVO-X2, the candidate matched the PyTorch reference in the isolated router
 test and reduced router-only latency at the production shape.
 
 | Router microbenchmark | PyTorch reference | HIP Triton | Speedup |
@@ -50,7 +50,7 @@ an independently justified numerical reason and task-level quality is proven.
 ### Current quality restoration proof
 
 After restoring the exact PyTorch router, the same AIME-25 problem zero was
-warmed once and measured once against the live GMKtec EVO-X2 server. The checkpoint
+warmed once and measured once against the live GMKtek EVO-X2 server. The checkpoint
 used greedy sampling, a thinking-enabled template, and a forced 128-token
 decode. The 54-token prompt produced the historic output SHA-1
 `0acef4eab6f4` exactly. The dedicated script
@@ -76,7 +76,7 @@ that the rejected Triton router should be restored.
 
 ## Calibration and rejected alternatives
 
-`ft bench bw` measured Qwen NVFP4's real expert kernels on GMKtec EVO-X2. The CPU
+`ft bench bw` measured Qwen NVFP4's real expert kernels on GMKtek EVO-X2. The CPU
 expert path reached 4.8 GB/s, while HIP expert gather reached 92.5 GB/s. That
 is a 0.05x CPU-to-gather ratio, so the calibration selected `offload`, not
 `hybrid`. CPU and GPU hybrid execution is therefore not a sound optimization
@@ -90,21 +90,21 @@ ROCm graph capture was accepted and completed for batch size one, but reduced
 sustained decode throughput by about 1.2 percent. It remains disabled in the
 accepted isolated launcher.
 
-## Evidence locations on GMKtec EVO-X2
+## Evidence locations on GMKtek EVO-X2
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T085317Z/
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T090601Z/
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T091716Z/
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run1.json
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run2.json
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run3.json
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T085317Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T090601Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T091716Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run1.json
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run2.json
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T093921Z/aime-quality-tps-run3.json
 ```
 
 The current best configuration is reloading under:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T092725Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T092725Z/
 ```
 
 ## Remaining gap
@@ -130,7 +130,7 @@ the same isolated Qwen command directly through the wheel-compatible
 ROCm SQLite trace below and passed the deterministic AIME output gate.
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T100601Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T100601Z/
   rocprof-full-qwen/david-Gmktec-x2-2/54976_results.db
 ```
 
@@ -225,7 +225,7 @@ quality, not merely a different kernel that happens to pass one output check.
 
 The current source passed the native focused regression suite after these
 experiments: `22 passed, 11 skipped` in
-`tests/kernels/test_fp8_pertensor_linear.py` on GMKtec EVO-X2.
+`tests/kernels/test_fp8_pertensor_linear.py` on GMKtek EVO-X2.
 
 ### Hardware counters and NVFP4 follow-up
 
@@ -265,7 +265,7 @@ leak into a full-model reload merely because they are faster.
 
 The AMD branch merged FreeToken upstream commit `58f4b9e`, which fixes an
 NVIDIA Ada row-wise W8A8 prefill issue. The merge is current-main compatible
-and does not alter GMKtec EVO-X2's ROCm W8A16 dense decode route, but it was still
+and does not alter GMKtek EVO-X2's ROCm W8A16 dense decode route, but it was still
 validated from a fresh isolated server launch rather than inferred from source
 inspection. The combined focused native test suite completed with `28 passed,
 22 skipped`.
@@ -278,7 +278,7 @@ in the prior baseline. This allocation difference is recorded as a source
 revision effect, not an optimization result.
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T113506Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T113506Z/
   aime-quality-current-main.json
 ```
 
@@ -298,7 +298,7 @@ geometry, so the AMD branch adds a documented profile: 40 MoE layers, 256
 experts per layer, top-8 routing, hidden size 2048, intermediate size 512, and
 the production six-bank NVFP4 layout.
 
-On GMKtec EVO-X2, with a 513-slot cache, one active token and all eight routed experts
+On GMKtek EVO-X2, with a 513-slot cache, one active token and all eight routed experts
 missing, the benchmark copied 13.5 MiB in 0.097 ms, or 146.8 GB/s. Across all
 40 MoE layers, its documented extrapolation is 3.87 ms per decode token. The
 all-hit case took 0.023 ms. This is a native HIP measurement using the actual
@@ -317,7 +317,7 @@ kernels remain the dominant performance targets. The full reproducibility log
 and exit code are retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-copy-bench-20260829T114800Z/
+/home/operator/freetoken-amd/artifacts/qwen-copy-bench-20260829T114800Z/
 ```
 
 ### Live clock and power-state verification
@@ -344,12 +344,12 @@ saturation. Hardware clock forcing is therefore not a justified safe
 optimization. Reproducible workload and sensor artifacts are retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-live-telemetry-20260829T050800Z/
+/home/operator/freetoken-amd/artifacts/qwen-live-telemetry-20260829T050800Z/
 ```
 
 ### Reusable gfx1151 C++ and HIP cache
 
-GMKtec EVO-X2 initially had no `freetoken_kernel_cache` package and therefore no
+GMKtek EVO-X2 initially had no `freetoken_kernel_cache` package and therefore no
 formal prebuilt helper-kernel inventory. The AMD branch now includes
 `scripts/gmk-evo-x2/build_rocm_kernel_cache.sh`. It validates the native HIP
 runtime and gfx1151 device, derives a source-revision-scoped cache path, and
@@ -367,7 +367,7 @@ legacy templates and has a regression test that pins the rule. The repaired
 ROCm 10 build produced all 80 valid catalog modules for gfx1151:
 
 ```text
-/home/david/freetoken-amd/cache/kernel-cache-rocm-gfx1151-d6ee8cef479c/
+/home/operator/freetoken-amd/cache/kernel-cache-rocm-gfx1151-d6ee8cef479c/
 ```
 
 `scripts/gmk-evo-x2/verify_rocm_kernel_cache.py` then loaded every one of those 80
@@ -383,7 +383,7 @@ resolved the same 8,974 MoE cache slots and 2,068 KV pages as the earlier
 current-main validation. The startup artifact is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T120405Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T120405Z/
 ```
 
 Its fixed 256-token scheduler workload also completed three of three scored
@@ -414,7 +414,7 @@ benchmark allowlists. The candidate artifacts are retained for reproducibility
 at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T121916Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T121916Z/
 ```
 
 This result demonstrates why raw tensor equality and a favorable isolated
@@ -465,8 +465,8 @@ copy measurements and the sustained TPS result agree: the dense FP8 decode
 path remains the more valuable target. The two diagnostic artifact roots are:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T124643Z/
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T125511Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T124643Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T125511Z/
 ```
 
 ### Rejected 64-block fused expert-copy candidate
@@ -495,14 +495,14 @@ The full candidate artifacts, including exact-copy microbenchmark data, AIME
 quality result, and scheduler samples, are retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T131629Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T131629Z/
 ```
 
 ### Native-library replacement screen
 
 The Qwen checkpoint carries calibrated `input_scale` tensors, so a W8A8
 hipBLASLt replacement was investigated as a possible way to replace the
-memory-bound W8A16 dense decode kernel. GMKtec EVO-X2 is running ROCm 10.0 with
+memory-bound W8A16 dense decode kernel. GMKtek EVO-X2 is running ROCm 10.0 with
 hipBLASLt 1.4 and PyTorch `2.13.0+rocm10.0.0`, but the route is not available
 for this model and GPU. PyTorch's native `_scaled_mm` call on gfx1151 rejects
 the operation before dispatch, reporting that it is supported only on CUDA
@@ -543,12 +543,12 @@ This prototype is rejected before model integration. The artifact preserves
 the complete hipcc command and timing JSON for later component work:
 
 ```text
-/home/david/freetoken-amd/artifacts/fp8-hip-prototype-20260829T133900Z/
+/home/operator/freetoken-amd/artifacts/fp8-hip-prototype-20260829T133900Z/
 ```
 
 ### System-level performance-policy audit
 
-GMKtec EVO-X2's CPU governor is already `performance`. The Radeon 8060S reports the
+GMKtek EVO-X2's CPU governor is already `performance`. The Radeon 8060S reports the
 standard `auto` GPU performance policy at idle, where shader and SoC clocks
 fall to 600 MHz while memory remains at 1,000 MHz. This is not evidence of a
 decode throttle: the earlier fixed API workload recorded 100 percent GPU use,
@@ -624,12 +624,12 @@ separate quality measurement performed while `high` was active.
 The complete high-policy evidence is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-dpm-high-20260829T220224Z/
+/home/operator/freetoken-amd/artifacts/qwen-dpm-high-20260829T220224Z/
 ```
 
 ### Same-base-model ROCm 10 llama.cpp control
 
-GMKtec EVO-X2's original llama-swap Qwen control was `Qwen3.6-27B-Q4_K_M`, which is
+GMKtek EVO-X2's original llama-swap Qwen control was `Qwen3.6-27B-Q4_K_M`, which is
 not the model served by FreeToken and cannot establish same-model Qwen parity.
 For a controlled comparison, the isolated directory
 `models/controls/qwen36-35b-a3b-unsloth-a483e9e6/` now contains
@@ -685,14 +685,14 @@ on this practical ROCm 10 control. It does not prove an architecture-level
 deficit independent of quantization. The raw control bundle is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-20260829T222546Z/
+/home/operator/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-20260829T222546Z/
 ```
 
 The post-control FreeToken recovery bundle, including deterministic quality
 evidence, is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T222712Z/
+/home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T222712Z/
 ```
 
 #### Exact-Q4 FreeToken feasibility boundary

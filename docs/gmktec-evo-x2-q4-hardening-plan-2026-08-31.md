@@ -1,10 +1,10 @@
-# GMKtec EVO-X2 Q4 hardening execution plan
+# GMKtek EVO-X2 Q4 hardening execution plan
 
 ## Objective
 
 Close the remaining reliability, performance, readiness, endurance, and
 publication gaps in the native ROCm/HIP Qwen Q4 path without disrupting the
-protected GMKtec EVO-X2 NVFP4 loopback service except during a recorded, reversible
+protected GMKtek EVO-X2 NVFP4 loopback service except during a recorded, reversible
 time-share window.
 
 ## Non-negotiable controls

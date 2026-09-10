@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 expert-block transfer prototype
+# GMKtek EVO-X2 expert-block transfer prototype
 
 This isolated prototype approximates MoE expert-cache misses with random,
 non-contiguous host slices copied to a device tensor. Each block is

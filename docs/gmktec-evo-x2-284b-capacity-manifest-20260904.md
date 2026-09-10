@@ -1,6 +1,6 @@
-# GMKtec EVO-X2 284B capacity manifest
+# GMKtek EVO-X2 284B capacity manifest
 
-This is a read-only capacity snapshot for the GMKtec EVO-X2 Strix Halo system.
+This is a read-only capacity snapshot for the GMKtek EVO-X2 Strix Halo system.
 It is not a claim that a 284B model fits or serves interactively.
 
 ## Observed platform
@@ -66,7 +66,7 @@ CPU-GPU path as needed.
 These facts explain why the local 2 GiB dedicated-VRAM reading alone does not
 decide feasibility, but they also show why the missing exact payload and a
 measured host-memory and bandwidth budget are mandatory before claiming that
-the GMKtec EVO-X2 can reproduce the paper result. Source: [FreeToken paper,
+the GMKtek EVO-X2 can reproduce the paper result. Source: [FreeToken paper,
 arXiv:2608.16157](https://arxiv.org/abs/2608.16157), especially the model and
 hardware description in the introduction and evaluation setup.
 

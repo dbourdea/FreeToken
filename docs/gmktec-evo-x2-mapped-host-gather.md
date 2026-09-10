@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 mapped-host descriptor gather
+# GMKtek EVO-X2 mapped-host descriptor gather
 
 This prototype compiled a HIP kernel that consumes one device-side descriptor
 list and gathers expert-like blocks directly from mapped pinned host memory. It

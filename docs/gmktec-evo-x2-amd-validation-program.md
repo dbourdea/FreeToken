@@ -1,15 +1,15 @@
-# GMKtec EVO-X2 AMD FreeToken validation program
+# GMKtek EVO-X2 AMD FreeToken validation program
 
 ## Purpose
 
-This program establishes what the `amd-rocm-gfx1151` branch proves on GMKtec EVO-X2.
-It separates native AMD functionality, GMKtec EVO-X2 performance, local ROCm control
+This program establishes what the `amd-rocm-gfx1151` branch proves on GMKtek EVO-X2.
+It separates native AMD functionality, GMKtek EVO-X2 performance, local ROCm control
 comparisons, and strict replication of FreeToken's NVIDIA paper. A result may
 only be labelled with the category its evidence supports.
 
 ## Scope and safety contract
 
-- Every executable workload refuses hosts other than GMKtec EVO-X2.
+- Every executable workload refuses hosts other than GMKtek EVO-X2.
 - Candidate servers bind to loopback-only ports and never change llama-swap.
 - Every temporary candidate run restores Qwen and waits for `/health` to report
   `status: ok` before success.
@@ -24,9 +24,9 @@ only be labelled with the category its evidence supports.
 
 | Category | Meaning | Current example |
 | --- | --- | --- |
-| Native AMD functionality | HIP, ROCm, API, and recovery work correctly | Qwen and Gemma serving on GMKtec EVO-X2 |
+| Native AMD functionality | HIP, ROCm, API, and recovery work correctly | Qwen and Gemma serving on GMKtek EVO-X2 |
 | Local control | Same local workload against an AMD control engine | Qwen Q4 FreeToken versus ROCm llama.cpp |
-| Paper-inspired | Workload follows paper category but lacks exact paper fields | Future GMKtec EVO-X2 agent suite |
+| Paper-inspired | Workload follows paper category but lacks exact paper fields | Future GMKtek EVO-X2 agent suite |
 | Strict paper replication | Model, precision, prompts, warmup, policy, metrics, and scoring all match | Not yet available |
 
 ## Metric definitions
@@ -45,7 +45,7 @@ only be labelled with the category its evidence supports.
 1. Reproducibility and protocol ledger.
 2. Native HIP, API, cache-reuse, and recovery regression.
 3. Fixed Qwen and Gemma quality suite.
-4. Five-sample cold and warm GMKtec EVO-X2 baseline matrix.
+4. Five-sample cold and warm GMKtek EVO-X2 baseline matrix.
 5. Paper-inspired agent workloads and tail analysis.
 6. Twenty-four-hour endurance and recovery qualification.
 7. Larger-model capacity assessment only after Qwen gates pass.

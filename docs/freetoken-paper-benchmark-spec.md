@@ -2,7 +2,7 @@
 
 This document transcribes the benchmark scope stated in the supplied FreeToken
 paper and maps each requirement to the evidence currently available for the
-GMKtec EVO-X2 Strix Halo port. It is a planning and evidence index. It does
+GMKtek EVO-X2 Strix Halo port. It is a planning and evidence index. It does
 not treat a paper-inspired workload as an exact reproduction unless the model,
 fixture, protocol, and measurement definition are all known to match.
 
@@ -31,7 +31,7 @@ The paper reports six discrete-GPU systems:
 | 4060 laptop | RTX 4060 Laptop, 8 GB | PCIe 4.0 x8 | 11.8 GB/s |
 | PRO 6000 | RTX PRO 6000 Blackwell, 96 GB | PCIe 5.0 x16 | 51.5 GB/s |
 
-The GMKtec EVO-X2 is not one of these systems. It uses an integrated Radeon
+The GMKtek EVO-X2 is not one of these systems. It uses an integrated Radeon
 8060S Strix Halo GPU with unified memory rather than a discrete NVIDIA card
 with a separately reported VRAM pool. Its results therefore need a separate
 AMD platform label and must not be presented as a direct replication of an

@@ -1,9 +1,9 @@
-# GMKtec EVO-X2 Strix Halo 50 percent performance campaign
+# GMKtek EVO-X2 Strix Halo 50 percent performance campaign
 
 ## Objective
 
 Increase the client-visible steady-state decode speed of the native ROCm/HIP
-FreeToken Qwen3.6-35B-A3B Q4 service on GMKtec EVO-X2 by up to 50 percent over the
+FreeToken Qwen3.6-35B-A3B Q4 service on GMKtek EVO-X2 by up to 50 percent over the
 currently accepted exact-Q4 baseline, while retaining equivalent output quality
 and operational reliability.
 
@@ -31,7 +31,7 @@ such.
 
 ## Scope boundaries
 
-- Target host: GMKtec EVO-X2 only, Radeon 8060S `gfx1151`.
+- Target host: GMKtek EVO-X2 only, Radeon 8060S `gfx1151`.
 - Target runtime: native FreeToken ROCm/HIP path only.
 - Target model: the exact qualified Qwen3.6-35B-A3B Q4_K_M artifact.
 - Candidate servers bind only to loopback test ports in isolated clean
@@ -238,7 +238,7 @@ samples.
 **Decision: rejected.** The candidate is numerically safe in the screened
 controls, but its 0.25 percent gain is below the one percent acceptance floor
 and is within normal run-to-run variation.  The change was reverted in
-`0a1b709`; its complete candidate artifact remains on GMKtec EVO-X2 for comparison.
+`0a1b709`; its complete candidate artifact remains on GMKtek EVO-X2 for comparison.
 
 ### C02: opt-in HIP unsafe-math optimizations
 
@@ -264,7 +264,7 @@ candidate therefore has no demonstrated decode gain, while its mean result is
 materially worse because of the stall.
 
 **Decision: rejected.** Preserve the raw quality and benchmark artifacts at
-`qwen35moe-q4-hipmath-20260901T081500Z` on GMKtec EVO-X2, but remove the experimental
+`qwen35moe-q4-hipmath-20260901T081500Z` on GMKtek EVO-X2, but remove the experimental
 compiler flag from the branch.  Further work should target the measured Q4_K
 and Q5_K routed-MoE vector kernels, not generic compiler flags.
 
@@ -286,7 +286,7 @@ failed.
 
 **Decision: rejected for correctness.** The wider vector ratio changes the
 kernel's coverage or reduction mapping on this HIP path.  Preserve the failed
-quality artifact at `qwen35moe-q4-vdr4-20260901T084500Z` on GMKtec EVO-X2, revert the
+quality artifact at `qwen35moe-q4-vdr4-20260901T084500Z` on GMKtek EVO-X2, revert the
 source candidate, and restore the protected normal Qwen service before the
 next investigation.
 
@@ -309,7 +309,7 @@ the fixed warmup plus three scored 256-token API samples.
 **Decision: rejected.** Correctness was preserved, but sharing the activation
 address did not offset the extra live accumulator and register pressure.  The
 result is below baseline and below the one-percent acceptance floor.  Preserve
-the artifact at `qwen35moe-q4-k2row-20260901T093500Z` on GMKtec EVO-X2 and revert the
+the artifact at `qwen35moe-q4-k2row-20260901T093500Z` on GMKtek EVO-X2 and revert the
 candidate source.
 
 ### C05: wider HIP Q8_0 vector-dot ratio
@@ -330,13 +330,13 @@ passed all three deterministic Qwen API controls.
 **Decision: rejected.** The wider Q8 work ratio is numerically safe but slows
 the end-to-end Q4 workload.  The extra per-lane work does not repay its
 occupancy and register cost on gfx1151.  Preserve the artifact at
-`qwen35moe-q4-q8vdr4-20260901T104200Z` on GMKtec EVO-X2 and revert the candidate.
+`qwen35moe-q4-q8vdr4-20260901T104200Z` on GMKtek EVO-X2 and revert the candidate.
 
 ### C06: modern MMVQ component replacement investigation
 
 The prior candidates establish that changing local launch dimensions or
 per-lane work ratios in the older vendored GGUF kernels does not produce a
-safe gain on gfx1151.  GMKtec EVO-X2 reports a 32-lane HIP warp, so the existing
+safe gain on gfx1151.  GMKtek EVO-X2 reports a 32-lane HIP warp, so the existing
 32-thread logical reduction is not accidentally running at half its physical
 wave width.
 
@@ -370,7 +370,7 @@ not extrapolation from CUDA-oriented paper results.
 
 #### C06 baseline: exact packed-expert microbenchmark
 
-The new screening harness completed its initial GMKtec EVO-X2 baseline with real
+The new screening harness completed its initial GMKtek EVO-X2 baseline with real
 packed bytes from layer 0 of the qualified Qwen GGUF.  It copied the eight
 routed expert slices only, used the production `ggml_moe_a8_vec` binding, and
 excluded model load, HTTP, router, scheduler, and JIT time from GPU-event
@@ -386,7 +386,7 @@ measurements.
 This is a selection baseline, not server TPS.  It makes later component work
 auditable: a candidate must improve this real-shape screen and still pass all
 end-to-end quality, latency, and recovery gates.  The artifact is
-`qwen35moe-q4kq5k-microbaseline-20260901T141100Z` on GMKtec EVO-X2.
+`qwen35moe-q4kq5k-microbaseline-20260901T141100Z` on GMKtek EVO-X2.
 
 ### C06 execution contract: selective modern MMVQ port
 
@@ -457,10 +457,10 @@ likely mechanism is that these relatively small routed-expert matrices do not
 provide enough parallel work to repay the added wave coordination.
 
 **Decision: rejected.** C06 is retained only on the isolated experimental
-branch and is not merged into the AMD port.  The protected GMKtec EVO-X2 Qwen
+branch and is not merged into the AMD port.  The protected GMKtek EVO-X2 Qwen
 service was restarted immediately after the screen and its health endpoint
 returned `status: ok` before the iteration was closed.  The immutable screen
-artifact is `qwen35moe-q4-c06-micro-20260901T174907Z` on GMKtec EVO-X2.
+artifact is `qwen35moe-q4-c06-micro-20260901T174907Z` on GMKtek EVO-X2.
 
 ### C07: upstream Triton-router audit
 
@@ -488,9 +488,9 @@ source-level numerical fix would therefore consume a protected-service window
 without testing a new hypothesis.
 
 **Decision: rejected as already disproven.** Preserve the router timing
-artifact `qwen-router-c07-20260901T180707Z` on GMKtec EVO-X2 as a diagnostic,
+artifact `qwen-router-c07-20260901T180707Z` on GMKtek EVO-X2 as a diagnostic,
 but retain the reference route for the exact-Q4 quality baseline.  The normal
-GMKtec EVO-X2 service remained on its existing configuration and returned
+GMKtek EVO-X2 service remained on its existing configuration and returned
 `status: ok` after the diagnostic.
 
 #### C07 correction and C08-C09 quality requalification
@@ -532,7 +532,7 @@ context, and recovery gates.  It must still complete the fixed five-sample API
 matrix and concurrent workload with a fresh exact-Q4 reference before it can
 replace the 47.960-TPS baseline.  Preserve the quality artifacts
 `qwen-router-c08-quality-20260901T181143Z` and
-`qwen-router-c09-full-quality-20260901T183253Z` on GMKtec EVO-X2.
+`qwen-router-c09-full-quality-20260901T183253Z` on GMKtek EVO-X2.
 
 ### C10: router-only exact-Q4 API and concurrency matrix
 
@@ -560,7 +560,7 @@ baseline and must not be promoted on this evidence alone.
 The controller stopped the candidate, restarted the ordinary NVFP4 API, and
 verified `status: ok`.  The recovered server PID, process-group ID, and session
 ID were identical, and no listener remained on the candidate port.  Preserve
-the complete artifact `qwen-router-c10-api-20260901T185412Z` on GMKtec EVO-X2.
+the complete artifact `qwen-router-c10-api-20260901T185412Z` on GMKtek EVO-X2.
 
 **Decision: do not promote.** Retain the current HIP Triton router as a
 quality-qualified route, but focus the next iteration on data movement and
@@ -579,7 +579,7 @@ upstream code intentionally filters them out.
 The corrected CPU-side controls passed: three host-residency and locked-layer
 copy tests, plus two strict AOT-grid selection tests.  The normal NVFP4 API
 reported `status: ok` after the checks.  The saved CPU evidence is
-`upstream-cache-c11-retry-20260901T191217Z` on GMKtec EVO-X2.
+`upstream-cache-c11-retry-20260901T191217Z` on GMKtek EVO-X2.
 
 However, the focused ROCm fused-MoE suite also produced an illegal-memory-
 access fault in `fused_moe_kernel` while testing the disposable candidate.
@@ -637,7 +637,7 @@ alignment output.  The saved GPU artifacts are
 `fused-moe-c15-alt-align-20260901T193812Z`,
 `fused-moe-c16-align-fix-20260901T194538Z`,
 `fused-moe-c17-full-parity-20260901T195315Z`, and
-`fused-moe-c18-regression-suite-20260901T200025Z` on GMKtec EVO-X2.
+`fused-moe-c18-regression-suite-20260901T200025Z` on GMKtek EVO-X2.
 
 The candidate containing the upstream cache-copy plan was then merged with the
 repair into isolated source revision `340ed31`.  Its focused safety suite
@@ -663,7 +663,7 @@ for AMD Radeon 8060S Graphics with HIP `7.15.26333`, writing them under
 `kernel-cache-rocm-gfx1151-340ed31`.  The subsequent verifier loaded all 82
 modules with `FREETOKEN_DISABLE_JIT=1` and reported `status: passed`.  The
 artifact `upstream-cache-c22-build-20260901T203402Z` retains the build log,
-strict verifier output, and recovery record on GMKtec EVO-X2.
+strict verifier output, and recovery record on GMKtek EVO-X2.
 
 **Decision: reusable-cache gate passed.** Future runs of this exact candidate
 must point at this revision-matched cache and retain JIT disabled.  This avoids
@@ -693,7 +693,7 @@ additional resident experts produces a measurable decode gain on this Q4
 workload.  The low remaining miss fraction also makes a 50 percent gain from
 cache sizing implausible.  Preserve `upstream-cache-c23-q4-quality-20260901T204241Z`,
 `upstream-cache-c24-cache-telemetry-20260901T205755Z`, and
-`upstream-cache-c25-r030-20260901T210838Z` on GMKtec EVO-X2.  Each candidate
+`upstream-cache-c25-r030-20260901T210838Z` on GMKtek EVO-X2.  Each candidate
 was stopped and the normal NVFP4 API recovery controller was started after its
 window.
 
@@ -744,7 +744,7 @@ on the scheduler-shaped workload and therefore fails the campaign requirement
 for a repeatable gain above normal variation.  Keep the new launcher parameter
 defaulted to zero for reproducible future investigation, but do not enable it
 for normal service.  Preserve `q4-c27-graph-bs1-v1-20260901T213143Z` on
-GMKtec EVO-X2.  The verified candidate process group was stopped, its loopback
+GMKtek EVO-X2.  The verified candidate process group was stopped, its loopback
 ports were clear, and normal NVFP4 service recovery was started.
 
 ### C28: two-row GGUF MMV grouping screen
@@ -800,7 +800,7 @@ screened output quality and is modestly faster in this one matrix, but the
 measured increase is too small to distinguish safely from host variation and
 does not meet the repeatable-gain requirement.  Do not merge the candidate
 branch or change the default.  Preserve `q4-c29-rdna4-mmvq8-20260901T215745Z`
-on GMKtec EVO-X2, including raw quality, per-token timing, HIP build, and
+on GMKtek EVO-X2, including raw quality, per-token timing, HIP build, and
 recovery evidence.  The isolated process was stopped; a stale executable bit
 on the normal recovery start helper was corrected before normal-service
 recovery was launched.

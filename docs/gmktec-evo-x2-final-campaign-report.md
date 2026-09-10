@@ -1,9 +1,9 @@
-# GMKtec EVO-X2 native ROCm FreeToken campaign report
+# GMKtek EVO-X2 native ROCm FreeToken campaign report
 
 ## Executive result
 
 The native ROCm and HIP port is functional and quality-qualified on the
-GMKtec EVO-X2 with an AMD Radeon 8060S `gfx1151` GPU. The port serves Qwen
+GMKtek EVO-X2 with an AMD Radeon 8060S `gfx1151` GPU. The port serves Qwen
 text and Gemma 4 GGUF workloads through an OpenAI-compatible local API. The
 controlled Qwen Q4_K_M same-format decode result is effectively at parity with
 the ROCm 10 llama.cpp control. Gemma FreeToken is slower than llama.cpp for
@@ -18,7 +18,7 @@ reference NVIDIA system is part of this campaign.
 
 | Field | Value |
 | --- | --- |
-| Host | GMKtec EVO-X2 |
+| Host | GMKtek EVO-X2 |
 | GPU | AMD Radeon 8060S |
 | GFX target | `gfx1151` |
 | ROCm | 10.0 |
@@ -59,8 +59,8 @@ latency claim.
 
 Evidence:
 
-- FreeToken: `/home/david/freetoken-amd/artifacts/qwen-gguf-warm-matrix-20260905T122817Z`
-- llama.cpp: `/home/david/freetoken-amd/artifacts/qwen-llama-warm-matrix-20260905T124007Z`
+- FreeToken: `/home/operator/freetoken-amd/artifacts/qwen-gguf-warm-matrix-20260905T122817Z`
+- llama.cpp: `/home/operator/freetoken-amd/artifacts/qwen-llama-warm-matrix-20260905T124007Z`
 
 ### Gemma 4
 

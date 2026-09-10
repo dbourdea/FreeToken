@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 real Qwen NVFP4 layer-zero parity
+# GMKtek EVO-X2 real Qwen NVFP4 layer-zero parity
 
 ## Purpose
 

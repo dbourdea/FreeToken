@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 Gemma 4 Q4 GGUF vision control
+# GMKtek EVO-X2 Gemma 4 Q4 GGUF vision control
 
 ## Scope
 
@@ -10,7 +10,7 @@ Qwen on `127.0.0.1:1919` on every exit path.
 
 ## Build and runtime contract
 
-- Host: GMKtec EVO-X2, Radeon 8060S (`gfx1151`) unified-memory GPU.
+- Host: GMKtek EVO-X2, Radeon 8060S (`gfx1151`) unified-memory GPU.
 - Backend: native ROCm/HIP and Triton. No CUDA compatibility path was used.
 - Text GGUF: `gemma-4-26B_q4_0-it.gguf`.
 - Vision projector: sibling `gemma-4-26B-it-mmproj.gguf`.
@@ -26,9 +26,9 @@ Qwen on `127.0.0.1:1919` on every exit path.
 
 ## Evidence
 
-Latest artifact directory on GMKtec EVO-X2:
+Latest artifact directory on GMKtek EVO-X2:
 
-`/home/david/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T045559Z`
+`/home/operator/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T045559Z`
 
 The runner completed both controls before it shut down the candidate and
 started Qwen recovery.
@@ -50,12 +50,12 @@ execution, image-token replacement, and OpenAI response formatting.
 
 ## Reproduction
 
-From the isolated checkout on GMKtec EVO-X2, first ensure the protected server health
+From the isolated checkout on GMKtek EVO-X2, first ensure the protected server health
 is exactly `status: ok`, then run:
 
 ```bash
 bash scripts/gmk-evo-x2/run_gemma4_gguf_text_control.sh \
-  /home/david/freetoken-amd/validation-qwen-gguf-d1dd473 vision
+  /home/operator/freetoken-amd/validation-qwen-gguf-d1dd473 vision
 ```
 
 The control runner saves `quality.json` for the text control and
@@ -64,7 +64,7 @@ restarts Qwen. The image verifier is also independently callable against an
 already-running isolated candidate:
 
 ```bash
-PYTHONPATH=python /home/david/freetoken-amd/.venv/bin/python \
+PYTHONPATH=python /home/operator/freetoken-amd/.venv/bin/python \
   scripts/gmk-evo-x2/verify_gemma4_gguf_image.py \
   --base-url http://127.0.0.1:1923 \
   --model gemma4-26b-q4-amd \
@@ -77,7 +77,7 @@ The matched llama.cpp runner used the same text GGUF, sibling projector,
 ROCm 10 installation, loopback-only OpenAI API contract, and deterministic
 image fixtures. Its artifact is:
 
-`/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260830T051736Z`
+`/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260830T051736Z`
 
 | Control | FreeToken AMD ROCm/HIP | llama.cpp ROCm 10 | Result |
 | --- | --- | --- | --- |
@@ -107,7 +107,7 @@ visible description containing the colors and their left-to-right arrangement.
 FreeToken passed this quality gate with 51 visible words, 63 completion tokens,
 1,093.83 ms TTFT, and 53.87 completion tokens per second over a 1.169 s
 stream window. Its artifact is
-`/home/david/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T055500Z`.
+`/home/operator/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T055500Z`.
 
 The matched ROCm 10 llama.cpp model recognized the same image correctly but
 placed every generated token in `reasoning_content`, leaving visible `content`
@@ -120,7 +120,7 @@ llama.cpp Gemma invocation, not evidence that it failed visual understanding.
 ## Recovery-contract result
 
 The final isolated FreeToken vision run is
-`/home/david/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T053317Z`.
+`/home/operator/freetoken-amd/artifacts/gemma4-gguf-vision-20260830T053317Z`.
 It passed all three image controls (`red`, `green`, and spatial `red`), then
 shut down the candidate and restored the protected Qwen server. Qwen reported
 the authoritative `status: ok` after about eight minutes and twenty seconds;

@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 compiled HIP gather prototype
+# GMKtek EVO-X2 compiled HIP gather prototype
 
 This prototype compiled a small device-side gather kernel with `hipcc` and ran
 it on the Radeon 8060S. It gathers 64 randomly spaced 64 KiB blocks from a
