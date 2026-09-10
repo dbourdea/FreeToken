@@ -221,3 +221,37 @@ def test_router_inference_requires_configured_bearer_key():
         denied = client.post("/v1/chat/completions", json={"model": "low"})
         assert denied.status_code == 401
         assert manager.calls == []
+
+
+def test_router_reload_atomically_replaces_a_valid_catalog(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text("[models.one]\nmodel = 'one.gguf'\n", encoding="utf-8")
+    manager = Manager()
+    catalog_doc = ModelCatalog.load(str(path))
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            catalog_path=str(path),
+        )
+        client = TestClient(app)
+        path.write_text("[models.two]\nmodel = 'two.gguf'\n", encoding="utf-8")
+        reloaded = client.post("/router/reload")
+        assert reloaded.status_code == 200
+        assert [item["name"] for item in reloaded.json()["models"]] == ["two"]
+        path.write_text("[models.bad]\nmodel = ''\n", encoding="utf-8")
+        rejected = client.post("/router/reload")
+        assert rejected.status_code == 400
+        assert [item["name"] for item in client.get("/models").json()["data"]] == ["two"]
+
+
+def test_router_reload_rejects_redefining_active_profile():
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    lease = router.acquire("low")
+    replacement = ModelCatalog({"low": ModelProfile("low", "changed.gguf", ())})
+    with pytest.raises(RoutingError, match="cannot redefine") as exc:
+        router.replace_catalog(replacement)
+    assert exc.value.status_code == 409
+    lease.release()

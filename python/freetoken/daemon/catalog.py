@@ -84,9 +84,11 @@ class ModelProfile:
 
 
 class ModelCatalog:
-    def __init__(self, profiles: dict[str, ModelProfile], settings: RouterSettings | None = None):
+    def __init__(self, profiles: dict[str, ModelProfile], settings: RouterSettings | None = None,
+                 *, path: str | None = None):
         self._profiles = profiles
         self.settings = settings or RouterSettings()
+        self.path = path
 
     @classmethod
     def empty(cls) -> "ModelCatalog":
@@ -105,7 +107,7 @@ class ModelCatalog:
         profiles: dict[str, ModelProfile] = {}
         for name, value in models.items():
             profiles[_profile_name(name)] = _profile(_profile_name(name), value)
-        return cls(profiles, _router_settings(raw.get("router", {}), profiles))
+        return cls(profiles, _router_settings(raw.get("router", {}), profiles), path=path)
 
     def get(self, name: str) -> ModelProfile:
         try:

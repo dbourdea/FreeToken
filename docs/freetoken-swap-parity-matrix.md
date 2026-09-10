@@ -35,7 +35,7 @@ Status labels:
 | Prometheus and activity/performance metrics | Native `/metrics` exposes bounded router admission, queue, activation, failure, and eviction counters; engine metrics remain separately available | Add TTFT, throughput, cancellation, process, and memory measurements with direct/cold/warm/alternating benchmark evidence. |
 | Inflight cancellation API | Native backend cancellation on client disconnect | Router inflight identifiers and explicit cancel API, with same-instance terminal-abort proof |
 | Parameter filters and configuration hooks | Missing | Safe allowlisted parameter transformation and lifecycle hooks, or explicit supported subset policy |
-| Configuration watch/reload | Missing | Atomic validated reload without disrupting active routing |
+| Configuration watch/reload | Native authenticated `POST /router/reload` re-parses the catalog atomically | Deterministic tests cover valid replacement, invalid-file rejection, and active-profile redefinition refusal. File watching and real-engine reload evidence remain required. |
 | UI, hardware, captures, MCP, Tailcat | Missing | Assess separately. Native management UI and local hardware view are applicable; captures, MCP, and Tailcat require explicit product-scope decisions |
 | Embedding, rerank, image, speech, transcription, ComfyUI, SDAPI routes | Inapplicable today where FreeToken has no matching server route | Document absent FreeToken backend capability and reject safely. Do not mimic endpoint success |
 | Accounting, drain/abort barrier, rollback | Native and more specific than direct llama-swap mode | Integrate into automatic routing, including loader failure and recovery tests |

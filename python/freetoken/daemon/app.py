@@ -142,6 +142,7 @@ def build_app(
     shutdown_hook: Callable[[], None] | None = None,
     catalog: ModelCatalog | None = None,
     router: RoutingCoordinator | None = None,
+    catalog_path: str | None = None,
 ) -> FastAPI:
     import time as _time
 
@@ -171,7 +172,7 @@ def build_app(
     auth = [Depends(require_token)]
 
     def require_router_key(authorization: str | None = Header(default=None)) -> None:
-        keys = catalog.settings.api_keys
+        keys = router.catalog.settings.api_keys
         if not keys:
             return
         supplied = authorization.removeprefix("Bearer ") if authorization else None
@@ -313,14 +314,30 @@ def build_app(
             return accounting_error(exc)
         return {"unloaded": unloaded, "router": router.status()}
 
+    @app.post("/router/reload", dependencies=auth)
+    async def router_reload():
+        if not catalog_path:
+            raise HTTPException(status_code=409, detail="catalog reload requires --catalog")
+        try:
+            replacement = await run(proxy_pool, ModelCatalog.load, catalog_path)
+            await run(lifecycle_pool, router.replace_catalog, replacement)
+        except CatalogError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RoutingError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": {"message": str(exc), "type": exc.code}},
+            )
+        return {"reloaded": True, "models": router.catalog.public()}
+
     # ---- engine lifecycle ----
 
     def profile_request(name: str) -> tuple[str, int, list[str]]:
-        profile = catalog.get(name)
+        profile = router.catalog.get(name)
         return profile.model, resolve_port(profile.port), list(profile.args)
 
     def profile_result(name: str, result: dict, port: int):
-        profile = catalog.get(name)
+        profile = router.catalog.get(name)
         readiness = wait_for_ready(
             manager, probe, pid=result.get("pid"), port=port, timeout_s=profile.ready_timeout_s
         )
@@ -340,7 +357,7 @@ def build_app(
     @app.get("/models", dependencies=auth)
     async def models():
         """A small llama-swap-style model listing, backed only by local profiles."""
-        return {"data": catalog.public()}
+        return {"data": router.catalog.public()}
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):

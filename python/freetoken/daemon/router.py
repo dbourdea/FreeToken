@@ -160,6 +160,40 @@ class RoutingCoordinator:
                 "scheduler": self._catalog.settings.scheduler,
             }
 
+    @property
+    def catalog(self) -> ModelCatalog:
+        with self._cond:
+            return self._catalog
+
+    def replace_catalog(self, catalog: ModelCatalog) -> None:
+        """Atomically install a validated catalog without changing a live engine.
+
+        Removing or redefining the active profile is refused. The operator can
+        explicitly unload first, which keeps configuration reload from silently
+        changing the ownership contract of an existing engine.
+        """
+        with self._cond:
+            if self._active_name is not None:
+                try:
+                    replacement = catalog.get(self._active_name)
+                    current = self._catalog.get(self._active_name)
+                except CatalogError as exc:
+                    raise RoutingError(
+                        "reload_conflict",
+                        "cannot remove the active profile until it is unloaded",
+                        status_code=409,
+                    ) from exc
+                if (replacement.model, replacement.port, replacement.args) != (
+                    current.model, current.port, current.args
+                ):
+                    raise RoutingError(
+                        "reload_conflict",
+                        "cannot redefine the active profile until it is unloaded",
+                        status_code=409,
+                    )
+            self._catalog = catalog
+            self._cond.notify_all()
+
     def prometheus(self) -> str:
         """Render bounded router counters without importing a metrics package."""
         status = self.status()

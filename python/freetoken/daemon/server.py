@@ -206,6 +206,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         started_wall=time.time(),
         shutdown_hook=shutdown_hook,
         catalog=catalog,
+        catalog_path=args.catalog,
     )
 
     import uvicorn
