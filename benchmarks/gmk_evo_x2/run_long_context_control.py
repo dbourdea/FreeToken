@@ -67,7 +67,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:1919/v1")
     parser.add_argument("--model", required=True)
     parser.add_argument("--artifact", required=True, type=Path)
-    parser.add_argument("--expected-host", default="david-Gmktec-x2-2")
+    parser.add_argument("--expected-host", required=True, help="Expected hostname of the explicitly selected test machine")
     parser.add_argument("--filler-repetitions", type=int, required=True)
     parser.add_argument(
         "--sample-variation",

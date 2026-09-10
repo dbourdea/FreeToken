@@ -30,7 +30,7 @@ readonly RUNNER="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_multiturn_state_suite.p
 readonly SUITE="${SOURCE_DIR}/benchmarks/gmk_evo_x2/multiturn_state_suite.json"
 readonly MODEL="qwen36-35b-a3b-q4km-gguf-amd"
 readonly PORT="1922"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 
 # Reject malformed numeric input before opening a socket or creating artifacts.
 case "${SESSION_COUNT}" in ''|*[!0-9]*) echo "session count must be a positive integer" >&2; exit 2;; esac

@@ -15,7 +15,7 @@ needs correctness before graph capture tuning.
 
 | Item | Value |
 | --- | --- |
-| Host | GMKtek EVO-X2, `david-Gmktec-x2-2` |
+| Host | GMKtek EVO-X2, `GMKtek EVO-X2` |
 | GPU | AMD Radeon 8060S Graphics, `gfx1151`, 40 CUs |
 | System ROCm installation | ROCm 10.0 at `/opt/rocm-10.0` |
 | PyTorch wheel | `2.13.0+rocm10.0.0` |
@@ -802,7 +802,7 @@ thermal problem, or active FreeToken server.  The Radeon 8060S was idle at
 30 C after the test.  It did, however, identify two pre-existing user-owned
 filesystem scans in uninterruptible `D` state: one scanning `/home/operator`,
 `/mnt`, and `/data` for large GGUF or SafeTensors files, and one scanning
-`/home/operator` and `/media/david` for Gemma GGUF files.  At capture time they
+`/home/operator` and `/media/operator` for Gemma GGUF files.  At capture time they
 had been alive for approximately 8.8 and 6.1 hours respectively.
 
 The same capture reported I/O full-pressure at 0.61 percent over ten seconds

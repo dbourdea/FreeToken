@@ -28,15 +28,15 @@ class RequireExpectedHostTests(unittest.TestCase):
     def test_accepts_gmk_evo_x2_short_name(self) -> None:
         """The harness accepts the exact GMKtek EVO-X2 host name used by the test policy."""
 
-        with patch("socket.gethostname", return_value="david-Gmktec-x2-2"):
-            self.assertEqual(require_expected_host("david-Gmktec-x2-2"), "david-gmktec-x2-2")
+        with patch("socket.gethostname", return_value="test-machine-1"):
+            self.assertEqual(require_expected_host("test-machine-1"), "test-machine-1")
 
     def test_rejects_other_hosts(self) -> None:
         """The harness prevents accidental benchmark traffic to any other LAN machine."""
 
         with patch("socket.gethostname", return_value="lan-199"):
             with self.assertRaisesRegex(RuntimeError, "refusing benchmark"):
-                require_expected_host("david-Gmktec-x2-2")
+                require_expected_host("test-machine-1")
 
     def test_throughput_mode_requires_two_requested_tokens(self) -> None:
         """The TPS mode rejects a one-token interval before it can produce nonsense."""
@@ -60,6 +60,7 @@ class RequireExpectedHostTests(unittest.TestCase):
                 "--model", "qwen",
                 "--tokenizer", "tokenizer",
                 "--artifact-dir", "artifacts",
+                "--expected-host", "test-machine",
             ]
         )
         self.assertEqual(args.reasoning_effort, "none")

@@ -11,7 +11,7 @@
 \hypersetup{colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue}
 
 \title{Native FreeToken Serving on AMD Strix Halo:\\A ROCm/HIP Port and Controlled Unified-Memory Evaluation}
-\author{David Bourdeau\\Independent Researcher\\\texttt{davidbourdeau@gmail.com}}
+\author{FreeToken AMD contributors}
 \date{Technical white paper, release candidate v0.1.0-rc1, 30 August 2026}
 
 \begin{document}
@@ -20,7 +20,7 @@
 \begin{abstract}
 Large mixture-of-experts (MoE) models make capable local inference possible, but most edge-serving systems are designed and evaluated on NVIDIA discrete GPUs. We present a native ROCm/HIP port of FreeToken for AMD Strix Halo, represented by the Ryzen AI Max+ 395 with Radeon 8060S graphics (\texttt{gfx1151}). The port retains FreeToken's CUDA behavior while adding HIP extension builds, ROCm-safe architecture detection, portable Triton paths, and native model-serving validation. It executes without a CUDA compatibility layer, Vulkan substitute, or CPU-only fallback.
 
-The evaluated GMKtec EVO X2 has 64 GiB installed LPDDR5 memory and a 4 GiB firmware GPU reservation. Linux exposes 59.46 GiB host memory and ROCm exposes a 56.0 GiB coarse-grained GPU pool. The native server produces a deterministic Qwen NVFP4 AIME canary at 27.88 mean client-visible decode tokens/s. A faster NVFP4 Triton-router path was rejected because it changed deterministic model output. In a matched raw-prompt Q4\_K\_M Qwen control, FreeToken reaches 50.63 tokens/s with a quality-checked HIP router versus 50.29 tokens/s for the ROCm 10 llama.cpp control. A Gemma 4 Q4 text control reaches 57.05 tokens/s and returns the expected deterministic answer. These are native-port and bounded same-file control results, not a strict reproduction of FreeToken's published RTX 4060 result.
+The evaluated GMKtek EVO-X2 has 64 GiB installed LPDDR5 memory and a 4 GiB firmware GPU reservation. Linux exposes 59.46 GiB host memory and ROCm exposes a 56.0 GiB coarse-grained GPU pool. The native server produces a deterministic Qwen NVFP4 AIME canary at 27.88 mean client-visible decode tokens/s. A faster NVFP4 Triton-router path was rejected because it changed deterministic model output. In a matched raw-prompt Q4\_K\_M Qwen control, FreeToken reaches 50.63 tokens/s with a quality-checked HIP router versus 50.29 tokens/s for the ROCm 10 llama.cpp control. A Gemma 4 Q4 text control reaches 57.05 tokens/s and returns the expected deterministic answer. These are native-port and bounded same-file control results, not a strict reproduction of FreeToken's published RTX 4060 result.
 \end{abstract}
 
 \section{Introduction}
@@ -41,7 +41,7 @@ The resulting server preserves FreeToken's OpenAI-compatible model discovery, st
 
 \section{Experimental Methodology}
 
-Experiments ran on a GMKtec NucBox EVO X2. Table~\ref{tab:platform} reports the static environment observed on 30 August 2026. Dynamic measurements such as free memory, temperature, clocks, and active processes are retained per run in the artifact manifest rather than presented as fixed specifications.
+Experiments ran on a GMKtek EVO-X2. Table~\ref{tab:platform} reports the static environment observed on 30 August 2026. Dynamic measurements such as free memory, temperature, clocks, and active processes are retained per run in the artifact manifest rather than presented as fixed specifications.
 
 \begin{table*}[t]
 \caption{Evaluated-system hardware and software environment.}
@@ -52,7 +52,7 @@ Experiments ran on a GMKtec NucBox EVO X2. Table~\ref{tab:platform} reports the 
 \toprule
 Component & Specification \\
 \midrule
-System and firmware & GMKtec NucBox EVO X2, SKU \texttt{EVO-X2-001}, hardware version 1.0, firmware EVO-X2 1.09 dated 13 September 2025 \\
+System and firmware & GMKtek EVO-X2, SKU \texttt{EVO-X2-001}, hardware version 1.0, firmware EVO-X2 1.09 dated 13 September 2025 \\
 Processor & AMD Ryzen AI Max+ 395 with Radeon 8060S; 16 cores, 32 hardware threads, one NUMA node, boost enabled \\
 CPU frequency and cache & 625 MHz minimum and 5.1875 GHz maximum; 768 KiB L1d, 512 KiB L1i, 16 MiB L2, and 64 MiB L3 \\
 Installed memory & 64 GiB LPDDR5, eight 8 GiB Micron devices; 8,532 MT/s rated and 8,000 MT/s configured \\

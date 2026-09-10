@@ -25,7 +25,7 @@ readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly MODEL_DIR="${GMK_EVO_X2_QWEN_TOKENIZER_DIR:-${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4}"
 readonly MODEL_NAME="${GMK_EVO_X2_QWEN_MODEL_NAME:-qwen3.6-35b-a3b-nvfp4-amd}"
 readonly BASE_URL="${GMK_EVO_X2_QWEN_BASE_URL:-http://127.0.0.1:1919/v1}"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 readonly BASE_PROMPT="The scheduler manages incoming inference requests by prioritizing, batching, and assigning them to available compute resources to optimize throughput and latency. "
 
 # Form the fixed input without shell interpolation at call time. The harness

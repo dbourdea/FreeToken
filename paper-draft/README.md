@@ -14,4 +14,4 @@ Use [PUBLICATION_CHECKLIST.md](PUBLICATION_CHECKLIST.md) for the final tag, Zeno
 
 ## Contact
 
-For manuscript correspondence, replication questions, or technical collaboration, contact David Bourdeau at [davidbourdeau@gmail.com](mailto:davidbourdeau@gmail.com). The project repository is <https://github.com/dbourdea/FreeToken>. Enable and link the public issue tracker before release so reproducible software defects and proposed changes have a searchable public route.
+For manuscript correspondence, replication questions, or technical collaboration, use the project repository at <https://github.com/dbourdea/FreeToken>. Personal contact details are omitted from this anonymized review copy. Enable and link the public issue tracker before release so reproducible software defects and proposed changes have a searchable public route.

@@ -105,7 +105,7 @@ def build(output: Path) -> None:
             continue
         if line.startswith("# "):
             story.append(Paragraph(clean(line[2:]), title))
-        elif line.startswith("**David Bourdeau"):
+        elif line.startswith("**FreeToken AMD contributors"):
             story.append(Paragraph(clean(line.strip("*")), author))
         elif line.startswith("*Technical white paper"):
             story.append(Paragraph(clean(line.strip("*")), author))

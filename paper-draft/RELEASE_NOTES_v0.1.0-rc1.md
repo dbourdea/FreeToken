@@ -41,4 +41,4 @@ from the public release.
 
 ## Correspondence
 
-David Bourdeau: davidbourdeau@gmail.com
+FreeToken AMD contributors. Personal contact details are omitted from this anonymized review copy.

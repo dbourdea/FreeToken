@@ -57,3 +57,5 @@ This candidate still requires broader quality testing, cancellation and recovery
 ## Privacy
 
 Current public AMD reports use GMKtek EVO-X2, placeholder operator paths, and documentation-only IP addresses. Benchmark launchers derive the invoking user's home directory instead of embedding a personal username; most root-directory defaults also accept `FREETOKEN_ROOT_DIR`. When invoking under a different account, explicitly set the intended root directory. Historical commits and previously generated binary publications are not erased by these working-tree changes.
+
+Benchmark API clients now require `--expected-host`; host-specific shell wrappers require an explicitly configured `FREETOKEN_EXPECTED_HOST` where they previously embedded the machine hostname. This preserves the host safety check and fails closed if no target is selected. Manuscript contact metadata and the tracked review PDF are anonymized in this branch. Repository-owner URLs, licenses, and third-party attribution remain intact. The separate checkout's in-progress manuscript and PDF edits are preserved, not overwritten by this review copy.

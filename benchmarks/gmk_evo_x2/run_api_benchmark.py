@@ -110,7 +110,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="GMK_EVO_X2",
         help="exact stripped response required in quality mode; empty disables the check",
     )
-    parser.add_argument("--expected-host", default="david-Gmktec-x2-2")
+    parser.add_argument("--expected-host", required=True, help="Expected hostname of the explicitly selected test machine")
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument("--warmup", action="store_true")
     args = parser.parse_args(argv)

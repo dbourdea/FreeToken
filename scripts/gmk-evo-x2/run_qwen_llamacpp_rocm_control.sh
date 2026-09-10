@@ -127,7 +127,7 @@ if [[ "${GMK_EVO_X2_QWEN_QUALITY_SUITE:-}" == "1" ]]; then
         "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_quality_suite.py" \
         --base-url "${BASE_URL}" \
         --model "${MODEL_NAME}" \
-        --expected-host "david-Gmktec-x2-2" \
+        --expected-host "${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}" \
         --max-tokens 64 \
         --artifact "${ARTIFACT_ROOT}/quality.json" \
         >"${ARTIFACT_ROOT}/quality.log" 2>&1

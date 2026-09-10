@@ -33,7 +33,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         help="versioned JSON fixture defining prompts and deterministic checks",
     )
-    parser.add_argument("--expected-host", default="david-Gmktec-x2-2")
+    parser.add_argument("--expected-host", required=True, help="Expected hostname of the explicitly selected test machine")
     parser.add_argument("--max-tokens", type=int, default=64)
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     args = parser.parse_args(argv)

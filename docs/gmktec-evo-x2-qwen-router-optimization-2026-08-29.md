@@ -131,7 +131,7 @@ ROCm SQLite trace below and passed the deterministic AIME output gate.
 
 ```text
 /home/operator/freetoken-amd/artifacts/qwen-reboot-recovery-20260829T100601Z/
-  rocprof-full-qwen/david-Gmktec-x2-2/54976_results.db
+  rocprof-full-qwen/GMKtek EVO-X2/54976_results.db
 ```
 
 The profiler recorded 353,457 dispatches. Its 15.61 decode TPS is intrusive

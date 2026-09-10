@@ -19,7 +19,7 @@ readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly RUNNER="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_multiturn_state_suite.py"
 readonly SUITE="${SOURCE_DIR}/benchmarks/gmk_evo_x2/multiturn_state_suite.json"
 readonly MODEL="qwen3.6-35b-a3b-nvfp4-amd"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 
 case "${SESSION_COUNT}" in
     ''|*[!0-9]*) echo "session count must be a positive integer" >&2; exit 2 ;;
