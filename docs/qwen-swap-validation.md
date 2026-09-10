@@ -14,6 +14,11 @@ The change preserves unrelated current model configuration fields, including oth
 
 Tests were run on GMKtek EVO-X2 using an isolated source checkout, not the protected inference service's files.
 
+The model SHA-256 checksums were independently verified after testing:
+
+- Qwen3.6-27B-Q4_K_M.gguf: `33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9`.
+- Qwen3.8-27B-Q4_K_M.gguf: `31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34`.
+
 | Gate | Result |
 | --- | --- |
 | Model metadata, GDN packing combinations, head-order tests | 21 passed |
@@ -26,6 +31,8 @@ Tests were run on GMKtek EVO-X2 using an isolated source checkout, not the prote
 | Switch to Qwen3.8, SSE response | `4` and `[DONE]`, 41.10 seconds including switch |
 | Switch back to Qwen3.6, SSE response | `4` and `[DONE]`, 38.25 seconds including switch |
 | Protected service restoration | Health and deterministic completion passed |
+
+A second, extended pass repeated A-to-B-to-A successfully in 35.99, 44.17, and 33.17 seconds. It also passed same-model concurrent requests, different-model concurrent requests, streamed usage-block checks, and five-second idle eviction. The private artifact set is `freetoken-swap-live-20260910-e`. The protected service was restored and verified, and the candidate listeners were closed. These timings include load/switch overhead and should not be used as decode throughput.
 
 The three live requests used temperature 0 and a 32-token output limit. Each asked for the single-digit answer to 2 + 2. These are deterministic smoke tests, not a broad reasoning benchmark. The request durations include model startup or switching and are not decode throughput or isolated time-to-first-token measurements.
 
