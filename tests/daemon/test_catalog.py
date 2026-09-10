@@ -150,3 +150,54 @@ def test_client_shutdown_uses_the_daemon_shutdown_transaction(monkeypatch, capsy
         "body": {"force": True}, "token": None, "timeout": daemon_client.DEFAULT_LIFECYCLE_TIMEOUT,
     }
     assert '"stopping": true' in capsys.readouterr().out
+
+
+def test_router_policy_is_strict_and_public_model_fields_are_safe(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text("""
+[router]
+api_keys = ["one", "two"]
+default_ttl_s = 300
+unload_timeout_s = 45
+scheduler = "fifo"
+
+[router.groups.interactive]
+members = ["coding", "chat"]
+swap = true
+exclusive = true
+
+[models.coding]
+model = "coding.gguf"
+ttl_s = 0
+unload_timeout_s = 60
+priority = 10
+group = "interactive"
+
+[models.chat]
+model = "chat.gguf"
+priority = -5
+""", encoding="utf-8")
+    catalog = ModelCatalog.load(str(path))
+    assert catalog.settings.api_keys == ("one", "two")
+    assert catalog.settings.default_ttl_s == 300
+    assert catalog.settings.groups[0].members == ("coding", "chat")
+    public = {item["name"]: item for item in catalog.public()}
+    assert public["coding"] == {
+        "name": "coding", "model": "coding.gguf", "args": [], "readyTimeoutS": 120.0,
+        "ttlS": 0.0, "unloadTimeoutS": 60.0, "priority": 10, "group": "interactive",
+    }
+    assert "api_keys" not in str(public)
+
+
+@pytest.mark.parametrize("router, message", [
+    ("[router]\nscheduler = 'lifo'", "scheduler"),
+    ("[router]\napi_keys = ['same', 'same']", "duplicates"),
+    ("[router.groups.g]\nmembers = ['missing']", "configured models"),
+    ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),
+    ("[models.a]\ngroup = 'other'", "must match"),
+])
+def test_router_policy_rejects_ambiguous_or_unsafe_configuration(tmp_path, router, message):
+    path = tmp_path / "models.toml"
+    path.write_text("[models.a]\nmodel = 'a.gguf'\n" + router, encoding="utf-8")
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
