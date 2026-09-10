@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
 from freetoken.daemon.app import build_app
-from freetoken.daemon.inference_proxy import UpstreamResponse
+from freetoken.daemon.inference_proxy import UpstreamResponse, filter_request_body
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.router import RoutingCoordinator, RoutingError
 
@@ -380,3 +380,9 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         server.shutdown()
         server.server_close()
         worker.join(2)
+
+
+def test_request_filter_is_explicit_top_level_removal_and_default_is_byte_preserving():
+    raw = b'{"model":"low", "metadata":{"private":true}, "user":"operator"}'
+    assert filter_request_body(raw, ()) == raw
+    assert filter_request_body(raw, ("metadata", "user")) == b'{"model":"low"}'

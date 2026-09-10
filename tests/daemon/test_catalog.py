@@ -194,6 +194,7 @@ priority = -5
 @pytest.mark.parametrize("router, message", [
     ("[router]\nscheduler = 'lifo'", "scheduler"),
     ("[router]\nupstream_timeout_s = 0", "upstream_timeout_s"),
+    ("drop_fields = ['model']", "drop_fields"),
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
 from .catalog import CatalogError, ModelCatalog
-from .inference_proxy import RequestModelError, open_upstream, request_model
+from .inference_proxy import RequestModelError, filter_request_body, open_upstream, request_model
 from .readiness import wait_for_ready
 from .router import RoutingCoordinator, RoutingError
 from .serve_manager import Conflict, SwitchLaunchError
@@ -297,8 +297,11 @@ def build_app(
         body = await request.body()
         try:
             model = request_model(body)
+            body = filter_request_body(body, router.catalog.get(model).drop_fields)
         except RequestModelError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except CatalogError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         suffix = f"?{request.url.query}" if request.url.query else ""
         return await forward_routed(request, model, path_and_query=request.url.path + suffix, body=body)
 

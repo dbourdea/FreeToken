@@ -33,6 +33,26 @@ def request_model(body: bytes) -> str:
     return model
 
 
+def filter_request_body(body: bytes, drop_fields: tuple[str, ...]) -> bytes:
+    """Remove only explicitly allowlisted top-level fields from a JSON request.
+
+    The default empty policy returns the original bytes exactly. This never
+    rewrites the model selector and deliberately has no expression or hook
+    language, so a catalog cannot execute code in the daemon.
+    """
+    if not drop_fields:
+        return body
+    try:
+        doc = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RequestModelError("request body must be valid JSON") from exc
+    if not isinstance(doc, dict):
+        raise RequestModelError("request body must be a JSON object")
+    for field in drop_fields:
+        doc.pop(field, None)
+    return json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
 def forward_headers(headers: Mapping[str, str]) -> dict[str, str]:
     """Preserve application headers while removing client and proxy connection state."""
     return {key: value for key, value in headers.items() if key.lower() not in _HOP_BY_HOP}

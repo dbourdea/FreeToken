@@ -60,6 +60,7 @@ class ModelProfile:
     unload_timeout_s: float | None = None
     priority: int = 0
     group: str | None = None
+    drop_fields: tuple[str, ...] = ()
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -81,6 +82,8 @@ class ModelProfile:
             doc["priority"] = self.priority
         if self.group is not None:
             doc["group"] = self.group
+        if self.drop_fields:
+            doc["dropFields"] = list(self.drop_fields)
         return doc
 
 
@@ -200,7 +203,7 @@ def _profile_name(name: object) -> str:
 def _profile(name: str, value: object) -> ModelProfile:
     if not isinstance(value, dict):
         raise CatalogError(f"models.{name} must be a table")
-    allowed = {"model", "args", "port", "description", "ready_timeout_s", "ttl_s", "unload_timeout_s", "priority", "group"}
+    allowed = {"model", "args", "port", "description", "ready_timeout_s", "ttl_s", "unload_timeout_s", "priority", "group", "drop_fields"}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise CatalogError(f"models.{name}: unsupported keys: {', '.join(unknown)}")
@@ -238,5 +241,12 @@ def _profile(name: str, value: object) -> ModelProfile:
     group = value.get("group")
     if group is not None:
         group = _profile_name(group)
+    drop_fields = value.get("drop_fields", [])
+    if (not isinstance(drop_fields, list) or len(drop_fields) > 32
+            or not all(isinstance(field, str) and _NAME.fullmatch(field) for field in drop_fields)
+            or "model" in drop_fields or len(set(drop_fields)) != len(drop_fields)):
+        raise CatalogError(
+            f"models.{name}.drop_fields must be distinct safe top-level names other than model"
+        )
     return ModelProfile(name, model, tuple(raw_args), port, description, ready_timeout_s,
-                        ttl_s, unload_timeout_s, priority, group)
+                        ttl_s, unload_timeout_s, priority, group, tuple(drop_fields))
