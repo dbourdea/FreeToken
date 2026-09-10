@@ -1,4 +1,4 @@
-"""Unit tests for the GMKtec EVO-X2 Qwen API benchmark safety primitives."""
+"""Unit tests for the GMKtek EVO-X2 Qwen API benchmark safety primitives."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class RequireExpectedHostTests(unittest.TestCase):
     """Exercise the host guard without requiring any third-party test package."""
 
     def test_accepts_gmk_evo_x2_short_name(self) -> None:
-        """The harness accepts the exact GMKtec EVO-X2 host name used by the test policy."""
+        """The harness accepts the exact GMKtek EVO-X2 host name used by the test policy."""
 
         with patch("socket.gethostname", return_value="david-Gmktec-x2-2"):
             self.assertEqual(require_expected_host("david-Gmktec-x2-2"), "david-gmktec-x2-2")
@@ -236,7 +236,7 @@ class QwenRecoveryContextTests(unittest.TestCase):
 
 
 class ConcurrentControlArgumentTests(unittest.TestCase):
-    """Reject nonsensical concurrent workloads before they can reach GMKtec EVO-X2."""
+    """Reject nonsensical concurrent workloads before they can reach GMKtek EVO-X2."""
 
     def test_concurrency_must_be_positive(self) -> None:
         """Zero clients has no latency or throughput meaning."""

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start or stop the qualified GMKtec EVO-X2 Qwen3.6 Q4_K_M FreeToken test server.
+# Start or stop the qualified GMKtek EVO-X2 Qwen3.6 Q4_K_M FreeToken test server.
 #
 # This helper is deliberately limited to the isolated loopback test port.  It
 # does not start the normal NVFP4 service, contact llama-swap, change system
@@ -67,7 +67,7 @@ listener_pid() {
 }
 
 # Return success only for the known test-server command.  This is the guard
-# that makes a PID or process-group signal safe in a shared GMKtec EVO-X2 shell.
+# that makes a PID or process-group signal safe in a shared GMKtek EVO-X2 shell.
 is_qualified_q4_process() {
     local pid="$1"
     local command

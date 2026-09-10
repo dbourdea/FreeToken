@@ -37,7 +37,7 @@ restore_production() {
     fi
     if ! production_ready; then
         recovered=0
-        # Start only once. The serial NVFP4 Qwen load on GMKtec EVO-X2 lasts minutes;
+        # Start only once. The serial NVFP4 Qwen load on GMKtek EVO-X2 lasts minutes;
         # retrying its launcher after the listener exists merely reports a
         # refusal and shortens the useful ready-status wait.
         bash "${PRODUCTION_DIR}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \

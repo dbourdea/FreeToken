@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Measure warm Qwen decode throughput against the isolated GMKtec EVO-X2 FreeToken API.
+# Measure warm Qwen decode throughput against the isolated GMKtek EVO-X2 FreeToken API.
 #
 # The workload is deliberately a fixed 48-times scheduler paragraph. It preserves
-# the former 733-token-class GMKtec EVO-X2 baseline shape while remaining separate from
+# the former 733-token-class GMKtek EVO-X2 baseline shape while remaining separate from
 # the unrecovered upstream paper workload. This script neither starts nor stops a
-# server and never contacts llama-swap or any non-GMKtec EVO-X2 endpoint.
+# server and never contacts llama-swap or any non-GMKtek EVO-X2 endpoint.
 
 set -euo pipefail
 

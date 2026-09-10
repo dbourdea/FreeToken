@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Measure deterministic long-context retrieval on the isolated GMKtec EVO-X2 API.
+"""Measure deterministic long-context retrieval on the isolated GMKtek EVO-X2 API.
 
 This tool deliberately covers the context range exposed by the running Qwen
-server.  It is a GMKtec EVO-X2 control, not a replication of the FreeToken paper's
+server.  It is a GMKtek EVO-X2 control, not a replication of the FreeToken paper's
 much longer agent sessions.  It places an exact marker at the start of a
 deterministic prompt, asks the model to retrieve only that marker, records
 every visible SSE event and refuses to overwrite an existing artifact.
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     artifact = {
         "schema_version": 1,
         "host": host,
-        "classification": "GMKtec EVO-X2 long-context control, not paper replication",
+        "classification": "GMKtek EVO-X2 long-context control, not paper replication",
         "request": {
             "base_url": args.base_url,
             "model": args.model,

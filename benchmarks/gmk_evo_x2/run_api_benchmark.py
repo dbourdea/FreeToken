@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure a warm GMKtec EVO-X2 Qwen server through its streamed OpenAI-compatible API.
+"""Measure a warm GMKtek EVO-X2 Qwen server through its streamed OpenAI-compatible API.
 
 This harness validates the host before opening a socket, records each SSE
 content event timestamp, counts completed text with the supplied checkpoint
@@ -124,7 +124,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def require_expected_host(expected_host: str) -> str:
-    """Fail closed unless this process is executing on the declared GMKtec EVO-X2 host."""
+    """Fail closed unless this process is executing on the declared GMKtek EVO-X2 host."""
 
     actual_host = socket.gethostname().lower()
     accepted = {expected_host.lower(), expected_host.lower().split(".", 1)[0]}

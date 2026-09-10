@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch Gemma4 Q4 GGUF in an isolated GMKtec EVO-X2 control slot and restore Qwen.
+# Launch Gemma4 Q4 GGUF in an isolated GMKtek EVO-X2 control slot and restore Qwen.
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ restore_production() {
         # Do not race the Qwen recovery process against the temporary Gemma
         # process still releasing its ROCm context. A bare kill followed by an
         # immediate recovery launch intermittently produced an empty Qwen log
-        # and a dead child on GMKtec EVO-X2.
+        # and a dead child on GMKtek EVO-X2.
         kill "${test_pid}" || true
         for _ in {1..30}; do
             kill -0 "${test_pid}" 2>/dev/null || break
@@ -47,7 +47,7 @@ restore_production() {
         # background PID or an artifact-directory print as successful recovery.
         local recovered=0
         # Launch exactly once. Qwen takes several minutes to load its three
-        # serial NVFP4 expert groups on GMKtec EVO-X2. Retrying the launcher while
+        # serial NVFP4 expert groups on GMKtek EVO-X2. Retrying the launcher while
         # its listener already exists only produces a misleading refusal and
         # wastes the short recovery window.
         bash "${PRODUCTION_DIR}/scripts/gmk-evo-x2/start_qwen_recovery_server.sh" \

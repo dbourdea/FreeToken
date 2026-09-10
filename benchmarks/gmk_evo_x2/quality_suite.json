@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Small deterministic Qwen API quality suite for GMKtec EVO-X2. This is a local control, not the FreeToken paper workload.",
+  "description": "Small deterministic Qwen API quality suite for GMKtek EVO-X2. This is a local control, not the FreeToken paper workload.",
   "cases": [
     {
       "id": "canary_exact",

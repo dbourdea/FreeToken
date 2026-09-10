@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run one isolated Qwen GGUF raw-prompt quality control on GMKtec EVO-X2.
+# Run one isolated Qwen GGUF raw-prompt quality control on GMKtek EVO-X2.
 #
 # This script deliberately takes the production API offline only while an
 # isolated checkout owns the Strix Halo GPU.  Its EXIT trap always stops that
@@ -15,7 +15,7 @@ readonly CHECKOUT="${1:?usage: run_qwen_gguf_raw_control.sh ISOLATED_CHECKOUT [D
 # A 512-token budget is normally sufficient to finish the fixed AIME answer;
 # callers may supply another positive limit when investigating longer outputs.
 readonly DECODE_TOKENS="${2:-512}"
-# GMKtec EVO-X2's persistent project root keeps models, artifacts, and production
+# GMKtek EVO-X2's persistent project root keeps models, artifacts, and production
 # recovery tooling outside the disposable candidate checkout.
 readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly PRODUCTION_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"

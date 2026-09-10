@@ -3,7 +3,7 @@
 #
 # Each session reuses the versioned three-turn suite and writes its own immutable
 # JSON artifact. The wrapper never starts, stops, or rebuilds Qwen. It requires
-# a healthy, swap-free GMKtec EVO-X2 server before the first request and writes an
+# a healthy, swap-free GMKtek EVO-X2 server before the first request and writes an
 # aggregate summary only after every requested session has completed.
 
 set -euo pipefail

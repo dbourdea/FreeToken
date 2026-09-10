@@ -133,7 +133,7 @@ restore_normal_service() {
 }
 
 # Install recovery before stopping the normal service so interrupts do not leave
-# the GMKtec EVO-X2 without its normal local OpenAI-compatible endpoint.
+# the GMKtek EVO-X2 without its normal local OpenAI-compatible endpoint.
 trap restore_normal_service EXIT INT TERM
 
 # Fail closed when a caller supplies an unexpected source tree or missing tools.

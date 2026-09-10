@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the isolated ROCm 10 llama.cpp Qwen3.6-35B-A3B control on GMKtec EVO-X2.
+# Run the isolated ROCm 10 llama.cpp Qwen3.6-35B-A3B control on GMKtek EVO-X2.
 #
 # This script intentionally starts a short-lived loopback-only llama.cpp server
 # on port 1921. It never contacts llama-swap, modifies its configuration, stops
@@ -67,7 +67,7 @@ trap cleanup_server EXIT
 
 # Start the exact ROCm 10 b10141 control on an otherwise unused loopback port.
 # One slot, 8,192 context tokens, full GPU offload, Flash Attention, and Q8 KV
-# cache retain the previously documented GMKtec EVO-X2 ROCm control conventions.
+# cache retain the previously documented GMKtek EVO-X2 ROCm control conventions.
 "${LLAMA_SERVER}" \
     -m "${MODEL_FILE}" \
     --alias "${MODEL_NAME}" \

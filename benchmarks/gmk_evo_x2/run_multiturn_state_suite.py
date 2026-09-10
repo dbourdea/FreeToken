@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure a deterministic GMKtec EVO-X2 multi-turn state-retention control.
+"""Measure a deterministic GMKtek EVO-X2 multi-turn state-retention control.
 
 This is a bounded intermediate workload between single prompts and the
 FreeToken paper's tool-using agents. Each turn receives the full prior visible

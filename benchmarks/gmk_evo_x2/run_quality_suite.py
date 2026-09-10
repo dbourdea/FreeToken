@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a small, versioned quality suite against the GMKtec EVO-X2 Qwen API.
+"""Run a small, versioned quality suite against the GMKtek EVO-X2 Qwen API.
 
 The suite is intentionally separate from the paper's agent workloads. It
 provides a repeatable precondition for local performance changes: every
