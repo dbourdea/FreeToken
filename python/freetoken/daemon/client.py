@@ -21,6 +21,7 @@ DEFAULT_TIMEOUT = 10.0
 # prepare-stop (15s transport budget) + default SIGTERM grace (10s) + reap wait (10s),
 # with enough HTTP scheduling slack that a valid lifecycle transaction does not look failed.
 DEFAULT_LIFECYCLE_TIMEOUT = 40.0
+DEFAULT_PROFILE_TIMEOUT = 960.0  # max catalog readiness (900s) plus lifecycle budget
 
 # Positional verbs that mean "act as a client"; anything else (bare, or a flag like --host) runs
 # the server. Kept in one place so the server dispatcher and this parser agree.
@@ -36,6 +37,8 @@ class ClientError(Exception):
 def _effective_timeout(verb: str, configured: float | None) -> float:
     if configured is not None:
         return configured
+    if verb in {"start-profile", "switch-profile"}:
+        return DEFAULT_PROFILE_TIMEOUT
     return (
         DEFAULT_LIFECYCLE_TIMEOUT
         if verb in {"stop", "shutdown", "switch", "start-profile", "switch-profile"}
@@ -124,7 +127,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         "--timeout",
         type=float,
         default=None,
-        help="HTTP timeout (default 10s; stop/switch 40s)",
+        help="HTTP timeout (default 10s; stop/switch 40s; profiles 960s)",
     )
 
     p = argparse.ArgumentParser(prog=prog, description="Control a running ft daemon")
@@ -211,6 +214,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             method, path, body = table[args.verb]
         doc = _request_json(method, args.url, path, body=body, token=args.token, timeout=timeout)
         print(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True))
+        if args.verb in {"start-profile", "switch-profile"} and not doc.get("readiness", {}).get("ready"):
+            return 1
         return 0
     except ClientError as exc:
         print(str(exc), file=sys.stderr)

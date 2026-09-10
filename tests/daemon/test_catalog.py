@@ -14,16 +14,16 @@ from freetoken.daemon.readiness import wait_for_ready
 def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(
-        """[models.qwen-coder]\nmodel = \"/models/qwen.gguf\"\nport = 1922\nargs = [\"--ctx-size\", \"32768\"]\ndescription = \"coding profile\"\n""",
+        """[models.qwen-coder]\nmodel = \"/models/qwen.gguf\"\nport = 1922\nargs = [\"--max-seq-len-override\", \"32768\"]\ndescription = \"coding profile\"\n""",
         encoding="utf-8",
     )
     catalog = ModelCatalog.load(str(path))
     assert catalog.get("qwen-coder").request() == {
-        "model": "/models/qwen.gguf", "port": 1922, "args": ["--ctx-size", "32768"]
+        "model": "/models/qwen.gguf", "port": 1922, "args": ["--max-seq-len-override", "32768"]
     }
     assert catalog.public() == [{
         "name": "qwen-coder", "model": "/models/qwen.gguf", "port": 1922,
-        "args": ["--ctx-size", "32768"], "description": "coding profile", "readyTimeoutS": 120.0,
+        "args": ["--max-seq-len-override", "32768"], "description": "coding profile", "readyTimeoutS": 120.0,
     }]
 
 
@@ -57,7 +57,7 @@ def test_readiness_waits_for_engine_health_not_just_a_listening_process():
                 {"reachable": True, "status": "ok", "model": "m"},
             ])
 
-        def health(self, port):
+        def fresh_health(self, port):
             assert port == 1922
             return next(self.docs)
 
@@ -72,7 +72,7 @@ def test_readiness_timeout_leaves_the_existing_engine_under_manager_control():
             return {"running": True, "pid": 44}
 
     class Probe:
-        def health(self, port):
+        def fresh_health(self, port):
             return {"reachable": True, "status": "loading"}
 
     clock = iter([0.0, 0.0, 1.0])
@@ -86,7 +86,7 @@ def test_readiness_timeout_leaves_the_existing_engine_under_manager_control():
 
 def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_path):
     path = tmp_path / "models.toml"
-    path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\nargs = ['--ctx-size', '32768']\n", encoding="utf-8")
+    path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\nargs = ['--max-seq-len-override', '32768']\n", encoding="utf-8")
 
     class Manager:
         def __init__(self):
@@ -107,7 +107,7 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
             return {"switched": True, "model": model, "port": port}
 
     class Probe:
-        def health(self, port):
+        def fresh_health(self, port):
             return {"reachable": True, "status": "ok", "port": port}
 
     manager = Manager()
@@ -128,8 +128,8 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
         switched = client.post("/engine/switch-profile", json={"name": "coding", "force": True}, headers={"X-FT-Token": "secret"})
         assert switched.status_code == 200
     assert manager.calls == [
-        ("start", "/models/coding.gguf", 1922, ["--ctx-size", "32768"]),
-        ("switch", "/models/coding.gguf", 1922, ["--ctx-size", "32768"], True),
+        ("start", "/models/coding.gguf", 1922, ["--max-seq-len-override", "32768"]),
+        ("switch", "/models/coding.gguf", 1922, ["--max-seq-len-override", "32768"], True),
     ]
 
 

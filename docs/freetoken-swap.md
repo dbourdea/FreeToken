@@ -1,6 +1,8 @@
 # freetoken-swap: named, safe model switching
 
-`freetoken-swap` is FreeToken's named-model layer over `ft daemon`. It takes the useful model catalog workflow from llama-swap, but keeps FreeToken's native lifecycle transaction and deliberately does not run shell commands from catalog entries. One daemon supervises one `ft serve` process at a time, so a model replacement is serialized with accounting, graceful drain, process-group cleanup, durable state, and the existing health endpoints.
+The native `ft daemon` catalog currently provides **manual** named-model switching. It is not yet an automatic inference router. It keeps FreeToken's native lifecycle transaction and deliberately does not run shell commands from catalog entries. One daemon supervises one `ft serve` process at a time, so a model replacement is serialized with accounting, graceful drain, process-group cleanup, durable state, and the existing health endpoints.
+
+For automatic request routing, the integration path is an unmodified, pinned llama-swap binary supervising FreeToken directly, using the new `/ready` endpoint. See [the example](../examples/freetoken-swap.yaml) and [compatibility research](freetoken-swap-research.md). This direct mode does not use the daemon's durable accounting outbox. Do not let both supervisors manage the same process or port. Real-model swap qualification remains required before production use.
 
 The catalog is TOML and is optional. Start the daemon with `--catalog` or set `FREETOKEN_SWAP_CATALOG`:
 
@@ -8,13 +10,13 @@ The catalog is TOML and is optional. Start the daemon with `--catalog` or set `F
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
 port = 1922
-args = ["--ctx-size", "32768", "--gpu", "GPU-EXAMPLE"]
-description = "Strix Halo coding profile"
+args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
+description = "GMKtek EVO-X2 candidate coding profile"
 ready_timeout_s = 300
 
 [models.qwen-chat]
 model = "/models/Qwen3.5-27B-Q4_K_M.gguf"
-args = ["--ctx-size", "16384"]
+args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
 ```
 
 ```bash
@@ -29,7 +31,11 @@ ft daemon health
 
 Profiles accept only `model`, `port`, `args`, `description`, and `ready_timeout_s` (default 120 seconds). `args` is passed as an argument vector to `ft serve`; it is never interpreted by a shell. A profile cannot set `--model` or `--port` in `args`, because those fields are owned by the supervisor and are part of its conflict and re-adoption identity. The model files and catalog remain local operational configuration, not repository content.
 
-After a profile launch, freetoken-swap polls the new engine's authoritative `/health` state until it reaches `ok`, reports `error`, or reaches the configured timeout. A timeout intentionally leaves the launched process under daemon management so an operator can inspect logs or explicitly stop it. It never treats an open port as ready and never kills a potentially slow model load automatically.
+These are illustrative paths, not a list of qualified models. In particular, dense Qwen GGUF support requires a compatible AMD/model-loader branch and cannot be inferred from this control-plane PR.
+
+After a profile launch, the daemon polls uncached engine health, verifies the process identity again after each probe, and waits for `status=ok` and `maintenance=serving`. Readiness failure returns HTTP 503. The client returns a nonzero exit code and defaults to a 960-second transport budget, covering the maximum 900-second catalog readiness timeout plus shutdown overhead. A timeout intentionally leaves the launched process under daemon management so an operator can inspect logs or explicitly stop it. Rollback is not implemented.
+
+FreeToken's `/health` remains a backwards-compatible diagnostic endpoint and can return HTTP 200 while loading or failed. `/ready` returns HTTP 503 for loading, failure, or maintenance, and HTTP 200 only when accepting requests. Configure llama-swap with `checkEndpoint: /ready`, never `/health` or `/v1/models` as a substitute.
 
 ## Provenance and scope
 

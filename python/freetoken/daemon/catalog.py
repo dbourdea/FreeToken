@@ -104,7 +104,11 @@ def _profile(name: str, value: object) -> ModelProfile:
     # The daemon owns these two options.  Letting a profile smuggle them through
     # produces ambiguous process state and defeats the lifecycle conflict guard.
     for arg in raw_args:
-        if arg in {"--model", "--port", "-p"} or arg.startswith(("--model=", "--port=")):
+        option = arg.split("=", 1)[0]
+        reserved = ("--model", "--model-path", "--port")
+        if arg == "--" or option == "-p" or (
+            option.startswith("--") and any(flag.startswith(option) for flag in reserved)
+        ):
             raise CatalogError(f"models.{name}.args must not set --model or --port")
     port = value.get("port")
     if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535):

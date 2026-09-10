@@ -203,13 +203,15 @@ def build_app(
         profile = catalog.get(name)
         return profile.model, resolve_port(profile.port), list(profile.args)
 
-    def profile_result(name: str, result: dict) -> dict:
+    def profile_result(name: str, result: dict, port: int):
         profile = catalog.get(name)
-        port = resolve_port(profile.port)
         readiness = wait_for_ready(
             manager, probe, pid=result.get("pid"), port=port, timeout_s=profile.ready_timeout_s
         )
-        return {**result, "profile": name, "readiness": readiness}
+        content = {**result, "profile": name, "readiness": readiness}
+        if not readiness["ready"]:
+            return JSONResponse(status_code=503, content=content)
+        return content
 
     @app.get("/models", dependencies=auth)
     async def models():
@@ -282,7 +284,7 @@ def build_app(
         try:
             model, port, args = profile_request(body.name)
             result = await run(lifecycle_pool, manager.start, model, port, args)
-            return await run(proxy_pool, profile_result, body.name, result)
+            return await run(proxy_pool, profile_result, body.name, result, port)
         except CatalogError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Conflict as exc:
@@ -304,7 +306,7 @@ def build_app(
         try:
             model, port, args = profile_request(body.name)
             result = await run(lifecycle_pool, manager.switch, model, port, args, body.force)
-            return await run(proxy_pool, profile_result, body.name, result)
+            return await run(proxy_pool, profile_result, body.name, result, port)
         except CatalogError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except (AccountingPrepareError, AccountingOutboxError) as exc:

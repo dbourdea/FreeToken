@@ -63,6 +63,10 @@ class ServeProbe:
     def health(self, port: int) -> dict:
         return self._cached("health", "/health", port)
 
+    def fresh_health(self, port: int) -> dict:
+        """Read this generation, never a cached response from a replaced engine."""
+        return self._fetch("/health", port)
+
     def stats(self, port: int) -> dict:
         return self._cached("stats", "/v1/stats", port)
 

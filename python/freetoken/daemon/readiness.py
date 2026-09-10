@@ -29,8 +29,13 @@ def wait_for_ready(
         state = manager.status()
         if not state.get("running") or (pid is not None and state.get("pid") != pid):
             return {"ready": False, "reason": "superseded", "health": last}
-        last = probe.health(port)
-        if last.get("reachable") and last.get("status") == "ok":
+        last = probe.fresh_health(port)
+        # Replacement or exit can happen while the HTTP request is in flight.
+        state = manager.status()
+        if not state.get("running") or (pid is not None and state.get("pid") != pid):
+            return {"ready": False, "reason": "superseded", "health": last}
+        if (last.get("reachable") and last.get("status") == "ok"
+                and last.get("maintenance", "serving") == "serving"):
             return {"ready": True, "health": last}
         if last.get("status") == "error":
             return {"ready": False, "reason": "engine-error", "health": last}
