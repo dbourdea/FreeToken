@@ -40,6 +40,15 @@ Status labels:
 | Embedding, rerank, image, speech, transcription, ComfyUI, SDAPI routes | Inapplicable today where FreeToken has no matching server route | Document absent FreeToken backend capability and reject safely. Do not mimic endpoint success |
 | Accounting, drain/abort barrier, rollback | Native and more specific than direct llama-swap mode | Integrate into automatic routing, including loader failure and recovery tests |
 
+## Native real-process gate
+
+`tests/daemon/test_real_process_recovery.py` now includes a Linux-only native
+router test that starts a disposable HTTP child through `ServeManager`, waits
+for real `/health` readiness, routes an SSE request through the daemon, then
+stops the child and verifies pidfile cleanup. It compiles and is skipped on
+Windows. It has not yet been executed on a Linux host, so it is a pending gate,
+not evidence of Linux completion.
+
 ## Architecture gate
 
 The target is one FreeToken-owned router and lifecycle supervisor. It must not

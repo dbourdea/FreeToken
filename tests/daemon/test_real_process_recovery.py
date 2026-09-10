@@ -11,9 +11,13 @@ import subprocess
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi.testclient import TestClient
 
+from freetoken.daemon.app import build_app
+from freetoken.daemon.catalog import ModelCatalog, ModelProfile
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.pidfile import ServeStateStore
 from freetoken.daemon.proxy import ServeProbe
@@ -44,6 +48,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+    def do_POST(self):
+        if self.path == "/v1/chat/completions":
+            length = int(self.headers.get("Content-Length", "0"))
+            request = json.loads(self.rfile.read(length) or b"{}")
+            body = ("data: {\\\"model\\\":\\\"%s\\\",\\\"echo\\\":%s}\\n\\n"
+                    "data: [DONE]\\n\\n") % (model, json.dumps(request.get("model")))
+            data = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        self.send_error(404)
 HTTPServer(("127.0.0.1", int(port)), Handler).serve_forever()
 '''
 
@@ -112,6 +130,55 @@ def test_real_readiness_rollback_and_process_group_cleanup(tmp_path, resistant):
             assert connection.connect_ex(("127.0.0.1", port)) != 0
     finally:
         # Test-owned sessions only. Always clean up even if an assertion fails.
+        for child in children:
+            try:
+                os.killpg(child.pid, 9)
+            except ProcessLookupError:
+                pass
+            if child.proc.poll() is None:
+                child.proc.wait(timeout=3)
+
+
+def test_native_router_supervises_a_real_child_and_relays_sse(tmp_path):
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    children = []
+
+    def spawn(model, actual_port, args):
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "-c", SERVER, model, str(actual_port), "no"],
+            start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        child = PopenChild(proc, None)
+        children.append(child)
+        return child
+
+    store = ServeStateStore(str(tmp_path / "serve.json"))
+    manager = ServeManager(LogRing(), store, spawn_fn=spawn, apply_oom=False,
+                           grace_s=0.2, reap_wait_s=3,
+                           read_stats=lambda p: json_get(p, "/v1/stats"))
+    probe = ServeProbe()
+    catalog = ModelCatalog({"good": ModelProfile("good", "good", (), port=port)})
+    try:
+        with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(2) as proxy:
+            app = build_app(
+                manager=manager, ring=LogRing(), probe=probe, footprint_fn=lambda pid: {},
+                lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog,
+            )
+            response = TestClient(app).post(
+                "/v1/chat/completions", json={"model": "good", "stream": True},
+            )
+        assert response.status_code == 200
+        assert b'"model":"good"' in response.content
+        assert response.content.endswith(b"data: [DONE]\n\n")
+        assert manager.status()["running"] is True
+        assert store.load() is not None
+        manager.stop()
+        assert store.load() is None
+        assert children[0].reaped.is_set()
+    finally:
         for child in children:
             try:
                 os.killpg(child.pid, 9)
