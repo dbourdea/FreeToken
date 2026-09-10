@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from fastapi.testclient import TestClient
@@ -329,3 +330,48 @@ def test_explicit_router_cancel_closes_an_inflight_upstream(monkeypatch):
     assert response[0].status_code == 200
     assert router.status()["cancellations"] == 1
     assert router.status()["activeRequests"] == 0
+
+
+def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes():
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["path"] = self.path
+            seen["body"] = self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("X-Engine", "loopback")
+            self.end_headers()
+            self.wfile.write(b"data: {\"ok\":true}\n\ndata: [DONE]\n\n")
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        manager = Manager()
+        port = server.server_address[1]
+        catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", (), port=port)})
+        router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+        with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+            app = build_app(
+                manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+                lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            )
+            payload = b'{"model":"low","stream":true,"messages":[]}'
+            response = TestClient(app).post(
+                "/v1/chat/completions", content=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        assert response.status_code == 200
+        assert response.headers["x-engine"] == "loopback"
+        assert response.content == b"data: {\"ok\":true}\n\ndata: [DONE]\n\n"
+        assert seen == {"path": "/v1/chat/completions", "body": payload}
+        assert router.status()["activeRequests"] == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)
