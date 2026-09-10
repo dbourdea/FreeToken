@@ -65,6 +65,24 @@ def test_readiness_waits_for_engine_health_not_just_a_listening_process():
     assert result == {"ready": True, "health": {"reachable": True, "status": "ok", "model": "m"}}
 
 
+def test_readiness_timeout_leaves_the_existing_engine_under_manager_control():
+    class Manager:
+        def status(self):
+            return {"running": True, "pid": 44}
+
+    class Probe:
+        def health(self, port):
+            return {"reachable": True, "status": "loading"}
+
+    clock = iter([0.0, 0.0, 1.0])
+    result = wait_for_ready(Manager(), Probe(), pid=44, port=1922, timeout_s=1, now=lambda: next(clock), sleep=lambda _: None)
+    assert result == {
+        "ready": False,
+        "reason": "timeout",
+        "health": {"reachable": True, "status": "loading"},
+    }
+
+
 def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\nargs = ['--ctx-size', '32768']\n", encoding="utf-8")
