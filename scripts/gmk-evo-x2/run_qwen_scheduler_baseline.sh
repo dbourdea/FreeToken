@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Measure warm Qwen decode throughput against the isolated GMKtec EVO-X2 FreeToken API.
+# Measure warm Qwen decode throughput against the isolated GMKtek EVO-X2 FreeToken API.
 #
 # The workload is deliberately a fixed 48-times scheduler paragraph. It preserves
-# the former 733-token-class GMKtec EVO-X2 baseline shape while remaining separate from
+# the former 733-token-class GMKtek EVO-X2 baseline shape while remaining separate from
 # the unrecovered upstream paper workload. This script neither starts nor stops a
-# server and never contacts llama-swap or any non-GMKtec EVO-X2 endpoint.
+# server and never contacts llama-swap or any non-GMKtek EVO-X2 endpoint.
 
 set -euo pipefail
 
 # Accept a caller-supplied artifact root so each run has immutable evidence.
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_scheduler_baseline.sh ARTIFACT_DIR}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 # Keep benchmark code independent from the source checkout serving the normal
 # API. A deployed server checkout can intentionally stay frozen while a newer
@@ -25,7 +25,7 @@ readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly MODEL_DIR="${GMK_EVO_X2_QWEN_TOKENIZER_DIR:-${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4}"
 readonly MODEL_NAME="${GMK_EVO_X2_QWEN_MODEL_NAME:-qwen3.6-35b-a3b-nvfp4-amd}"
 readonly BASE_URL="${GMK_EVO_X2_QWEN_BASE_URL:-http://127.0.0.1:1919/v1}"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 readonly BASE_PROMPT="The scheduler manages incoming inference requests by prioritizing, batching, and assigning them to available compute resources to optimize throughput and latency. "
 
 # Form the fixed input without shell interpolation at call time. The harness

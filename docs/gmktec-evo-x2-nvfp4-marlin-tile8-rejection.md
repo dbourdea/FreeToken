@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 NVFP4 Marlin tile-8 candidate rejection
+# GMKtek EVO-X2 NVFP4 Marlin tile-8 candidate rejection
 
 ## Candidate
 
@@ -38,7 +38,7 @@ The candidate stopped after the failure, preserving the raw benchmark and
 quality artifacts under:
 
 ```text
-/home/david/freetoken-amd/artifacts/nvfp4-marlin-api-candidate-20260904T180912Z/
+/home/operator/freetoken-amd/artifacts/nvfp4-marlin-api-candidate-20260904T180912Z/
 ```
 
 ## Recovery verification

@@ -1,9 +1,9 @@
-# GMKtec EVO-X2 fused MoE expert prototype
+# GMKtek EVO-X2 fused MoE expert prototype
 
 ## Purpose
 
 This bounded native HIP experiment measures a representative expert-row
-operation on the GMKtec EVO-X2 without downloading or loading a large model
+operation on the GMKtek EVO-X2 without downloading or loading a large model
 checkpoint. It is intended to identify whether a device kernel can consume
 multiple routed expert rows from mapped host memory while performing the dot
 product and reduction on the GPU.

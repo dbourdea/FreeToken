@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Measure simultaneous GMKtec EVO-X2 streamed requests without changing server state.
+"""Measure simultaneous GMKtek EVO-X2 streamed requests without changing server state.
 
 The existing scheduler baseline measures one warm request at a time.  This
 control releases a fixed number of requests together, preserves each raw
 response and timing stream, and reports both individual latency and aggregate
-throughput.  It is a local GMKtec EVO-X2 control, not a reproduction of an upstream
+throughput.  It is a local GMKtek EVO-X2 control, not a reproduction of an upstream
 agent workload.  The program never starts, stops, or reconfigures a server.
 """
 
@@ -147,7 +147,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--tokenizer", required=True, type=Path)
     parser.add_argument("--artifact", required=True, type=Path)
-    parser.add_argument("--expected-host", default="david-Gmktec-x2-2")
+    parser.add_argument("--expected-host", required=True, help="Expected hostname of the explicitly selected test machine")
     parser.add_argument("--concurrency", required=True, type=int)
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--max-tokens", type=int, default=256)
@@ -166,7 +166,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def require_expected_host(expected_host: str) -> str:
-    """Fail closed to keep concurrency traffic on the declared GMKtec EVO-X2 host."""
+    """Fail closed to keep concurrency traffic on the declared GMKtek EVO-X2 host."""
 
     actual_host = socket.gethostname().lower()
     expected_short = expected_host.lower().split(".", 1)[0]
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     all_gaps = [gap for item in rounds for request in item["requests"] for gap in request["token_gap_seconds"]]
     artifact = {
         "schema_version": 1,
-        "classification": "GMKtec EVO-X2 concurrent API control, not paper replication",
+        "classification": "GMKtek EVO-X2 concurrent API control, not paper replication",
         "host": host,
         "request": {
             "base_url": args.base_url,

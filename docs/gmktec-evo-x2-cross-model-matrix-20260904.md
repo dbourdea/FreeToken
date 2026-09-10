@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 cross-model benchmark matrix
+# GMKtek EVO-X2 cross-model benchmark matrix
 
 This matrix consolidates the preserved September 4, 2026 controls for the
 native ROCm/HIP FreeToken port and the local ROCm 10 llama.cpp controls. It is

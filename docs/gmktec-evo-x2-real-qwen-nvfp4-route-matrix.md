@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 real Qwen NVFP4 route matrix
+# GMKtek EVO-X2 real Qwen NVFP4 route matrix
 
 ## Purpose
 

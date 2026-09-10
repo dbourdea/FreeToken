@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 grouped-transfer overlap prototype
+# GMKtek EVO-X2 grouped-transfer overlap prototype
 
 This prototype tested whether a naive two-stream pipeline could hide grouped
 expert staging and transfer behind synthetic GPU work. It is an isolated

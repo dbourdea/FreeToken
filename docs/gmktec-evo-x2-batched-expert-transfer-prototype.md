@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 batched expert-transfer prototype
+# GMKtek EVO-X2 batched expert-transfer prototype
 
 This isolated prototype uses the same 64 randomly selected 64 KiB blocks as
 the serialized expert-block test, but gathers blocks into pinned staging

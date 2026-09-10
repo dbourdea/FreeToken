@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 NVFP4 Marlin `num_stages=2` candidate rejection
+# GMKtek EVO-X2 NVFP4 Marlin `num_stages=2` candidate rejection
 
 ## Candidate
 
@@ -32,7 +32,7 @@ observed output SHA-1: 1cae5bae914f
 Raw artifacts are preserved under:
 
 ```text
-/home/david/freetoken-amd/artifacts/nvfp4-marlin-api-candidate-20260904T184547Z/
+/home/operator/freetoken-amd/artifacts/nvfp4-marlin-api-candidate-20260904T184547Z/
 ```
 
 ## Recovery

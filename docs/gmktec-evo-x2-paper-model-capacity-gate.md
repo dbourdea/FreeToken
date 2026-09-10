@@ -1,12 +1,12 @@
-# GMKtec EVO-X2 paper-model capacity gate
+# GMKtek EVO-X2 paper-model capacity gate
 
 This is a read-only capacity gate for deciding whether to attempt the
-FreeToken paper's large-model demonstrations on the GMKtec EVO-X2 Strix Halo.
+FreeToken paper's large-model demonstrations on the GMKtek EVO-X2 Strix Halo.
 It records the live host state and does not download, load, or alter a model.
 
 ## Live host observation
 
-The observation was collected on 2026-09-04 from the configured GMKtec EVO-X2
+The observation was collected on 2026-09-04 from the configured GMKtek EVO-X2
 using `free -h`, `swapon --show --bytes`, `rocm-smi`, and a bounded model-file
 inventory.
 
@@ -128,7 +128,7 @@ without importing GPU libraries.
 
 ## Real-shape ROCm slice result
 
-The isolated harness was run on the GMKtec EVO-X2 using the pinned shard and
+The isolated harness was run on the GMKtek EVO-X2 using the pinned shard and
 the native ROCm environment. It transferred 80,216,064 bytes, or 76.5 MiB,
 covering all six experts and all six tensors per expert for layer 0. Five
 round trips were recorded. The first H2D sample was cold at 0.863 GiB/s,

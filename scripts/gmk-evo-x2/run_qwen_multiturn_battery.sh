@@ -3,7 +3,7 @@
 #
 # Each session reuses the versioned three-turn suite and writes its own immutable
 # JSON artifact. The wrapper never starts, stops, or rebuilds Qwen. It requires
-# a healthy, swap-free GMKtec EVO-X2 server before the first request and writes an
+# a healthy, swap-free GMKtek EVO-X2 server before the first request and writes an
 # aggregate summary only after every requested session has completed.
 
 set -euo pipefail
@@ -13,13 +13,13 @@ readonly SESSION_COUNT="${2:-30}"
 # Default to the strict clean-memory gate. A caller may pass a higher,
 # explicitly recorded ceiling for a diagnostic characterization run.
 readonly MAX_SWAP_KIB="${GMK_EVO_X2_BATTERY_MAX_SWAP_KIB:-64}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly RUNNER="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_multiturn_state_suite.py"
 readonly SUITE="${SOURCE_DIR}/benchmarks/gmk_evo_x2/multiturn_state_suite.json"
 readonly MODEL="qwen3.6-35b-a3b-nvfp4-amd"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 
 case "${SESSION_COUNT}" in
     ''|*[!0-9]*) echo "session count must be a positive integer" >&2; exit 2 ;;

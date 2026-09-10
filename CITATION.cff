@@ -2,9 +2,7 @@ cff-version: 1.2.0
 message: "Release candidate citation metadata. Replace the release-candidate version with the immutable release tag and DOI before publication."
 title: "FreeToken AMD ROCm/HIP Port for Strix Halo"
 authors:
-  - family-names: Bourdeau
-    given-names: David
-    email: davidbourdeau@gmail.com
+  - name: FreeToken AMD contributors
 license: Apache-2.0
 repository-code: "https://github.com/dbourdea/FreeToken"
 version: "0.1.0-rc1"

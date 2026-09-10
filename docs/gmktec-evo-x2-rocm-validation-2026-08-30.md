@@ -1,8 +1,8 @@
-# GMKtec EVO-X2 ROCm validation results, 2026-08-30
+# GMKtek EVO-X2 ROCm validation results, 2026-08-30
 
 ## Scope
 
-This report records post-repair validation of the native FreeToken ROCm/HIP port on the GMKtec EVO-X2 Radeon 8060S. It covers the OpenAI-compatible API, Gemma 4 vision correctness, Qwen reliability, a controlled llama.cpp ROCm comparison, and a strict multi-turn endurance run. It is local hardware evidence, not a reproduction of the FreeToken paper's NVIDIA results.
+This report records post-repair validation of the native FreeToken ROCm/HIP port on the GMKtek EVO-X2 Radeon 8060S. It covers the OpenAI-compatible API, Gemma 4 vision correctness, Qwen reliability, a controlled llama.cpp ROCm comparison, and a strict multi-turn endurance run. It is local hardware evidence, not a reproduction of the FreeToken paper's NVIDIA results.
 
 ## Reproduction boundary
 
@@ -77,7 +77,7 @@ Long-context retrieval used an exact early marker, three samples at each size, a
 
 ## Matched workload comparison with llama.cpp
 
-Both runners executed the same fixed scheduler prompt, 256 requested output tokens, greedy decoding, one concurrent request, one 8,192-token slot, and three measured samples after warmup on GMKtec EVO-X2. The values are decode TPS, not aggregate concurrent throughput.
+Both runners executed the same fixed scheduler prompt, 256 requested output tokens, greedy decoding, one concurrent request, one 8,192-token slot, and three measured samples after warmup on GMKtek EVO-X2. The values are decode TPS, not aggregate concurrent throughput.
 
 | Runner | Model format | Successful samples | Median decode TPS |
 | --- | --- | ---: | ---: |
@@ -123,10 +123,10 @@ the loaded Q4 server, but it reduced mean decode throughput to 47.287 TPS while
 quality still passed. The normal `auto` policy therefore remains the accepted
 policy for this configuration.
 
-The exact-Q4 evidence is retained on GMKtec EVO-X2 at
-`/home/david/freetoken-amd/artifacts/qwen35moe-gguf-full-control-20260830T141438Z/`
+The exact-Q4 evidence is retained on GMKtek EVO-X2 at
+`/home/operator/freetoken-amd/artifacts/qwen35moe-gguf-full-control-20260830T141438Z/`
 and
-`/home/david/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-q4matched-20260830T142002Z-retry/`.
+`/home/operator/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-q4matched-20260830T142002Z-retry/`.
 
 The Q4 server also passed the full cold long-context retrieval control: five
 unique-prefix requests at 6,856 reported prompt tokens all returned only
@@ -204,9 +204,9 @@ percent below its fresh llama.cpp control, but requires a repair for the SVM
 resident-memory limit before it can be recommended as the stable profile.
 
 Retained raw evidence for this recovery investigation is under
-`/home/david/freetoken-amd/artifacts/qwen35moe-gguf-memory-ratio-025-20260830T150554Z/`
+`/home/operator/freetoken-amd/artifacts/qwen35moe-gguf-memory-ratio-025-20260830T150554Z/`
 and the fresh llama.cpp control is under
-`/home/david/freetoken-amd/artifacts/qwen35moe-llamacpp-rocm10-current-harness-retry-20260830T151654Z/`.
+`/home/operator/freetoken-amd/artifacts/qwen35moe-llamacpp-rocm10-current-harness-retry-20260830T151654Z/`.
 
 ## Initial clean-memory endurance
 
@@ -261,7 +261,7 @@ returned the correct visible answer `4`, and retained its advertised
 8,192-token context.
 
 Raw evidence is retained under
-`/home/david/freetoken-amd/artifacts/qwen35moe-gguf-process-scoped-endurance-20260830T153333Z/`,
+`/home/operator/freetoken-amd/artifacts/qwen35moe-gguf-process-scoped-endurance-20260830T153333Z/`,
 including each request JSON, per-session telemetry, and the machine-generated
 `summary.json`. The reusable verifier is
 `benchmarks/gmk_evo_x2/summarize_qwen_gguf_endurance.py`.
@@ -288,15 +288,15 @@ previous rejection of a larger static MoE cache: prior 0.38-memory-ratio
 testing reduced misses but did not produce a sustained TPS gain. Cache capacity
 alone is therefore not a justified route to closing the current llama.cpp gap.
 
-The telemetry and restoration evidence is retained on GMKtec EVO-X2 at
-`/home/david/freetoken-amd/artifacts/qwen-cache-stats-driver-20260830T135236Z/`.
+The telemetry and restoration evidence is retained on GMKtek EVO-X2 at
+`/home/operator/freetoken-amd/artifacts/qwen-cache-stats-driver-20260830T135236Z/`.
 The restored normal service returned the required AIME SHA-1
 `0acef4eab6f4`, at 28.60 visible decode TPS, 399.08 ms TTFT, and 38.49 ms p99
 stream-event gap.
 
 ## Regression tests
 
-The focused regression suite passed 21 tests on GMKtec EVO-X2:
+The focused regression suite passed 21 tests on GMKtek EVO-X2:
 
 ```text
 tests/server/test_message_wire.py

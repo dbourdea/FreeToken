@@ -1,9 +1,9 @@
-# GMKtec EVO-X2 native ROCm validation, 2026-08-28
+# GMKtek EVO-X2 native ROCm validation, 2026-08-28
 
 ## Result
 
 This validation passed the first release gate for the AMD port.  FreeToken
-served both required MoE models through the OpenAI-compatible API on GMKtec EVO-X2's
+served both required MoE models through the OpenAI-compatible API on GMKtek EVO-X2's
 Radeon 8060S (`gfx1151`) using a native HIP and ROCm execution path.
 
 This is not a CPU fallback or a Vulkan result.  The serving process uses the
@@ -15,7 +15,7 @@ needs correctness before graph capture tuning.
 
 | Item | Value |
 | --- | --- |
-| Host | GMKtec EVO-X2, `david-Gmktec-x2-2` |
+| Host | GMKtek EVO-X2, `GMKtek EVO-X2` |
 | GPU | AMD Radeon 8060S Graphics, `gfx1151`, 40 CUs |
 | System ROCm installation | ROCm 10.0 at `/opt/rocm-10.0` |
 | PyTorch wheel | `2.13.0+rocm10.0.0` |
@@ -24,7 +24,7 @@ needs correctness before graph capture tuning.
 | Validation commit | `065d806` |
 | API exposure | loopback-only ports, not llama-swap |
 
-The isolated validation layout was `/home/david/freetoken-amd/`; no existing
+The isolated validation layout was `/home/operator/freetoken-amd/`; no existing
 llama-swap service, model configuration, or production endpoint was changed.
 
 ## Models and API evidence
@@ -34,11 +34,11 @@ llama-swap service, model configuration, or production endpoint was changed.
 | `nvidia/Qwen3.6-35B-A3B-NVFP4` | vendor model snapshot used for this run | Triton attention, MoE offload, native Triton NVFP4, serial expert load | HTTP 200, `AMD ROCm FreeToken ready.` in 1.54 s | HTTP 200, SSE chunks and `[DONE]` |
 | `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | `d1c082be9cf3c8a514acf63b8761f4b41935842e` | Triton attention, MoE offload, serial expert load, HIP GGUF JIT | HTTP 200, `native hip api works` in 341.304 ms | HTTP 200, SSE chunks and `[DONE]` |
 
-Raw evidence remains on GMKtec EVO-X2 in these isolated artifact directories:
+Raw evidence remains on GMKtek EVO-X2 in these isolated artifact directories:
 
 ```text
-/home/david/freetoken-amd/artifacts/qwen36-nvfp4-serial-hip-prefill/
-/home/david/freetoken-amd/artifacts/gemma4-q4-rocm-thrust-system/
+/home/operator/freetoken-amd/artifacts/qwen36-nvfp4-serial-hip-prefill/
+/home/operator/freetoken-amd/artifacts/gemma4-q4-rocm-thrust-system/
 ```
 
 The Gemma telemetry captured immediately after the API tests identified the
@@ -92,8 +92,8 @@ stream and consumed the 128-token cap, whereas FreeToken's parser emitted the
 final concise answer and stopped at 26 tokens.  That makes the output-rate
 comparison useful as a warm streaming rate, but not a quality or exact
 end-to-end task comparison.  The raw llama.cpp evidence is retained under
-`/home/david/freetoken-amd/artifacts/llamacpp-vulkan-gemma4-q4-tps/` on
-GMKtec EVO-X2.
+`/home/operator/freetoken-amd/artifacts/llamacpp-vulkan-gemma4-q4-tps/` on
+GMKtek EVO-X2.
 
 ## Same-model ROCm 10 and HIP comparison
 
@@ -141,11 +141,11 @@ reasoning text.  FreeToken stopped after a concise 20-token answer.  This
 makes the output-rate comparison a useful streaming measurement, but it is
 not an exact answer-quality or equal-completion-length evaluation.
 
-Raw artifacts are retained only on GMKtec EVO-X2:
+Raw artifacts are retained only on GMKtek EVO-X2:
 
 ```text
-/home/david/freetoken-amd/artifacts/llamacpp-rocm10-gemma4-q4-tps/
-/home/david/freetoken-amd/artifacts/freetoken-rocm10-gemma4-q4-tps/
+/home/operator/freetoken-amd/artifacts/llamacpp-rocm10-gemma4-q4-tps/
+/home/operator/freetoken-amd/artifacts/freetoken-rocm10-gemma4-q4-tps/
 ```
 
 ## AMD TPS optimization campaign
@@ -190,7 +190,7 @@ and `offload` backend intact while making the capacity choices explicit:
 
 ```bash
 python benchmarks/bench_decode_moe.py \
-  --model /home/david/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
+  --model /home/operator/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
   --backend offload --cache 4096 --num-token-override 8320 \
   --mem-ratio 0.50 --decode 128 --greedy
 ```
@@ -232,9 +232,9 @@ inside the pinned 8,320-token pool, returned exactly `OK`, and completed in
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/full-expert-cache-4096-20260829T010740Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fixed-expert-cache-3840-control-20260829T011537Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/full-cache-4096-context8320-20260829T012342Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/full-expert-cache-4096-20260829T010740Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fixed-expert-cache-3840-control-20260829T011537Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/full-cache-4096-context8320-20260829T012342Z/
 ```
 
 ### Current-host ROCm llama.cpp control
@@ -242,7 +242,7 @@ The retained raw evidence is:
 The historical llama.cpp reference was useful for identifying the original
 gap, but it was not collected alongside the accepted 4,096-slot FreeToken
 configuration.  A new five-run control was therefore run immediately after
-that configuration investigation, without changing GMKtec EVO-X2, stopping any
+that configuration investigation, without changing GMKtek EVO-X2, stopping any
 user process, or enabling a production service.  Each trial launched a fresh
 `llama-server` from the ROCm 10 `b10141` build with all layers on `gfx1151`,
 Flash Attention enabled, one parallel slot, and `-c 8320`.  The server reports
@@ -273,10 +273,10 @@ This is a close result for decode rate, but it does **not** meet the stated
 criterion of meeting or exceeding llama.cpp.  The remaining performance work
 is therefore directed at the HIP decode path and the source of the FreeToken
 tail stall, rather than a claim of parity.  The raw llama.cpp evidence is
-retained on GMKtec EVO-X2 at:
+retained on GMKtek EVO-X2 at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/llamacpp-current-host-context8320-20260829T013730Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/llamacpp-current-host-context8320-20260829T013730Z/
 ```
 
 ### Current-upstream rebase and full API revalidation
@@ -285,7 +285,7 @@ After the comparison, upstream `main` advanced from `9ef3651` to `a05c265`
 with Qwen 3.8 support and engine or cache changes.  The AMD branch was rebased
 onto that current upstream revision without a conflict, rather than leaving a
 performance result attached to an obsolete upstream base.  The rebased branch
-was then installed into the isolated GMKtec EVO-X2 virtual environment so its native
+was then installed into the isolated GMKtek EVO-X2 virtual environment so its native
 HIP pinned-memory extension was built from the rebased source.  The source
 checkout used for that validation was deliberately separate from the earlier
 test checkout, preventing an uncommitted working-tree change from becoming
@@ -318,7 +318,7 @@ serving.  It is intentionally not folded into the five-run performance score.
 Its raw logs and result are retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/rebased-current-main-api-retry-20260829T014741Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/rebased-current-main-api-retry-20260829T014741Z/
 ```
 
 ### Rebased Qwen3.6 NVFP4 API revalidation
@@ -353,7 +353,7 @@ considered an optimization.
 The raw evidence is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/rebased-current-main-qwen36-api-20260829T015240Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/rebased-current-main-qwen36-api-20260829T015240Z/
 ```
 
 ### Rejected ROCm vendored-Triton router candidate
@@ -379,7 +379,7 @@ intentional ROCm behavior from a missing CUDA Linux package.
 The rejected candidate evidence is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/qwen36-vendored-router-api-20260829T015937Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/qwen36-vendored-router-api-20260829T015937Z/
 ```
 
 The restored branch was then revalidated through the full Qwen API path.  It
@@ -390,7 +390,7 @@ concurrently slowed by the documented host I/O pressure, taking 3 minutes and
 37 seconds instead of about 2 minutes.  The final exact-path artifact is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/qwen36-router-revert-api-20260829T020626Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/qwen36-router-revert-api-20260829T020626Z/
 ```
 
 ### Accepted HIP Q4_0 one-wave/two-row MoE specialization
@@ -402,7 +402,7 @@ It preserves FreeToken's flattened token/top-k route IDs, packed expert-bank
 layout, Q8_1 activation layout, and BF16 public output contract.  CUDA retains
 the established generic path.
 
-The dedicated GMKtec EVO-X2 microbenchmark uses the verified Gemma 4 26B A4B Q4_0
+The dedicated GMKtek EVO-X2 microbenchmark uses the verified Gemma 4 26B A4B Q4_0
 geometry: 128 experts, top-k 8, hidden width 2816, intermediate width 704, and
 one decode token.  Five runs with 2,000 timed calls each measured a 73.509 us
 baseline median for the gate/up plus down pair and a 64.340 us candidate median,
@@ -433,12 +433,12 @@ observable API result.  It remains approximately 7.5 percent below the
 matched llama.cpp client-TPS reference, so it is an incremental port
 improvement rather than completion of the performance objective.
 
-Artifacts are retained on GMKtec EVO-X2:
+Artifacts are retained on GMKtek EVO-X2:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-microbench-20260828T231332Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-two-row-wave-20260828T231950Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-two-row-wave-20260828T231950Z/api-repeats-20260828T232646Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-microbench-20260828T231332Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-two-row-wave-20260828T231950Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-two-row-wave-20260828T231950Z/api-repeats-20260828T232646Z/
 ```
 
 ### Rejected two-row MoE Q8 activation-reuse candidate
@@ -475,9 +475,9 @@ the service was torn down cleanly.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/microbench.json
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/api-first.jsonl
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/api-repeats.jsonl
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/microbench.json
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/api-first.jsonl
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/moe-q8-reuse-20260829T005332Z/api-repeats.jsonl
 ```
 
 ### Rejected dense Q4_0 one-wave/two-row specialization
@@ -502,9 +502,9 @@ acceptance metric for graph-captured end-to-end decode.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-microbench-20260828T233506Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-two-row-wave-20260828T233930Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-two-row-wave-api-20260828T234147Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-microbench-20260828T233506Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-two-row-wave-20260828T233930Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-two-row-wave-api-20260828T234147Z/
 ```
 
 ### Rejected dense Q4_0 FP32-output hypothesis
@@ -529,8 +529,8 @@ model-serving API changed.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-fp32-output-20260828T234953Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-fp32-output-rocprof-20260828T235258Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-fp32-output-20260828T234953Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-fp32-output-rocprof-20260828T235258Z/
 ```
 
 ### Rejected dense HIP launch-bound candidate
@@ -554,9 +554,9 @@ path remains unchanged by this experiment.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-launch-bounds-20260828T235459Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-launch-bounds-rocprof-20260828T235726Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-launch-bounds-api-20260828T235756Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-launch-bounds-20260828T235459Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-launch-bounds-rocprof-20260828T235726Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-launch-bounds-api-20260828T235756Z/
 ```
 
 ### Rejected indexed Q4_0 dense HIP kernel
@@ -582,9 +582,9 @@ without an explanation for the end-to-end stalls.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-indexed-pointer-20260829T000901Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-indexed-pointer-rocprof-20260829T001126Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-indexed-pointer-api-20260829T001156Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-indexed-pointer-20260829T000901Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-indexed-pointer-rocprof-20260829T001126Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-indexed-pointer-api-20260829T001156Z/
 ```
 
 ### Rejected scalarized dense Q4_0 dot-product candidate
@@ -616,10 +616,10 @@ repeatable end-to-end improvement, so it was reverted in `d9ce2c5`.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/microbench.json
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/microbench-rocprof.json
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/api-first.jsonl
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/api-repeats.jsonl
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/microbench.json
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/microbench-rocprof.json
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/api-first.jsonl
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-scalarized-20260829T003720Z/api-repeats.jsonl
 ```
 
 ### Rejected Q4_0 MoE route-grouping candidate
@@ -642,7 +642,7 @@ kernel remains active.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-route-group8-20260829T001802Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-moe-route-group8-20260829T001802Z/
 ```
 
 ### Rejected Triton GQA attention eight-warp candidate
@@ -669,12 +669,12 @@ event timings cannot be used as a serving-performance acceptance criterion.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockh2-20260829T002315Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockh4-8-20260829T002334Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockn64-20260829T002442Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-warps2-8-20260829T002459Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-global-warps8-20260829T002558Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/attention-warps8-api-20260829T002618Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockh2-20260829T002315Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockh4-8-20260829T002334Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-blockn64-20260829T002442Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-warps2-8-20260829T002459Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gqa-attention-global-warps8-20260829T002558Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/attention-warps8-api-20260829T002618Z/
 ```
 
 The best verified FreeToken command shape is:
@@ -682,9 +682,9 @@ The best verified FreeToken command shape is:
 ```bash
 export ROCM_PATH=/opt/rocm-10.0
 export HIP_PATH=/opt/rocm-10.0
-export TORCH_EXTENSIONS_DIR=/home/david/freetoken-amd/cache/torch_extensions
+export TORCH_EXTENSIONS_DIR=/home/operator/freetoken-amd/cache/torch_extensions
 
-ft serve --model-path /home/david/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
+ft serve --model-path /home/operator/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
   --attention-backend triton --moe-backend offload --moe-cache-size 4096 \
   --num-tokens 8320 --memory-ratio 0.50 --max-running-requests 1 \
   --max-seq-len-override 8320 --cuda-graph-max-bs 1
@@ -761,11 +761,11 @@ performance outcome used for this decision.
 The retained raw evidence is:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gemma-final-path-warm-20260829T021243Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gemma-final-current-kernel-trace-20260829T021738Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-current-baseline-micro-20260829T022723Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-rdna4-eightwaves-micro-20260829T022528Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-rdna4-eightwaves-api-repaired-20260829T023038Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gemma-final-path-warm-20260829T021243Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/gemma-final-current-kernel-trace-20260829T021738Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-current-baseline-micro-20260829T022723Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-rdna4-eightwaves-micro-20260829T022528Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q4-rdna4-eightwaves-api-repaired-20260829T023038Z/
 ```
 
 ### Rejected RDNA4 dense Q6_K eight-wave candidate
@@ -792,17 +792,17 @@ byte-for-byte equality checks against the validated final source.  The raw
 evidence is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q6-rdna4-eightwaves-api-20260829T023720Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/dense-q6-rdna4-eightwaves-api-20260829T023720Z/
 ```
 
 ### Current host-interference qualifier
 
-A read-only GMKtec EVO-X2 health capture at 2026-08-29T02:41:15Z found no GPU reset,
+A read-only GMKtek EVO-X2 health capture at 2026-08-29T02:41:15Z found no GPU reset,
 thermal problem, or active FreeToken server.  The Radeon 8060S was idle at
 30 C after the test.  It did, however, identify two pre-existing user-owned
-filesystem scans in uninterruptible `D` state: one scanning `/home/david`,
+filesystem scans in uninterruptible `D` state: one scanning `/home/operator`,
 `/mnt`, and `/data` for large GGUF or SafeTensors files, and one scanning
-`/home/david` and `/media/david` for Gemma GGUF files.  At capture time they
+`/home/operator` and `/media/operator` for Gemma GGUF files.  At capture time they
 had been alive for approximately 8.8 and 6.1 hours respectively.
 
 The same capture reported I/O full-pressure at 0.61 percent over ten seconds
@@ -823,7 +823,7 @@ the interference.
 ### Current review-branch static validation
 
 The current upstream-review commit `6c6198b10d9fb6a9c93e0aa94a05ac4144ec061d`
-was validated directly on GMKtec EVO-X2 after the I/O evidence capture tooling was
+was validated directly on GMKtek EVO-X2 after the I/O evidence capture tooling was
 added.  The check completed without starting an inference server or changing
 host state:
 
@@ -836,17 +836,17 @@ pytest -q tests/kernels/test_gguf_hip_build_flags.py \
 The raw output and commit metadata are retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/current-review-static-validation-20260829T024456Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/current-review-static-validation-20260829T024456Z/
 ```
 
 A temporary high-performance DPM governor test could not be run because the
-non-root GMKtec EVO-X2 account cannot write `power_dpm_force_performance_level`;
+non-root GMKtek EVO-X2 account cannot write `power_dpm_force_performance_level`;
 automatic mode was unchanged.
 
-Raw campaign artifacts are retained on GMKtec EVO-X2:
+Raw campaign artifacts are retained on GMKtek EVO-X2:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-optimization-2026-08-28/
+/home/operator/freetoken-amd/artifacts/amd-optimization-2026-08-28/
 ```
 
 ## Deep-investigation baseline and profiler repair
@@ -856,12 +856,12 @@ The reproducible read-only baseline is captured by
 The first baseline was written to:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/baseline-20260828T220753Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/baseline-20260828T220753Z/
 ```
 
 ### Test-checkout repair and revalidated shipping baseline
 
-During the follow-on investigation, the isolated GMKtec EVO-X2 source checkout was
+During the follow-on investigation, the isolated GMKtek EVO-X2 source checkout was
 found at `61a1505`.  That commit contained the subsequently rejected
 two-block-residency Q4_0 MoE experiment.  The authoritative branch had already
 reverted that experiment at `b77825d` and documented the rejection at
@@ -876,7 +876,7 @@ than reusing the binary compiled from the stale source.
 
 | Item | Revalidated value |
 | --- | --- |
-| Artifact directory | `/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/repaired-baseline-20260828T224642Z/` |
+| Artifact directory | `/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/repaired-baseline-20260828T224642Z/` |
 | Source commit | `222cbd3` |
 | Model SHA-256 | `3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d` |
 | Extension build | Fresh ROCm 10 `hipcc`, `--offload-arch=gfx1151`, `-O3` |
@@ -915,7 +915,7 @@ configuration.
 The raw candidate evidence is retained at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-load-alignment-20260828T225237Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/q4-load-alignment-20260828T225237Z/
 ```
 
 This eliminates aligned helper spelling as the explanation for the measured
@@ -951,11 +951,11 @@ The 0.14 percent TPS change is smaller than the observed run-to-run variation,
 does not close the gap to the 60.42 client TPS ROCm 10 llama.cpp reference,
 and changes the deterministic greedy response hash.  The candidate was
 therefore reverted and is not a shipping option.  Raw evidence remains on
-GMKtec EVO-X2 at:
+GMKtek EVO-X2 at:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fp32-intermediate-20260828T230126Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fp32-intermediate-retry-20260828T230209Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fp32-intermediate-20260828T230126Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/fp32-intermediate-retry-20260828T230209Z/
 ```
 
 It confirms the active device is `gfx1151`, PyTorch is
@@ -1004,7 +1004,7 @@ See the persistent-cache operating procedure in
 Qwen was started in the isolated environment with this functional shape:
 
 ```bash
-ft serve --model-path /home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
+ft serve --model-path /home/operator/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
   --served-model-name qwen3.6-35b-a3b-nvfp4-amd --host 127.0.0.1 --port 18501 \
   --attention-backend triton --moe-backend offload --nvfp4-backend triton \
   --expert-load serial --moe-cache-auto --memory-ratio 0.35 \
@@ -1015,7 +1015,7 @@ ft serve --model-path /home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
 Gemma used the native GGUF model file and its own loopback port:
 
 ```bash
-ft serve --model-path /home/david/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
+ft serve --model-path /home/operator/freetoken-amd/models/Gemma-4-26B-A4B-it-qat-q4_0-gguf/gemma-4-26B_q4_0-it.gguf \
   --served-model-name gemma-4-26b-a4b-q4-amd --host 127.0.0.1 --port 18502 \
   --attention-backend triton --moe-backend offload --expert-load serial \
   --moe-cache-auto --memory-ratio 0.50 --max-seq-len-override 8192 \
@@ -1040,7 +1040,7 @@ line `API server is ready to serve` before submitting requests.
    PyTorch wheel omits Thrust.  It passes that path as a compiler system
    include, avoiding an attempted hipify write into the ROCm installation.
 6. The same JIT adds a system ROCm library directory only when the wheel SDK
-   lacks the unversioned `libamdhip64.so` linker name.  On GMKtec EVO-X2 this allowed
+   lacks the unversioned `libamdhip64.so` linker name.  On GMKtek EVO-X2 this allowed
    the native `gfx1151` object and shared module to compile and link.
 
 ## Known limitations and follow-up work
@@ -1072,7 +1072,7 @@ this change.
 The earlier five-run comparison was repeated after the two identified
 user-space filesystem scans had been stopped with the operator's explicit
 authorization.  This is the decision-quality comparison: it uses the same
-GMKtec EVO-X2 `gfx1151` device, ROCm 10 runtime, 14 GB Gemma 4 26B A4B Q4_0 GGUF,
+GMKtek EVO-X2 `gfx1151` device, ROCm 10 runtime, 14 GB Gemma 4 26B A4B Q4_0 GGUF,
 cached AIME-25 problem 0, greedy OpenAI-compatible streamed request, and
 128-token generation limit on each runner.  Every scored sample starts a
 fresh server, makes one excluded warm request, then makes one scored request.
@@ -1100,11 +1100,11 @@ percent higher.  Therefore the AMD port is proven functional and stable but
 does not yet meet the requested requirement to match or exceed the optimized
 llama.cpp control.
 
-The raw, per-run result and server-log bundles remain on GMKtec EVO-X2:
+The raw, per-run result and server-log bundles remain on GMKtek EVO-X2:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/clean-host-freetoken-matrix-20260829T030633Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/clean-host-llamacpp-matrix-20260829T031840Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/clean-host-freetoken-matrix-20260829T030633Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/clean-host-llamacpp-matrix-20260829T031840Z/
 ```
 
 The llama.cpp bundle records zero blocked (`D`) processes before and after all
@@ -1142,13 +1142,13 @@ and is explicitly excluded.  The valid four-row result then set
 This establishes a stricter rule for all remaining performance work: every
 source-changing HIP candidate must compile in a unique extension-cache path,
 and the artifact must contain the resulting shared module before API timing is
-accepted.  The immutable raw bundles are on GMKtec EVO-X2:
+accepted.  The immutable raw bundles are on GMKtek EVO-X2:
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-occupancy-retry-20260829T032503Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-occupancy-two-20260829T032852Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-four-rows-20260829T033123Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-four-rows-isolated-cache-20260829T033230Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-occupancy-retry-20260829T032503Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-occupancy-two-20260829T032852Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-four-rows-20260829T033123Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-moe-q4-four-rows-isolated-cache-20260829T033230Z/
 ```
 
 ### Isolated dense Q4 four-wave experiment
@@ -1176,7 +1176,7 @@ an evidence-backed non-shipping experiment, not promoted to the AMD branch or
 given a five-run matrix.
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-dense-q4-four-waves-isolated-cache-20260829T033846Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-dense-q4-four-waves-isolated-cache-20260829T033846Z/
 ```
 
 ### Isolated dense Q4 two-wave experiment
@@ -1197,7 +1197,7 @@ justify a clean-host five-run matrix.  The candidate is rejected and remains
 outside the shipping AMD branch.
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-dense-q4-two-waves-isolated-cache-20260829T034349Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-dense-q4-two-waves-isolated-cache-20260829T034349Z/
 ```
 
 ### Accepted gfx1151 RDNA3 dot-product intrinsic selection
@@ -1240,6 +1240,6 @@ specifically for the requested sustained decode-TPS requirement.  The API
 remains OpenAI-compatible and deterministic for the workload.
 
 ```text
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-rdna35-sudot4-isolated-cache-20260829T035002Z/
-/home/david/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-rdna35-sudot4-clean-host-matrix-20260829T035209Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-rdna35-sudot4-isolated-cache-20260829T035002Z/
+/home/operator/freetoken-amd/artifacts/amd-deep-investigation-2026-08-28/hip-rdna35-sudot4-clean-host-matrix-20260829T035209Z/
 ```

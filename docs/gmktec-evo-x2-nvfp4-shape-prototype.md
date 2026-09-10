@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 production-shape NVFP4 prototype
+# GMKtek EVO-X2 production-shape NVFP4 prototype
 
 ## Purpose
 

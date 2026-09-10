@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture a read-only, secret-safe GMKtec EVO-X2 runtime manifest for one test run.
+# Capture a read-only, secret-safe GMKtek EVO-X2 runtime manifest for one test run.
 #
 # The collector never starts or stops a model server.  It creates a new artifact
 # directory, records only operational metadata needed to reproduce a benchmark,
@@ -10,8 +10,8 @@ set -euo pipefail
 # Require a caller-owned, not-yet-existing artifact location so an old result is
 # never silently replaced by a later run.
 readonly ARTIFACT_DIR="${1:?usage: capture_validation_manifest.sh ARTIFACT_DIR [EXPECTED_HOST]}"
-readonly EXPECTED_HOST="${2:-david-Gmktec-x2-2}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly EXPECTED_HOST="${2:-${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}}"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 
 # The program runs only where this validation program is authorized.  A caller

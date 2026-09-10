@@ -1,21 +1,21 @@
-# GMKtec EVO-X2 Qwen API replication harness
+# GMKtek EVO-X2 Qwen API replication harness
 
 `run_api_benchmark.py` measures a running local FreeToken server through its
 OpenAI-compatible streaming API. It does not start a service, modify model
 files, change llama-swap, or contact another LAN host. The script refuses to
-run unless the operating system host name is GMKtec EVO-X2 or an explicitly supplied
+run unless the operating system host name is GMKtek EVO-X2 or an explicitly supplied
 test host.
 
-Run a quality canary on GMKtec EVO-X2 from the isolated FreeToken environment after
+Run a quality canary on GMKtek EVO-X2 from the isolated FreeToken environment after
 the server is already warm:
 
 ```bash
 python benchmarks/gmk_evo_x2/run_api_benchmark.py \
   --model qwen3.6-35b-a3b-nvfp4 \
-  --tokenizer /home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
+  --tokenizer /home/operator/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
   --base-url http://127.0.0.1:1919/v1 \
   --samples 5 \
-  --artifact-dir /home/david/freetoken-amd/artifacts/qwen-replication-$(date -u +%Y%m%dT%H%M%SZ)
+  --artifact-dir /home/operator/freetoken-amd/artifacts/qwen-replication-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
 For a fixed-length decode TPS measurement, pass the exact paper or surrogate
@@ -25,11 +25,11 @@ produce the same requested decode length:
 ```bash
 python benchmarks/gmk_evo_x2/run_api_benchmark.py \
   --model qwen3.6-35b-a3b-nvfp4 \
-  --tokenizer /home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
+  --tokenizer /home/operator/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4 \
   --base-url http://127.0.0.1:1919/v1 \
   --mode throughput --expected-text '' --max-tokens 256 \
   --prompt "<fixed benchmark prompt>" --samples 5 \
-  --artifact-dir /home/david/freetoken-amd/artifacts/qwen-throughput-$(date -u +%Y%m%dT%H%M%SZ)
+  --artifact-dir /home/operator/freetoken-amd/artifacts/qwen-throughput-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
 The harness writes one immutable JSON artifact per request plus a manifest and

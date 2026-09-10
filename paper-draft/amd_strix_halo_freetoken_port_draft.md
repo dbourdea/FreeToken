@@ -1,8 +1,8 @@
 # Native FreeToken Serving on AMD Strix Halo: A ROCm/HIP Port and Controlled Unified-Memory Evaluation
 
-**David Bourdeau**
+**FreeToken AMD contributors**
 
-*Correspondence: davidbourdeau@gmail.com*
+*Anonymized review copy; correspondence through the project repository.*
 
 *Technical white paper, release candidate v0.1.0-rc1, 30 August 2026*
 
@@ -10,7 +10,7 @@
 
 Large mixture-of-experts (MoE) models make capable local inference possible, but most edge-serving systems are designed and evaluated on NVIDIA discrete GPUs. We present a native ROCm/HIP port of FreeToken for AMD Strix Halo, a unified-memory APU platform represented by the Ryzen AI Max+ 395 with Radeon 8060S graphics (`gfx1151`). The port retains FreeToken's CUDA behavior while adding HIP extension builds, ROCm-safe architecture detection, portable Triton paths, and native model-loading and serving validation. It executes without a CUDA compatibility layer, Vulkan substitute, or CPU-only fallback.
 
-We evaluate the port on a GMKtec EVO X2, a Strix Halo system with 64 GiB installed LPDDR5 memory and a 4 GiB firmware GPU reservation. Linux exposes 59.46 GiB host memory and ROCm exposes a 56.0 GiB coarse-grained GPU pool. We use Qwen3.6-35B-A3B and Gemma 4 26B A4B controls. The port serves Qwen's NVIDIA NVFP4 checkpoint through an OpenAI-compatible streaming API and reproduces a deterministic AIME canary with the reference router at 27.88 mean client-visible decode tokens/s. A faster NVFP4 Triton-router path was rejected because it changed deterministic model output. For a matched raw-prompt Q4_K_M Qwen control, both FreeToken and llama.cpp used the same 54-token prompt and produced the correct mathematical result; FreeToken reached 50.63 tokens/s after enabling a quality-checked native HIP router, compared with 50.29 tokens/s for the ROCm 10 llama.cpp control. A Gemma 4 Q4 text control reached 57.05 tokens/s and returned the expected deterministic answer.
+We evaluate the port on a GMKtek EVO-X2, a Strix Halo system with 64 GiB installed LPDDR5 memory and a 4 GiB firmware GPU reservation. Linux exposes 59.46 GiB host memory and ROCm exposes a 56.0 GiB coarse-grained GPU pool. We use Qwen3.6-35B-A3B and Gemma 4 26B A4B controls. The port serves Qwen's NVIDIA NVFP4 checkpoint through an OpenAI-compatible streaming API and reproduces a deterministic AIME canary with the reference router at 27.88 mean client-visible decode tokens/s. A faster NVFP4 Triton-router path was rejected because it changed deterministic model output. For a matched raw-prompt Q4_K_M Qwen control, both FreeToken and llama.cpp used the same 54-token prompt and produced the correct mathematical result; FreeToken reached 50.63 tokens/s after enabling a quality-checked native HIP router, compared with 50.29 tokens/s for the ROCm 10 llama.cpp control. A Gemma 4 Q4 text control reached 57.05 tokens/s and returned the expected deterministic answer.
 
 These results establish functionality and a bounded same-file Q4 control, not a strict reproduction of FreeToken's published 39.3 tokens/s RTX 4060 result. The upstream prompt corpus, cache state, stop policy, exact revision, and configuration remain incomplete. Profiling instead identifies dense mixed-FP8 decode as the dominant NVFP4 Qwen kernel consumer and shows that a worst-case unified-memory expert-cache fill is materially smaller than end-to-end token time. We release the porting boundary, validation contract, and rejected-candidate evidence to make AMD edge-serving claims reproducible and falsifiable.
 
@@ -47,13 +47,13 @@ The resulting server preserves FreeToken's OpenAI-compatible model discovery, st
 
 ### 4.1 Platform and runtime
 
-Experiments ran on a GMKtec NucBox EVO X2. Table 1 records the environment observed on 30 August 2026. The port uses ROCm 10, HIP-compiled extensions, and AMD Triton. The Qwen NVFP4 experiment uses the upstream-supported `nvidia/Qwen3.6-35B-A3B-NVFP4` model through native HIP Triton. The same-file Q4 control uses `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`; Gemma uses `gemma-4-26B_q4_0-it.gguf`.
+Experiments ran on a GMKtek EVO-X2. Table 1 records the environment observed on 30 August 2026. The port uses ROCm 10, HIP-compiled extensions, and AMD Triton. The Qwen NVFP4 experiment uses the upstream-supported `nvidia/Qwen3.6-35B-A3B-NVFP4` model through native HIP Triton. The same-file Q4 control uses `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`; Gemma uses `gemma-4-26B_q4_0-it.gguf`.
 
 **Table 1. Evaluated-system hardware and software environment.** The table reports static platform information. Dynamic measurements such as free memory, temperature, clocks, and active processes are retained per benchmark run in the artifact manifest rather than presented as fixed machine specifications.
 
 | Component | Specification |
 | --- | --- |
-| System | GMKtec NucBox EVO X2, SKU `EVO-X2-001`, hardware version 1.0 |
+| System | GMKtek EVO-X2, SKU `EVO-X2-001`, hardware version 1.0 |
 | Firmware | EVO-X2 1.09, 13 September 2025 |
 | Processor | AMD Ryzen AI Max+ 395 with Radeon 8060S |
 | CPU topology | 16 cores, 32 hardware threads, one NUMA node; boost enabled |
@@ -154,7 +154,7 @@ We ported FreeToken to native ROCm/HIP execution on AMD Strix Halo and evaluated
 
 [3] AMD. *ROCm Documentation.* https://rocm.docs.amd.com/.
 
-[4] David Bourdeau. *FreeToken AMD ROCm/HIP Port for Strix Halo: Technical White Paper and Artifact Release Candidate v0.1.0-rc1.* Branch `amd-rocm-gfx1151`, commit `a937862f171900bd5d1d207c8ff59b40a15ce742`; tag and DOI pending, 2026.
+[4] FreeToken AMD contributors. *FreeToken AMD ROCm/HIP Port for Strix Halo: Technical White Paper and Artifact Release Candidate v0.1.0-rc1.* Branch `amd-rocm-gfx1151`, commit `a937862f171900bd5d1d207c8ff59b40a15ce742`; tag and DOI pending, 2026.
 
 [5] Apache Software Foundation. *Apache License, Version 2.0.* https://www.apache.org/licenses/LICENSE-2.0.
 

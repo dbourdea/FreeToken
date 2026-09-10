@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 ROCm transfer prototype
+# GMKtek EVO-X2 ROCm transfer prototype
 
 This read-only prototype measures contiguous host and device copies in the
 existing FreeToken Python environment. It is a lower-bound systems datapoint

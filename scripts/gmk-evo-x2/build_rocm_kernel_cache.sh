@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a reusable native ROCm kernel cache for FreeToken on GMKtec EVO-X2.
+# Build a reusable native ROCm kernel cache for FreeToken on GMKtek EVO-X2.
 #
 # FreeToken's C++/HIP helper kernels normally compile on their first matching
 # call when no prebuilt cache is configured. This builder compiles the complete
@@ -18,7 +18,7 @@ set -euo pipefail
 # Keep the host-specific locations explicit so cache provenance is easy to
 # inspect after an upgrade. Callers may override ROOT_DIR for an isolated test
 # checkout but must not point it at an unrelated installation.
-readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-/home/david/freetoken-amd}"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${FREETOKEN_SOURCE_DIR:-${ROOT_DIR}/source-qwen-harness-d6ee8ce}"
 readonly VENV_PYTHON="${FREETOKEN_VENV_PYTHON:-${ROOT_DIR}/.venv/bin/python}"
 readonly ROCM_ROOT="${ROCM_PATH:-/opt/rocm-10.0}"
@@ -66,7 +66,7 @@ build_dir = pathlib.Path(sys.argv[2])
 if torch.version.hip is None:
     raise SystemExit("refusing to build a ROCm cache with a non-HIP PyTorch runtime")
 if "gfx1151" not in torch.cuda.get_device_name().lower() and "8060" not in torch.cuda.get_device_name().lower():
-    raise SystemExit(f"refusing non-GMKtec EVO-X2 GPU: {torch.cuda.get_device_name()}")
+    raise SystemExit(f"refusing non-GMKtek EVO-X2 GPU: {torch.cuda.get_device_name()}")
 
 specs = default_kernel_specs()
 paths = compile_and_package_kernels(

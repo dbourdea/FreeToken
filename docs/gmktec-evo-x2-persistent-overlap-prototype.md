@@ -1,4 +1,4 @@
-# GMKtec EVO-X2 persistent grouped-transfer overlap prototype
+# GMKtek EVO-X2 persistent grouped-transfer overlap prototype
 
 This prototype tested a lower-overhead overlap design than the earlier
 per-group-event experiment. It uses one persistent transfer stream,

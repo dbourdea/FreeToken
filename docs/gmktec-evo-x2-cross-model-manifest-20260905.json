@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "manifest_date_utc": "2026-09-05",
-  "purpose": "Machine-readable index of controlled native FreeToken and ROCm 10 llama.cpp comparison evidence on one GMKtec EVO-X2.",
+  "purpose": "Machine-readable index of controlled native FreeToken and ROCm 10 llama.cpp comparison evidence on one GMKtek EVO-X2.",
   "scope": {
-    "host_class": "GMKtec EVO-X2",
+    "host_class": "GMKtek EVO-X2",
     "gpu_architecture": "AMD Radeon 8060S gfx1151",
     "execution_stack": "native ROCm/HIP",
     "rocm_major": 10,
@@ -37,7 +37,7 @@
         "mean_client_ttft_ms": 424.0,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-q4-mmv-y4-api5-20260905T075002Z"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-q4-mmv-y4-api5-20260905T075002Z"
     },
     {
       "run_id": "qwen36_q4_llama_cpp_rocm10",
@@ -56,7 +56,7 @@
         "mean_decode_tps": 48.7477,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-llamacpp-paired-20260905T062500Z"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-llamacpp-paired-20260905T062500Z"
     },
     {
       "run_id": "qwen36_q4km_gguf_freetoken_raw",
@@ -77,7 +77,7 @@
         "ttft_ms": 54311.0295,
         "quality_status": "expected answer path passed; full output hash differs from llama.cpp"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-gguf-raw-20260905T121136Z/raw-quality.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-gguf-raw-20260905T121136Z/raw-quality.json"
     },
     {
       "run_id": "qwen36_q4km_gguf_llama_cpp_raw",
@@ -98,7 +98,7 @@
         "ttft_ms": 234.0382,
         "quality_status": "expected answer path passed; full output hash differs from FreeToken"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-llama-raw-20260905T122310Z/raw-quality.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-llama-raw-20260905T122310Z/raw-quality.json"
     },
     {
       "run_id": "qwen36_q4km_gguf_freetoken_warmed_matrix",
@@ -121,7 +121,7 @@
         "mean_ttft_ms_samples_2_to_5": 424.2563,
         "quality_status": "passed; all five output hashes matched"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-gguf-warm-matrix-20260905T122817Z"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-gguf-warm-matrix-20260905T122817Z"
     },
     {
       "run_id": "qwen36_q4km_gguf_llama_cpp_warmed_matrix",
@@ -144,7 +144,7 @@
         "mean_ttft_ms_samples_2_to_5": 58.8298,
         "quality_status": "passed; all five output hashes matched"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/qwen-llama-warm-matrix-20260905T124007Z"
+      "artifact": "/home/operator/freetoken-amd/artifacts/qwen-llama-warm-matrix-20260905T124007Z"
     },
     {
       "run_id": "gemma4_q4_freetoken_text",
@@ -167,7 +167,7 @@
         "p99_token_gap_ms": 21.6015,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260905T084837Z/text-matrix.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260905T084837Z/text-matrix.json"
     },
     {
       "run_id": "gemma4_q4_llama_cpp_rocm10_text",
@@ -190,7 +190,7 @@
         "p99_token_gap_ms": 18.1409,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T091532Z/text-matrix.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T091532Z/text-matrix.json"
     },
     {
       "run_id": "gemma4_q4_freetoken_concurrency_2",
@@ -208,7 +208,7 @@
         "mean_ttft_ms": 359.8159,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260905T112013Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260905T112013Z/concurrency.json"
     },
     {
       "run_id": "gemma4_q4_llama_cpp_rocm10_concurrency_2",
@@ -226,7 +226,7 @@
         "mean_ttft_ms": 1263.9829,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T112959Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T112959Z/concurrency.json"
     },
     {
       "run_id": "gemma4_q4_freetoken_concurrency_4",
@@ -244,7 +244,7 @@
         "mean_ttft_ms": 369.0398,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260905T105149Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260905T105149Z/concurrency.json"
     },
     {
       "run_id": "gemma4_q4_llama_cpp_rocm10_concurrency_4",
@@ -262,7 +262,7 @@
         "mean_ttft_ms": 3678.1440,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T110157Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T110157Z/concurrency.json"
     },
     {
       "run_id": "gemma4_q4_freetoken_concurrency_8",
@@ -280,7 +280,7 @@
         "mean_ttft_ms": 3178.3465,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-gguf-text-20260905T110609Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-gguf-text-20260905T110609Z/concurrency.json"
     },
     {
       "run_id": "gemma4_q4_llama_cpp_rocm10_concurrency_8",
@@ -298,7 +298,7 @@
         "mean_ttft_ms": 8483.9289,
         "quality_status": "passed"
       },
-      "artifact": "/home/david/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T111607Z/concurrency.json"
+      "artifact": "/home/operator/freetoken-amd/artifacts/gemma4-llamacpp-vision-20260905T111607Z/concurrency.json"
     }
   ],
   "unresolved": [

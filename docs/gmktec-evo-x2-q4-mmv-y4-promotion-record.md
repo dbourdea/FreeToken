@@ -1,7 +1,7 @@
 # Q4 MMV_Y=4 promotion record
 
 This record documents the reproducible FreeToken Q4 candidate measured on the
-GMKtec EVO-X2. It is an evidence record, not a claim that the candidate has
+GMKtek EVO-X2. It is an evidence record, not a claim that the candidate has
 already replaced the protected service configuration.
 
 ## Candidate identity
@@ -13,7 +13,7 @@ already replaced the protected service configuration.
 - PyTorch: `2.13.0+rocm10.0.0`.
 - HIP runtime reported by PyTorch: `7.15.26333`.
 - Python: `3.12.13`, Clang-backed environment.
-- Reusable extension cache: `/home/david/freetoken-amd/cache/torch_extensions-q8-api-y4`.
+- Reusable extension cache: `/home/operator/freetoken-amd/cache/torch_extensions-q8-api-y4`.
 
 ## Runtime configuration
 
@@ -48,12 +48,12 @@ the supported dense activation launch geometry.
 
 The first five-sample API run is preserved at:
 
-`/home/david/freetoken-amd/artifacts/qwen-q4-mmv-y4-api5-20260905T075002Z`
+`/home/operator/freetoken-amd/artifacts/qwen-q4-mmv-y4-api5-20260905T075002Z`
 
 Its mean decode rate was 48.03 TPS, with five successful samples and a
 standard deviation of 0.054 TPS. The independent repeat is preserved at:
 
-`/home/david/freetoken-amd/artifacts/qwen-q4-mmv-y4-repeat-20260905T082425Z`
+`/home/operator/freetoken-amd/artifacts/qwen-q4-mmv-y4-repeat-20260905T082425Z`
 
 The repeat measured 47.86 TPS across five successful samples, with a standard
 deviation of 0.092 TPS. The matched ROCm10 llama.cpp control measured 48.75
@@ -61,14 +61,14 @@ TPS, so the repeat was approximately 1.8 percent slower in decode.
 
 The quality and state evidence is preserved at:
 
-`/home/david/freetoken-amd/artifacts/qwen-q4-mmv-y4-quality-20260905T080132Z`
+`/home/operator/freetoken-amd/artifacts/qwen-q4-mmv-y4-quality-20260905T080132Z`
 
 The deterministic suite passed its exact, arithmetic, and JSON cases. The
 three-turn state suite passed acknowledgment, recall, and transformation.
 
 The long-context and resource evidence is preserved at:
 
-`/home/david/freetoken-amd/artifacts/qwen-q4-mmv-y4-longctx-20260905T081222Z`
+`/home/operator/freetoken-amd/artifacts/qwen-q4-mmv-y4-longctx-20260905T081222Z`
 
 Five nonce-varied 6,056-token prompts passed exact marker retrieval. Available
 memory changed from 19 GiB to 18 GiB. Swap use decreased from 2.1 GiB to 710
@@ -91,7 +91,7 @@ same source revision, ROCm 10.0 paths, `gfx1151` target, `MMV_Y=4`, and Q8
 one-wave guard. The native build invoked `/opt/rocm-10.0/bin/hipcc` and emitted
 the expected `-DGGML_CUDA_MMV_Y=4` and `--offload-arch=gfx1151` flags.
 
-- Artifact: `/home/david/freetoken-amd/artifacts/qwen-q8-mmv-y4-clean-20260905T084057Z`.
+- Artifact: `/home/operator/freetoken-amd/artifacts/qwen-q8-mmv-y4-clean-20260905T084057Z`.
 - Real-weight Q8 screen: 25.983 microseconds mean over 300 repetitions.
 - Device and software identity matched the candidate record.
 - Build and benchmark output is preserved in `build-and-bench.log`.
@@ -157,5 +157,5 @@ definitively reject Y4 as a current-branch performance promotion.**
 
 Artifacts:
 
-- Y1: `/home/david/freetoken-amd/artifacts/qwen-q4-current-mmvy1-20260905T160000Z/`
-- Y4: `/home/david/freetoken-amd/artifacts/qwen-q4-current-mmvy4-20260905T133000Z/`
+- Y1: `/home/operator/freetoken-amd/artifacts/qwen-q4-current-mmvy1-20260905T160000Z/`
+- Y4: `/home/operator/freetoken-amd/artifacts/qwen-q4-current-mmvy4-20260905T133000Z/`

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the isolated ROCm 10 llama.cpp Qwen3.6-35B-A3B control on GMKtec EVO-X2.
+# Run the isolated ROCm 10 llama.cpp Qwen3.6-35B-A3B control on GMKtek EVO-X2.
 #
 # This script intentionally starts a short-lived loopback-only llama.cpp server
 # on port 1921. It never contacts llama-swap, modifies its configuration, stops
@@ -11,7 +11,7 @@ set -euo pipefail
 # Keep the precise source revision, model revision, local model path, and API
 # identity visible in the command itself so the comparison can be reproduced
 # without guessing which llama.cpp build or Qwen quantization was selected.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly LLAMA_SERVER="${ROOT_DIR}/llama.cpp-rocm10-b10141/build-rocm10-clang/bin/llama-server"
 readonly MODEL_DIR="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6"
@@ -67,7 +67,7 @@ trap cleanup_server EXIT
 
 # Start the exact ROCm 10 b10141 control on an otherwise unused loopback port.
 # One slot, 8,192 context tokens, full GPU offload, Flash Attention, and Q8 KV
-# cache retain the previously documented GMKtec EVO-X2 ROCm control conventions.
+# cache retain the previously documented GMKtek EVO-X2 ROCm control conventions.
 "${LLAMA_SERVER}" \
     -m "${MODEL_FILE}" \
     --alias "${MODEL_NAME}" \
@@ -127,7 +127,7 @@ if [[ "${GMK_EVO_X2_QWEN_QUALITY_SUITE:-}" == "1" ]]; then
         "${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_quality_suite.py" \
         --base-url "${BASE_URL}" \
         --model "${MODEL_NAME}" \
-        --expected-host "david-Gmktec-x2-2" \
+        --expected-host "${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}" \
         --max-tokens 64 \
         --artifact "${ARTIFACT_ROOT}/quality.json" \
         >"${ARTIFACT_ROOT}/quality.log" 2>&1

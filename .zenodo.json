@@ -3,7 +3,7 @@
   "description": "Technical white paper and reproducibility package for a native ROCm/HIP port of FreeToken on AMD Strix Halo. Includes gfx1151 validation, controlled benchmark methodology, and portable artifact tooling. This release candidate does not claim strict replication of the upstream NVIDIA result or general AMD superiority.",
   "creators": [
     {
-      "name": "Bourdeau, David"
+      "name": "FreeToken AMD contributors"
     }
   ],
   "version": "0.1.0-rc1",

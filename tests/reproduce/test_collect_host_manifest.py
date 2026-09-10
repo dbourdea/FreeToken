@@ -30,7 +30,7 @@ class CollectHostManifestTests(unittest.TestCase):
     def test_public_collector_has_no_host_identifier_or_personal_path_dependency(self) -> None:
         forbidden_host = "lan" + "-" + "223"
         self.assertNotIn(forbidden_host, self.script.lower())
-        self.assertNotIn("/home/" + "david", self.script)
+        self.assertNotRegex(self.script, r"/home/[A-Za-z][A-Za-z0-9_-]+")
 
     def test_collector_accepts_a_git_worktree_and_requires_a_new_artifact_directory(self) -> None:
         self.assertIn('git -C "${SOURCE_DIR}" rev-parse --is-inside-work-tree', self.script)

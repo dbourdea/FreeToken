@@ -1,15 +1,15 @@
-# GMKtec EVO-X2 FreeToken AMD campaign completion audit
+# GMKtek EVO-X2 FreeToken AMD campaign completion audit
 
 ## Purpose and scope
 
 This audit is the controlling completion record for the native ROCm and HIP
-FreeToken port evaluated on the authorized GMKtec EVO-X2. It separates what
+FreeToken port evaluated on the authorized GMKtek EVO-X2. It separates what
 has been proven on that system from paper-inspired evidence, from comparisons
 that require an external NVIDIA reference system or unreleased author inputs.
 It must be updated from immutable artifacts, not from a plan or an intended
 command.
 
-The campaign may claim only GMKtec EVO-X2 results. A second host is outside
+The campaign may claim only GMKtek EVO-X2 results. A second host is outside
 the authorized scope, so it cannot be silently substituted for a missing
 result or used to claim broader AMD support.
 
@@ -39,11 +39,11 @@ metric boundary into an equal comparison.
 | Qwen Q4_K_M same-format comparison | Same checkpoint, tokenizer, caller-rendered prompt, completion cap, and five warmed requests on both runtimes | Proven for decode parity; TTFT remains a separate boundary | [`gmktec-evo-x2-cross-model-manifest-20260905.json`](gmktec-evo-x2-cross-model-manifest-20260905.json) records five-request artifacts. FreeToken steady decode was 49.4357 TPS versus 49.1772 TPS for llama.cpp, while all-sample means were 48.6028 and 49.1155 TPS respectively. |
 | Q5-only four-row optimization correctness | Real-weight component parity and complete API quality gate | Proven | C138 exact component hash and C139 API quality evidence |
 | Q5-only four-row performance value | Same configuration baseline comparison, scheduler, C4, and tail metrics | Proven for the stated local Qwen workload | C139 records higher C4 prefill and decode TPS plus lower C4 tails; it separately retains the slight single-request decode reduction |
-| ROCm llama.cpp local control | Same host, recorded model format, API shape, quality suite, and timing matrix | Proven as a practical Q4 control; five-sample refresh recorded | C89 remains the earlier four-slot workload control. The 2026-09-04 five-sample refresh is preserved at `/home/david/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-timeshare-five-20260904T101357Z/`: five of five samples passed, mean decode 46.6625 TPS, median 46.7524 TPS, mean prefill 19,343.40 TPS. Protected-service recovery completed and the paired FreeToken control is preserved at `/home/david/freetoken-amd/artifacts/qwen35b-freetoken-five-20260904T102530Z/`. It is not a same-format NVFP4 equivalence claim. |
-| Paper-inspired W1 control | Pinned AIME source, complete local request contract, five samples, raw responses, and quality result | Proven as paper-inspired control | Five raw samples and aggregate evidence are preserved at `/home/david/freetoken-amd/artifacts/w1-paper-inspired-five-sample-20260904T094252`. All five matched output SHA1 `0acef4eab6f4`; the run log records token counts and timing. This remains a reproducible W1-style control, not strict paper replication, because the paper's original prompt, cache policy, and exact runner contract remain unpublished. |
+| ROCm llama.cpp local control | Same host, recorded model format, API shape, quality suite, and timing matrix | Proven as a practical Q4 control; five-sample refresh recorded | C89 remains the earlier four-slot workload control. The 2026-09-04 five-sample refresh is preserved at `/home/operator/freetoken-amd/artifacts/qwen35b-llamacpp-rocm10-timeshare-five-20260904T101357Z/`: five of five samples passed, mean decode 46.6625 TPS, median 46.7524 TPS, mean prefill 19,343.40 TPS. Protected-service recovery completed and the paired FreeToken control is preserved at `/home/operator/freetoken-amd/artifacts/qwen35b-freetoken-five-20260904T102530Z/`. It is not a same-format NVFP4 equivalence claim. |
+| Paper-inspired W1 control | Pinned AIME source, complete local request contract, five samples, raw responses, and quality result | Proven as paper-inspired control | Five raw samples and aggregate evidence are preserved at `/home/operator/freetoken-amd/artifacts/w1-paper-inspired-five-sample-20260904T094252`. All five matched output SHA1 `0acef4eab6f4`; the run log records token counts and timing. This remains a reproducible W1-style control, not strict paper replication, because the paper's original prompt, cache policy, and exact runner contract remain unpublished. |
 | W2 through W4 strict replication | Authors' exact harnesses, fixtures, versions, policy, and scoring | External evidence unavailable | Public source audit documents that OpenCode SWE-bench, Claude Code, OpenClaw, and raw paper artifacts are not released |
-| 24-hour Q5 endurance | All 1,440 minute-cadence sessions, zero candidate and host swap, final summary, restored swap, and real normal-service completion | Proven | C142 artifact `/home/david/freetoken-amd/artifacts/q4-c142-q5-swapdrain-endurance-20260902T222206Z` contains exactly 1,440 valid session JSON files, zero failures, zero candidate and host swap, completed controller evidence, and preserved recovery artifacts. Per-session records measure state correctness, TTFT, token-gap tails, swap, and thermal telemetry. They intentionally do not claim per-session prefill TPS. |
-| Normal service recovery | Recovered protected Qwen API produces a real completed response with `finish_reason: stop` | Proven | Read-only probe artifact `/home/david/freetoken-amd/artifacts/qwen-protected-recovery-explicit-20260904T093948` records model `qwen3.6-35b-a3b-nvfp4-amd`, visible response `READY.`, and `finish_reason: stop` after the C142 recovery. |
+| 24-hour Q5 endurance | All 1,440 minute-cadence sessions, zero candidate and host swap, final summary, restored swap, and real normal-service completion | Proven | C142 artifact `/home/operator/freetoken-amd/artifacts/q4-c142-q5-swapdrain-endurance-20260902T222206Z` contains exactly 1,440 valid session JSON files, zero failures, zero candidate and host swap, completed controller evidence, and preserved recovery artifacts. Per-session records measure state correctness, TTFT, token-gap tails, swap, and thermal telemetry. They intentionally do not claim per-session prefill TPS. |
+| Normal service recovery | Recovered protected Qwen API produces a real completed response with `finish_reason: stop` | Proven | Read-only probe artifact `/home/operator/freetoken-amd/artifacts/qwen-protected-recovery-explicit-20260904T093948` records model `qwen3.6-35b-a3b-nvfp4-amd`, visible response `READY.`, and `finish_reason: stop` after the C142 recovery. |
 | 284B capacity claim | Model manifest, reserved-memory evidence, load and quality result on comparable resources | Incomplete, metadata gate rejects full load | [`gmktec-evo-x2-paper-model-capacity-gate.md`](gmktec-evo-x2-paper-model-capacity-gate.md) pins the official release revision and records a reproducible metadata-only `REJECT_FULL_LOAD` result: 155.425 GiB payload versus a 4 GiB authoritative budget after explicit headroom. The new real-shape slice measures transfer only; full-model quality and serving throughput remain unmeasured. |
 | Strict NVIDIA paper comparison | Same model, precision, workload, policy, metric boundary, and NVIDIA reference hardware | External evidence unavailable | The paper protocol still lacks exact released inputs and no reference NVIDIA system is in scope |
 | Upstream-ready documentation | Reproducible, secret-safe tracked source and current evidence links | Proven for current evidence set | C142, Gemma comparison, Qwen same-format warmed matrix, machine-readable manifest, long-context boundaries, recovery proof, W1 result, and the capacity baseline are tracked. Strict NVIDIA parity and 284B qualification remain explicitly unresolved. |
@@ -79,5 +79,5 @@ results together, with their different measurement boundaries stated plainly.
 The final report must state separately: native AMD functionality, controlled
 quality, local Q4 control comparisons, paper-inspired controls, strict-paper
 limitations, and external hardware limitations. It may not state that a
-GMKtec EVO-X2 result equals or exceeds a published NVIDIA result unless every
+GMKtek EVO-X2 result equals or exceeds a published NVIDIA result unless every
 condition in the strict NVIDIA comparison row is proven.

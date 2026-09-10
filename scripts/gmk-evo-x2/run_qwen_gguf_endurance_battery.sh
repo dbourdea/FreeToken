@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run an isolated, process-scoped Qwen GGUF endurance battery on GMKtec EVO-X2.
+# Run an isolated, process-scoped Qwen GGUF endurance battery on GMKtek EVO-X2.
 #
 # Linux reports swap for every desktop and monitoring process.  A system-wide
 # zero-swap requirement can therefore reject a healthy model server because an
@@ -19,8 +19,8 @@ readonly SESSION_COUNT="${2:-60}"
 # of compressing every request into a short throughput-only batch.
 readonly INTERVAL_SECONDS="${3:-60}"
 
-# Keep all fixed GMKtec EVO-X2 paths explicit for reproducibility and host isolation.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+# Keep all fixed GMKtek EVO-X2 paths explicit for reproducibility and host isolation.
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 # Allow an isolated candidate worktree to reuse the exact endurance contract.
 # The caller must choose a path under the dedicated Qwen source root, so this
 # override cannot accidentally execute arbitrary code or touch port 1919.
@@ -30,7 +30,7 @@ readonly RUNNER="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_multiturn_state_suite.p
 readonly SUITE="${SOURCE_DIR}/benchmarks/gmk_evo_x2/multiturn_state_suite.json"
 readonly MODEL="qwen36-35b-a3b-q4km-gguf-amd"
 readonly PORT="1922"
-readonly EXPECTED_HOST="david-Gmktec-x2-2"
+readonly EXPECTED_HOST="${FREETOKEN_EXPECTED_HOST:?Set FREETOKEN_EXPECTED_HOST to the approved test hostname}"
 
 # Reject malformed numeric input before opening a socket or creating artifacts.
 case "${SESSION_COUNT}" in ''|*[!0-9]*) echo "session count must be a positive integer" >&2; exit 2;; esac
