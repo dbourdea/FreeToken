@@ -80,7 +80,15 @@ Both ordinary and SSE responses were checked, including `[DONE]`. Adding `stream
 
 Every maintenance trial restored the protected service and verified a deterministic completion. After the final pass, the service manager reported it active and running, and the test listeners were closed. Raw artifacts remain private under the logical sets `freetoken-swap-live-20260910-d` and `freetoken-swap-live-20260910-e`. FreeToken PR #1 contains the control-plane integration and PR #2 contains the AMD model repair and anonymization.
 
-Remaining limits are explicit: no claim of long-context qualification, comprehensive tool-calling quality, cancellation coverage, direct-supervisor rollback, or long-duration reliability is made. Native daemon rollback has CPU failure-injection and HTTP integration coverage, not GPU failure-recovery qualification. The direct integration does not acquire the daemon's durable accounting guarantees. Semaphore-cleanup warnings remain a follow-up investigation even though the service recovery and port cleanup checks passed.
+Remaining limits are explicit: no claim of long-context qualification, comprehensive tool-calling quality, direct-supervisor rollback, or long-duration reliability is made. The direct integration does not acquire the daemon's durable accounting guarantees. Semaphore-cleanup warnings remain a follow-up investigation even though the final worker-process and port cleanup checks passed. The additional bounded cancellation and native real-model recovery results below supersede those earlier unqualified gates.
+
+### Approved live cancellation and native recovery
+
+The subsequent approved window passed the cancellation harness using the same pinned llama-swap binary and repaired runtime. Qwen3.6, Qwen3.8, and Qwen3.6 returned `4` in 35.01, 36.95, and 33.29 seconds, including loading/switching. The cancellation request produced first content after 0.368 seconds. After disconnect, the same engine instance reached zero active requests in an observed 0.254 seconds, while completed requests stayed at one. No engine restart or natural completion was accepted as cancellation. Post-disconnect A-to-B-to-A streaming, same-model concurrency, conflicting-model concurrency, and idle eviction passed again.
+
+The native daemon was then tested against the real Qwen3.6 runtime through its profile API. A private invalid GGUF fixture caused the real loader to raise `GGUF magic invalid`; the switch returned HTTP 503. Automatic rollback restored the previous Qwen3.6 model, reached readiness, and returned `4` in a streamed completion. Accounting preserved the previous engine's sealed receipt (27 prompt tokens, 2 completion tokens, complete drain). The failed loader's separate crash receipt was marked degraded with unknown token totals, rather than inventing zero usage.
+
+Both phases restored the original llama.cpp service and verified generation. Final read-only checks found no test listeners or remaining FreeToken multiprocessing workers. Private logical artifact sets are `freetoken-swap-live-20260910-f` and `freetoken-native-recovery-20260910-a`. These results qualify the documented bounded workflows, not every model, failure mode, context size, or extended workload.
 
 ### Native recovery regression suite
 

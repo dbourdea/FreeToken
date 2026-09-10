@@ -37,8 +37,8 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Automatic model routing | Unmodified llama-swap directly supervising FreeToken; prior real Qwen A-to-B-to-A runs | Bounded live verification passed |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU and bounded live evidence |
 | Concurrency and unloading | Prior same-model and conflicting-model concurrent requests plus idle eviction | Bounded live verification passed |
-| Rollback protections | Launch/readiness recovery, newer lifecycle intent wins, accounting preservation, actual Linux process-group tests | Implemented; real-model failure recovery still unqualified |
-| Client cancellation | Strict disconnect gate and real localhost transport test | Harness verified; FreeToken GPU cancellation still unqualified |
+| Rollback protections | Launch/readiness recovery, newer lifecycle intent wins, accounting preservation, actual Linux process-group tests; real invalid-GGUF failure followed by Qwen3.6 readiness and generation recovery | Implemented and bounded live verification passed |
+| Client cancellation | Same-instance active-to-idle transition without normal-completion increment, followed by A-to-B-to-A streaming recovery | Bounded FreeToken GPU verification passed |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, prior restore and completion checks, no interruption during combined-tree checks | Maintained |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
@@ -50,20 +50,26 @@ instruction to merge either PR or change the repository's release strategy.
 GitHub reported no status checks for either PR at this audit. The test results
 above are independently executed evidence, not claims of passing hosted CI.
 
-## Remaining completion gates
+## Final live completion gates
 
-1. In an approved isolated maintenance window, run the real FreeToken
-   cancellation gate and verify post-disconnect A-to-B-to-A routing.
-2. Qualify native daemon recovery from a real replacement-model failure,
-   including restored-model readiness and completion, not merely a new PID.
-3. Review the complete evidence after those runs, including cleanup, protected
-   service restoration, and any newly exposed defects. Keep the PRs as drafts
-   until the required reliability evidence supports promotion.
+The user approved another maintenance window. Both live gates passed:
 
-The earlier maintenance window is closed. A new window has been requested but
-is not assumed approved. These remaining tests must not stop or compete with
-the protected workload without that approval. Long-context and broad model
-quality claims remain outside the bounded results and must not be inferred.
+1. GPU stream cancellation reached terminal idle on the same backend, without
+   a normal-completion increment. Post-disconnect A-to-B-to-A streaming,
+   concurrency, and TTL unloading passed.
+2. Native daemon recovery passed after the real loader rejected an invalid
+   GGUF fixture. The restored Qwen3.6 model reached readiness and generated the
+   expected answer. The failed switch correctly remained HTTP 503.
+3. Both phases restored and health-checked the protected service, including a
+   verified completion. Final process/listener checks found no test runtime
+   remaining. The accounting gap for the crashed loader is explicitly degraded.
+
+The approved window is closed. No permanent production activation, merge, or
+upstream submission was performed. The PRs remain drafts for maintainer review;
+submission and verification do not authorize merging or production promotion.
+Long-context quality, broad model compatibility, direct-router automatic
+rollback, and long-duration endurance remain explicitly unclaimed limitations,
+not capabilities inferred from these bounded tests.
 
 See [integration behavior](freetoken-swap.md) and
 [source research and live-test limitations](freetoken-swap-research.md).
