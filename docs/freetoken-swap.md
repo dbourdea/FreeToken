@@ -43,6 +43,12 @@ FreeToken's `/health` remains a backwards-compatible diagnostic endpoint and can
 
 Use `ft serve` or `python -m freetoken.cli serve` in a process command. The legacy `python -m freetoken` entrypoint does not accept the `serve` subcommand. Use a revision-specific `TORCH_EXTENSIONS_DIR` and prebuild native GGUF kernels before a maintenance window so an abandoned shared build lock cannot stall model initialization. For SSE token metrics, clients should request `stream_options: {"include_usage": true}`.
 
+## Cancellation qualification
+
+The opt-in Linux harness `benchmarks/swap/qualify.py --cancellation` adds a live disconnect gate to its maintenance-window run. It reads SSE incrementally, verifies that generation is active, closes the response after the first content delta, and polls backend statistics through `/upstream/model-a/v1/stats`. Passing requires the same backend instance to become idle without increasing the normal-completion count. A backend restart, an already-finished response, or a missing terminal abort fails the gate. It then checks fresh A-to-B-to-A streaming completions. Prefix bytes, backend snapshots, first-content timing, abort latency, and recovery responses are private artifacts.
+
+The gate has CPU tests, including an actual localhost HTTP stream disconnect. It has not yet been run against the real FreeToken GPU workload. It requires a separately approved maintenance window and does not imply cancellation is already qualified. Use `--extended` as well to retain concurrent-request and TTL gates. Existing mandatory source, model, protected-service, and artifact arguments still apply; `--allow-maintenance` is not a substitute for operator approval.
+
 ## Provenance and scope
 
 The design was informed by [mostlygeek/llama-swap](https://github.com/mostlygeek/llama-swap), checked out locally at `41ec321b6216d838488b2a7d936274ed227c0c5e` on 2026-09-10. llama-swap is MIT licensed (`LICENSE.md`). No llama-swap or llama.cpp code is vendored, modified, or submitted by this feature. FreeToken remains the sole change and pull-request target.

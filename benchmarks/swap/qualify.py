@@ -62,6 +62,62 @@ def canary(url, model, stream=False):
     return raw, content.strip()
 
 
+def cancellation_canary(url, model, *, seconds=30):
+    """Close a live SSE response, then require same-process terminal abort evidence.
+
+    Active reaching zero alone is insufficient: TTL restart and normal completion
+    can also produce that observation. Check instance identity and completed count.
+    """
+    stats_url = url + "/upstream/" + model + "/v1/stats"
+    before = json.loads(http(stats_url))
+    instance = before.get("instance_id")
+    assert instance, "backend instance identity missing"
+    assert before["requests"]["active"] == 0, "cancellation test requires an idle backend"
+    body = {"model": model, "stream": True, "max_tokens": 1024, "temperature": 0,
+            "messages": [{"role": "user", "content":
+                          "Count from 1 to 1000, writing every number on a separate line. Do not summarize."}],
+            "chat_template_kwargs": {"enable_thinking": False}}
+    request = urllib.request.Request(url + "/v1/chat/completions",
+                                     data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+    raw = bytearray()
+    started = time.monotonic()
+    observed = None
+    with urllib.request.urlopen(request, timeout=660) as response:
+        # Read incrementally. Reading the entire body would only test completion.
+        for line in response:
+            raw.extend(line)
+            if len(raw) > 1024 * 1024:
+                raise RuntimeError("stream exceeded cancellation capture limit")
+            if line.strip() == b"data: [DONE]":
+                raise RuntimeError("stream completed before cancellation")
+            if not line.startswith(b"data: "):
+                continue
+            doc = json.loads(line[6:])
+            if any(choice.get("delta", {}).get("content") for choice in doc.get("choices", [])):
+                first_content = time.monotonic()
+                observed = json.loads(http(stats_url))
+                assert observed["instance_id"] == instance, "backend restarted before disconnect"
+                assert observed["requests"]["active"] > 0, "generation already finished before disconnect"
+                break
+        else:
+            raise RuntimeError("stream ended without a content delta")
+    disconnected = time.monotonic()
+    deadline = disconnected + seconds
+    while True:
+        after = json.loads(http(stats_url))
+        assert after["instance_id"] == instance, "backend restart cannot count as cancellation"
+        if after["requests"]["active"] == 0:
+            assert after["requests"]["completed"] == before["requests"]["completed"], \
+                "normal completion cannot count as cancellation"
+            return bytes(raw), {"passed": True, "before": before, "during": observed,
+                                "after": after, "firstContentSeconds": first_content - started,
+                                "abortSeconds": time.monotonic() - disconnected}
+        if time.monotonic() >= deadline:
+            raise TimeoutError("disconnected request did not reach terminal abort")
+        time.sleep(0.25)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source", "python", "llama-swap", "model-a", "model-b", "artifacts", "protected-service", "protected-url"):
@@ -70,6 +126,7 @@ def main():
     parser.add_argument("--port", type=int, default=1960)
     parser.add_argument("--start-port", type=int, default=1961)
     parser.add_argument("--extended", action="store_true", help="Also test concurrent requests and idle eviction")
+    parser.add_argument("--cancellation", action="store_true", help="Also qualify live SSE disconnect and recovery")
     args = parser.parse_args()
     artifacts = Path(args.artifacts)
     artifacts.mkdir(parents=True, exist_ok=False)
@@ -153,6 +210,17 @@ def main():
                 print("TRIAL_RESULT " + json.dumps(row), flush=True)
                 if not row["passed"]:
                     raise RuntimeError("deterministic quality gate failed")
+            if args.cancellation:
+                raw, cancellation = cancellation_canary(base, "model-a")
+                (artifacts / "cancelled-prefix.sse").write_bytes(raw)
+                status["cancellation"] = cancellation
+                save()
+                for index, alias in enumerate(("model-a", "model-b", "model-a")):
+                    raw, content = canary(base, alias, True)
+                    (artifacts / f"after-cancel-{index}-{alias}.sse").write_bytes(raw)
+                    assert content == "4", "post-cancellation routing failed"
+                status["cancellationRecoveryPassed"] = True
+                print("CANCELLATION_RECOVERY_OK", flush=True)
             if args.extended:
                 for names in (("model-a", "model-a"), ("model-a", "model-b")):
                     with ThreadPoolExecutor(2) as clients:
@@ -204,6 +272,8 @@ def main():
               and len(status["trials"]) == 3 and all(x["passed"] for x in status["trials"]))
     if args.extended:
         passed = passed and status.get("concurrentPassed") and status.get("idleEvictionPassed")
+    if args.cancellation:
+        passed = passed and status.get("cancellation", {}).get("passed") and status.get("cancellationRecoveryPassed")
     return 0 if passed else 1
 
 
