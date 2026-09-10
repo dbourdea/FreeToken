@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from freetoken.daemon.catalog import CatalogError, ModelCatalog
 from freetoken.daemon.app import build_app
 from freetoken.daemon.logring import LogRing
+from freetoken.daemon.readiness import wait_for_ready
 
 
 def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
@@ -21,7 +22,7 @@ def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
     }
     assert catalog.public() == [{
         "name": "qwen-coder", "model": "/models/qwen.gguf", "port": 1922,
-        "args": ["--ctx-size", "32768"], "description": "coding profile",
+        "args": ["--ctx-size", "32768"], "description": "coding profile", "readyTimeoutS": 120.0,
     }]
 
 
@@ -43,6 +44,27 @@ def test_catalog_unknown_profile_has_operator_facing_error():
         ModelCatalog.empty().get("missing")
 
 
+def test_readiness_waits_for_engine_health_not_just_a_listening_process():
+    class Manager:
+        def status(self):
+            return {"running": True, "pid": 44}
+
+    class Probe:
+        def __init__(self):
+            self.docs = iter([
+                {"reachable": True, "status": "loading"},
+                {"reachable": True, "status": "ok", "model": "m"},
+            ])
+
+        def health(self, port):
+            assert port == 1922
+            return next(self.docs)
+
+    clock = iter([0.0, 0.0, 0.1, 0.1])
+    result = wait_for_ready(Manager(), Probe(), pid=44, port=1922, timeout_s=1, now=lambda: next(clock), sleep=lambda _: None)
+    assert result == {"ready": True, "health": {"reachable": True, "status": "ok", "model": "m"}}
+
+
 def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\nargs = ['--ctx-size', '32768']\n", encoding="utf-8")
@@ -50,22 +72,29 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
     class Manager:
         def __init__(self):
             self.calls = []
+            self.running = False
 
         def status(self):
-            return {"running": False, "port": None}
+            return {"running": self.running, "pid": 101 if self.running else None, "port": 1922 if self.running else None}
 
         def start(self, model, port, args):
             self.calls.append(("start", model, port, args))
+            self.running = True
             return {"started": True, "model": model, "port": port}
 
         def switch(self, model, port, args, force):
             self.calls.append(("switch", model, port, args, force))
+            self.running = True
             return {"switched": True, "model": model, "port": port}
+
+    class Probe:
+        def health(self, port):
+            return {"reachable": True, "status": "ok", "port": port}
 
     manager = Manager()
     with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
         app = build_app(
-            manager=manager, ring=LogRing(), probe=None, footprint_fn=lambda pid: {},
+            manager=manager, ring=LogRing(), probe=Probe(), footprint_fn=lambda pid: {},
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=ModelCatalog.load(str(path)), token="secret",
         )
         client = TestClient(app)
@@ -76,6 +105,7 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
         started = client.post("/engine/start-profile", json={"name": "coding"}, headers={"X-FT-Token": "secret"})
         assert started.status_code == 200
         assert started.json()["profile"] == "coding"
+        assert started.json()["readiness"]["ready"] is True
         switched = client.post("/engine/switch-profile", json={"name": "coding", "force": True}, headers={"X-FT-Token": "secret"})
         assert switched.status_code == 200
     assert manager.calls == [

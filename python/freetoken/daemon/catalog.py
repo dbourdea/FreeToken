@@ -32,6 +32,7 @@ class ModelProfile:
     args: tuple[str, ...]
     port: int | None = None
     description: str | None = None
+    ready_timeout_s: float = 120.0
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -44,6 +45,7 @@ class ModelProfile:
         doc["name"] = self.name
         if self.description:
             doc["description"] = self.description
+        doc["readyTimeoutS"] = self.ready_timeout_s
         return doc
 
 
@@ -89,7 +91,7 @@ def _profile_name(name: object) -> str:
 def _profile(name: str, value: object) -> ModelProfile:
     if not isinstance(value, dict):
         raise CatalogError(f"models.{name} must be a table")
-    allowed = {"model", "args", "port", "description"}
+    allowed = {"model", "args", "port", "description", "ready_timeout_s"}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise CatalogError(f"models.{name}: unsupported keys: {', '.join(unknown)}")
@@ -110,4 +112,11 @@ def _profile(name: str, value: object) -> ModelProfile:
     description = value.get("description")
     if description is not None and (not isinstance(description, str) or "\x00" in description):
         raise CatalogError(f"models.{name}.description must be a string without NUL")
-    return ModelProfile(name, model, tuple(raw_args), port, description)
+    ready_timeout_s = value.get("ready_timeout_s", 120.0)
+    if (
+        not isinstance(ready_timeout_s, (int, float))
+        or isinstance(ready_timeout_s, bool)
+        or not 1 <= ready_timeout_s <= 900
+    ):
+        raise CatalogError(f"models.{name}.ready_timeout_s must be from 1 through 900 seconds")
+    return ModelProfile(name, model, tuple(raw_args), port, description, float(ready_timeout_s))

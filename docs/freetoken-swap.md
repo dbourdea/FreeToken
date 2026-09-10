@@ -10,6 +10,7 @@ model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
 port = 1922
 args = ["--ctx-size", "32768", "--gpu", "GPU-EXAMPLE"]
 description = "Strix Halo coding profile"
+ready_timeout_s = 300
 
 [models.qwen-chat]
 model = "/models/Qwen3.5-27B-Q4_K_M.gguf"
@@ -26,7 +27,9 @@ ft daemon health
 
 `GET /models`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose the same control-plane capability. They require `X-FT-Token` whenever the daemon has a token configured. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
 
-Profiles accept only `model`, `port`, `args`, and `description`. `args` is passed as an argument vector to `ft serve`; it is never interpreted by a shell. A profile cannot set `--model` or `--port` in `args`, because those fields are owned by the supervisor and are part of its conflict and re-adoption identity. The model files and catalog remain local operational configuration, not repository content.
+Profiles accept only `model`, `port`, `args`, `description`, and `ready_timeout_s` (default 120 seconds). `args` is passed as an argument vector to `ft serve`; it is never interpreted by a shell. A profile cannot set `--model` or `--port` in `args`, because those fields are owned by the supervisor and are part of its conflict and re-adoption identity. The model files and catalog remain local operational configuration, not repository content.
+
+After a profile launch, freetoken-swap polls the new engine's authoritative `/health` state until it reaches `ok`, reports `error`, or reaches the configured timeout. A timeout intentionally leaves the launched process under daemon management so an operator can inspect logs or explicitly stop it. It never treats an open port as ready and never kills a potentially slow model load automatically.
 
 ## Provenance and scope
 

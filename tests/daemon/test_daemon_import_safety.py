@@ -21,6 +21,7 @@ DAEMON_MODULES = [
     "freetoken.daemon.version",
     "freetoken.daemon.accounting",
     "freetoken.daemon.catalog",
+    "freetoken.daemon.readiness",
     "freetoken.daemon.logfmt",
     "freetoken.daemon.logring",
     "freetoken.daemon.osproc",
