@@ -50,6 +50,7 @@ ft daemon switch OTHER_MODEL                    # stop old + start new
 ft daemon models                                # list freetoken-swap named profiles
 ft daemon switch-profile coding                 # atomic switch via the local TOML catalog
 ft daemon stop
+ft daemon shutdown                             # stop the serve and then the control plane
 # Recovery only: permit a degraded receipt if the failed engine cannot seal final totals.
 ft daemon stop --force
 ```

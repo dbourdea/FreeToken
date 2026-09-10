@@ -24,7 +24,7 @@ DEFAULT_LIFECYCLE_TIMEOUT = 40.0
 
 # Positional verbs that mean "act as a client"; anything else (bare, or a flag like --host) runs
 # the server. Kept in one place so the server dispatcher and this parser agree.
-CLIENT_VERBS = ("self", "status", "health", "metrics", "stats", "models", "start", "stop", "switch", "start-profile", "switch-profile", "logs")
+CLIENT_VERBS = ("self", "status", "health", "metrics", "stats", "models", "start", "stop", "shutdown", "switch", "start-profile", "switch-profile", "logs")
 
 
 class ClientError(Exception):
@@ -38,7 +38,7 @@ def _effective_timeout(verb: str, configured: float | None) -> float:
         return configured
     return (
         DEFAULT_LIFECYCLE_TIMEOUT
-        if verb in {"stop", "switch", "start-profile", "switch-profile"}
+        if verb in {"stop", "shutdown", "switch", "start-profile", "switch-profile"}
         else DEFAULT_TIMEOUT
     )
 
@@ -141,6 +141,12 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         action="store_true",
         help="stop even if final accounting cannot be sealed (may lose the unobserved token tail)",
     )
+    shutdown = sub.add_parser("shutdown", parents=[common], help="Stop the serve and daemon (POST /shutdown)")
+    shutdown.add_argument(
+        "--force",
+        action="store_true",
+        help="stop even if final accounting cannot be sealed (may lose the unobserved token tail)",
+    )
     for name in ("start", "switch"):
         sp = sub.add_parser(name, parents=[common], help=f"POST /engine/{name}")
         sp.add_argument("model", help="Model path/id")
@@ -181,6 +187,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             "stop": (
                 "POST",
                 "/engine/stop",
+                {"force": True} if getattr(args, "force", False) else {},
+            ),
+            "shutdown": (
+                "POST",
+                "/shutdown",
                 {"force": True} if getattr(args, "force", False) else {},
             ),
         }

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import CatalogError, ModelCatalog
 from freetoken.daemon.app import build_app
+from freetoken.daemon import client as daemon_client
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.readiness import wait_for_ready
 
@@ -130,3 +131,19 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
         ("start", "/models/coding.gguf", 1922, ["--ctx-size", "32768"]),
         ("switch", "/models/coding.gguf", 1922, ["--ctx-size", "32768"], True),
     ]
+
+
+def test_client_shutdown_uses_the_daemon_shutdown_transaction(monkeypatch, capsys):
+    seen = {}
+
+    def request(method, url, path, **kwargs):
+        seen.update(method=method, url=url, path=path, **kwargs)
+        return {"stopping": True}
+
+    monkeypatch.setattr(daemon_client, "_request_json", request)
+    assert daemon_client.main(["shutdown", "--url", "http://daemon:1900", "--force"]) == 0
+    assert seen == {
+        "method": "POST", "url": "http://daemon:1900", "path": "/shutdown",
+        "body": {"force": True}, "token": None, "timeout": daemon_client.DEFAULT_LIFECYCLE_TIMEOUT,
+    }
+    assert '"stopping": true' in capsys.readouterr().out
