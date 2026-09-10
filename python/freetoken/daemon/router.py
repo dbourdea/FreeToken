@@ -57,18 +57,22 @@ class RoutingCoordinator:
         *,
         default_port: int = 1919,
         ready_fn: Callable = wait_for_ready,
+        timer_factory: Callable[[float, Callable[[], None]], object] | None = None,
     ) -> None:
         self._manager = manager
         self._catalog = catalog
         self._probe = probe
         self._default_port = default_port
         self._ready_fn = ready_fn
+        self._timer_factory = timer_factory or self._new_timer
         self._cond = threading.Condition(threading.Lock())
         self._next_sequence = 0
         self._pending: list[tuple[int, int, str]] = []
         self._leases = 0
         self._active_name: str | None = None
         self._switching = False
+        self._idle_timer: object | None = None
+        self._evictions = 0
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
@@ -90,6 +94,7 @@ class RoutingCoordinator:
                     self._cond.wait()
                     continue
                 if self._matches_active(profile, port):
+                    self._cancel_idle_timer()
                     self._pending.remove(ticket)
                     self._leases += 1
                     state = self._manager.status()
@@ -118,6 +123,7 @@ class RoutingCoordinator:
         with self._cond:
             self._active_name = profile.name
             self._switching = False
+            self._cancel_idle_timer()
             self._leases += 1
             self._cond.notify_all()
         return RouteLease(self, profile, port, pid)
@@ -129,6 +135,8 @@ class RoutingCoordinator:
             if self._leases <= 0:
                 raise ValueError("routing lease was already released")
             self._leases -= 1
+            if self._leases == 0:
+                self._schedule_idle_eviction()
             self._cond.notify_all()
 
     def status(self) -> dict:
@@ -138,8 +146,70 @@ class RoutingCoordinator:
                 "activeRequests": self._leases,
                 "switching": self._switching,
                 "queuedRequests": len(self._pending),
+                "idleEvictionScheduled": self._idle_timer is not None,
+                "evictions": self._evictions,
                 "scheduler": self._catalog.settings.scheduler,
             }
+
+    def evict_idle(self, name: str | None = None) -> bool:
+        """Unload a truly idle matching engine, preserving lifecycle accounting.
+
+        The timer calls this method, and tests may call it directly. A stale
+        timer cannot unload a newer profile because identity is checked under
+        admission before entering the manager lifecycle transaction.
+        """
+        with self._cond:
+            active = self._active_name
+            if name is not None and active != name:
+                return False
+            if active is None or self._leases or self._switching:
+                return False
+            profile = self._catalog.get(active)
+            port = profile.port or self._default_port
+            if not self._matches_active(profile, port):
+                self._active_name = None
+                self._idle_timer = None
+                self._cond.notify_all()
+                return False
+            self._switching = True
+            self._idle_timer = None
+        try:
+            timeout = profile.unload_timeout_s or self._catalog.settings.unload_timeout_s
+            self._manager.stop(timeout=timeout)
+        except Exception:
+            with self._cond:
+                self._switching = False
+                self._cond.notify_all()
+            raise
+        with self._cond:
+            self._active_name = None
+            self._switching = False
+            self._evictions += 1
+            self._cond.notify_all()
+        return True
+
+    @staticmethod
+    def _new_timer(delay: float, callback: Callable[[], None]):
+        timer = threading.Timer(delay, callback)
+        timer.daemon = True
+        return timer
+
+    def _cancel_idle_timer(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _schedule_idle_eviction(self) -> None:
+        if self._active_name is None:
+            return
+        profile = self._catalog.get(self._active_name)
+        ttl = profile.ttl_s if profile.ttl_s is not None else self._catalog.settings.default_ttl_s
+        if ttl <= 0:
+            return
+        self._cancel_idle_timer()
+        timer = self._timer_factory(ttl, lambda: self.evict_idle(profile.name))
+        self._idle_timer = timer
+        timer.start()
 
     def _matches_active(self, profile: ModelProfile, port: int) -> bool:
         state = self._manager.status()

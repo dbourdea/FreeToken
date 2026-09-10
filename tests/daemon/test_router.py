@@ -46,6 +46,11 @@ class Manager:
         self.pid += 1
         return {"launched": True, "pid": self.pid}
 
+    def stop(self, timeout):
+        self.calls.append(("stop", timeout))
+        self.model = None
+        return {"stopped": True}
+
 
 def catalog():
     return ModelCatalog({
@@ -118,6 +123,42 @@ def test_failed_readiness_restores_previous_engine_before_reporting_error():
     assert manager.model == "low.gguf"
 
 
+def test_ttl_evicts_only_after_final_lease_and_uses_profile_timeout():
+    class Timer:
+        def __init__(self, delay, callback):
+            self.delay = delay
+            self.callback = callback
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+    manager = Manager()
+    catalog_doc = ModelCatalog({
+        "low": ModelProfile("low", "low.gguf", (), ttl_s=12, unload_timeout_s=7),
+    })
+    timers = []
+    router = RoutingCoordinator(
+        manager, catalog_doc, object(), ready_fn=ready,
+        timer_factory=lambda delay, callback: timers.append(Timer(delay, callback)) or timers[-1],
+    )
+    first = router.acquire("low")
+    second = router.acquire("low")
+    first.release()
+    assert timers == []
+    second.release()
+    assert len(timers) == 1
+    assert timers[0].delay == 12
+    assert timers[0].started is True
+    assert router.evict_idle("low") is True
+    assert manager.calls == [("start", "low.gguf"), ("stop", 7)]
+    assert router.status()["evictions"] == 1
+
+
 def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({
@@ -146,6 +187,9 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
             assert response.status_code == 200
             assert response.content == b"data: first\\n\\ndata: [DONE]\\n\\n"
             assert response.headers["x-upstream"] == "yes"
+        status = client.get("/router/status")
+        assert status.status_code == 200
+        assert status.json()["activeRequests"] == 0
     assert manager.calls == [("start", "low.gguf")]
     assert [item["path_and_query"] for item in calls] == ["/v1/chat/completions", "/v1/messages"]
     assert router.status()["activeRequests"] == 0

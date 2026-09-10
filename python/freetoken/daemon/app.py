@@ -49,6 +49,10 @@ class ProfileBody(BaseModel):
     force: bool = False
 
 
+class RouterUnloadBody(BaseModel):
+    name: str | None = None
+
+
 class AccountingAckBody(BaseModel):
     receiptId: str
 
@@ -270,6 +274,18 @@ def build_app(
     @app.post("/v1/messages/count_tokens", dependencies=[Depends(require_router_key)])
     async def inference_proxy(request: Request):
         return await route_inference(request)
+
+    @app.get("/router/status", dependencies=auth)
+    async def router_status():
+        return router.status()
+
+    @app.post("/router/unload", dependencies=auth)
+    async def router_unload(body: RouterUnloadBody | None = None):
+        try:
+            unloaded = await run(lifecycle_pool, router.evict_idle, body.name if body else None)
+        except (AccountingPrepareError, AccountingOutboxError) as exc:
+            return accounting_error(exc)
+        return {"unloaded": unloaded, "router": router.status()}
 
     # ---- engine lifecycle ----
 
