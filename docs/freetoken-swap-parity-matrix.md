@@ -32,7 +32,7 @@ Status labels:
 | Profiles | Native named catalog profiles, different API | Native profile listing/activation compatibility policy and tests |
 | API keys | Native daemon token, different header and scope | Router inference and management key policy with authorization tests |
 | Logs and bounded streaming logs | Native engine log snapshot only | Bounded router/proxy/upstream log buffers and SSE log streams |
-| Prometheus and activity/performance metrics | Partial engine metrics | Router lifecycle, queue, TTFT, cancellation, eviction, process, memory, and Prometheus metrics |
+| Prometheus and activity/performance metrics | Native `/metrics` exposes bounded router admission, queue, activation, failure, and eviction counters; engine metrics remain separately available | Add TTFT, throughput, cancellation, process, and memory measurements with direct/cold/warm/alternating benchmark evidence. |
 | Inflight cancellation API | Native backend cancellation on client disconnect | Router inflight identifiers and explicit cancel API, with same-instance terminal-abort proof |
 | Parameter filters and configuration hooks | Missing | Safe allowlisted parameter transformation and lifecycle hooks, or explicit supported subset policy |
 | Configuration watch/reload | Missing | Atomic validated reload without disrupting active routing |

@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
@@ -278,6 +278,10 @@ def build_app(
     @app.get("/router/status", dependencies=auth)
     async def router_status():
         return router.status()
+
+    @app.get("/metrics", dependencies=auth)
+    async def router_metrics():
+        return PlainTextResponse(router.prometheus(), media_type="text/plain; version=0.0.4")
 
     @app.post("/router/unload", dependencies=auth)
     async def router_unload(body: RouterUnloadBody | None = None):

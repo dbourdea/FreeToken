@@ -73,6 +73,9 @@ class RoutingCoordinator:
         self._switching = False
         self._idle_timer: object | None = None
         self._evictions = 0
+        self._admissions = 0
+        self._activations = 0
+        self._activation_failures = 0
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
@@ -97,6 +100,7 @@ class RoutingCoordinator:
                     self._cancel_idle_timer()
                     self._pending.remove(ticket)
                     self._leases += 1
+                    self._admissions += 1
                     state = self._manager.status()
                     self._cond.notify_all()
                     return RouteLease(self, profile, port, state.get("pid"))
@@ -112,6 +116,7 @@ class RoutingCoordinator:
         except Exception as exc:
             with self._cond:
                 self._switching = False
+                self._activation_failures += 1
                 self._cond.notify_all()
             if isinstance(exc, RoutingError):
                 raise
@@ -125,6 +130,7 @@ class RoutingCoordinator:
             self._switching = False
             self._cancel_idle_timer()
             self._leases += 1
+            self._admissions += 1
             self._cond.notify_all()
         return RouteLease(self, profile, port, pid)
 
@@ -148,8 +154,29 @@ class RoutingCoordinator:
                 "queuedRequests": len(self._pending),
                 "idleEvictionScheduled": self._idle_timer is not None,
                 "evictions": self._evictions,
+                "admissions": self._admissions,
+                "activations": self._activations,
+                "activationFailures": self._activation_failures,
                 "scheduler": self._catalog.settings.scheduler,
             }
+
+    def prometheus(self) -> str:
+        """Render bounded router counters without importing a metrics package."""
+        status = self.status()
+        values = {
+            "active_requests": status["activeRequests"],
+            "queued_requests": status["queuedRequests"],
+            "admissions_total": status["admissions"],
+            "activations_total": status["activations"],
+            "activation_failures_total": status["activationFailures"],
+            "evictions_total": status["evictions"],
+        }
+        lines = []
+        for name, value in values.items():
+            metric = f"freetoken_swap_{name}"
+            metric_type = "counter" if name.endswith("_total") else "gauge"
+            lines.extend((f"# TYPE {metric} {metric_type}", f"{metric} {value}"))
+        return "\n".join(lines) + "\n"
 
     def evict_idle(self, name: str | None = None) -> bool:
         """Unload a truly idle matching engine, preserving lifecycle accounting.
@@ -233,10 +260,14 @@ class RoutingCoordinator:
         if exact:
             result = {"pid": state.get("pid"), "idempotent": True}
         elif state.get("running"):
+            with self._cond:
+                self._activations += 1
             result, ticket = self._manager.switch_for_readiness(
                 profile.model, port, list(profile.args)
             )
         else:
+            with self._cond:
+                self._activations += 1
             result = self._manager.start(profile.model, port, list(profile.args))
         readiness = self._ready_fn(
             self._manager,

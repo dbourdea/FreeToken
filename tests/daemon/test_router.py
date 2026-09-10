@@ -190,6 +190,9 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
         status = client.get("/router/status")
         assert status.status_code == 200
         assert status.json()["activeRequests"] == 0
+        metrics = client.get("/metrics")
+        assert metrics.status_code == 200
+        assert "freetoken_swap_admissions_total 2" in metrics.text
     assert manager.calls == [("start", "low.gguf")]
     assert [item["path_and_query"] for item in calls] == ["/v1/chat/completions", "/v1/messages"]
     assert router.status()["activeRequests"] == 0
