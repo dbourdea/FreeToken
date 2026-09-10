@@ -371,6 +371,10 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         assert response.content == b"data: {\"ok\":true}\n\ndata: [DONE]\n\n"
         assert seen == {"path": "/v1/chat/completions", "body": payload}
         assert router.status()["activeRequests"] == 0
+        assert router.status()["terminalStreams"] == 1
+        assert router.status()["lastTtftMs"] is not None
+        assert router.status()["lastDurationMs"] is not None
+        assert "freetoken_swap_last_ttft_ms" in router.prometheus()
     finally:
         server.shutdown()
         server.server_close()

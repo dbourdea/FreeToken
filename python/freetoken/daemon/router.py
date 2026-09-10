@@ -77,6 +77,9 @@ class RoutingCoordinator:
         self._activations = 0
         self._activation_failures = 0
         self._cancellations = 0
+        self._terminal_streams = 0
+        self._last_ttft_ms: float | None = None
+        self._last_duration_ms: float | None = None
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
@@ -169,6 +172,9 @@ class RoutingCoordinator:
                 "activations": self._activations,
                 "activationFailures": self._activation_failures,
                 "cancellations": self._cancellations,
+                "terminalStreams": self._terminal_streams,
+                "lastTtftMs": self._last_ttft_ms,
+                "lastDurationMs": self._last_duration_ms,
                 "scheduler": self._catalog.settings.scheduler,
             }
 
@@ -216,6 +222,7 @@ class RoutingCoordinator:
             "activations_total": status["activations"],
             "activation_failures_total": status["activationFailures"],
             "cancellations_total": status["cancellations"],
+            "terminal_streams_total": status["terminalStreams"],
             "evictions_total": status["evictions"],
         }
         lines = []
@@ -223,11 +230,22 @@ class RoutingCoordinator:
             metric = f"freetoken_swap_{name}"
             metric_type = "counter" if name.endswith("_total") else "gauge"
             lines.extend((f"# TYPE {metric} {metric_type}", f"{metric} {value}"))
+        for name, value in (("last_ttft_ms", status["lastTtftMs"]),
+                            ("last_duration_ms", status["lastDurationMs"])):
+            if value is not None:
+                metric = f"freetoken_swap_{name}"
+                lines.extend((f"# TYPE {metric} gauge", f"{metric} {value}"))
         return "\n".join(lines) + "\n"
 
     def record_cancellation(self) -> None:
         with self._cond:
             self._cancellations += 1
+
+    def record_stream(self, *, ttft_s: float | None, duration_s: float) -> None:
+        with self._cond:
+            self._terminal_streams += 1
+            self._last_ttft_ms = round(ttft_s * 1000, 3) if ttft_s is not None else None
+            self._last_duration_ms = round(duration_s * 1000, 3)
 
     def evict_idle(self, name: str | None = None) -> bool:
         """Unload a truly idle matching engine, preserving lifecycle accounting.

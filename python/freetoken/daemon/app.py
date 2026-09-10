@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
@@ -227,6 +228,7 @@ def build_app(
         Starlette closes that iterator, which closes the upstream socket and
         releases admission for the next model swap.
         """
+        started = time.monotonic()
         try:
             lease = await run(lifecycle_pool, router.acquire, model)
         except RoutingError as exc:
@@ -261,9 +263,18 @@ def build_app(
             inflight[request_id] = {"profile": lease.profile.name, "upstream": upstream}
 
         def stream_response():
+            first_byte_at = None
             try:
-                yield from upstream.chunks()
+                for chunk in upstream.chunks():
+                    if first_byte_at is None:
+                        first_byte_at = time.monotonic()
+                    yield chunk
             finally:
+                ended = time.monotonic()
+                router.record_stream(
+                    ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
+                    duration_s=ended - started,
+                )
                 lease.release()
                 with inflight_lock:
                     if inflight.get(request_id, {}).get("upstream") is upstream:
