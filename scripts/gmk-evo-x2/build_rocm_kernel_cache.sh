@@ -18,7 +18,7 @@ set -euo pipefail
 # Keep the host-specific locations explicit so cache provenance is easy to
 # inspect after an upgrade. Callers may override ROOT_DIR for an isolated test
 # checkout but must not point it at an unrelated installation.
-readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-/home/david/freetoken-amd}"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${FREETOKEN_SOURCE_DIR:-${ROOT_DIR}/source-qwen-harness-d6ee8ce}"
 readonly VENV_PYTHON="${FREETOKEN_VENV_PYTHON:-${ROOT_DIR}/.venv/bin/python}"
 readonly ROCM_ROOT="${ROCM_PATH:-/opt/rocm-10.0}"

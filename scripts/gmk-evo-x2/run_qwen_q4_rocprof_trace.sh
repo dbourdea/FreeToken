@@ -15,9 +15,9 @@ set -euo pipefail
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_q4_rocprof_trace.sh ARTIFACT_DIR [SOURCE_DIR]}"
 # Permit an explicit reviewed Qwen checkout while keeping the qualified source
 # as the default for ordinary diagnostic traces.
-readonly SOURCE_DIR="${2:-/home/david/freetoken-amd/source-qwen-bench-metrics-f1baf13}"
+readonly SOURCE_DIR="${2:-${HOME}/freetoken-amd/source-qwen-bench-metrics-f1baf13}"
 # Keep all fixed host paths together so they are easy to audit before use.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly NORMAL_SOURCE_DIR="${ROOT_DIR}/source-qwen-c06-fc3346f"
 readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"

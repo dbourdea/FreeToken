@@ -19,13 +19,13 @@ readonly TEMPORARY_POLICY="${1:?usage: run_qwen_dpm_policy_benchmark.sh POLICY [
 
 # Store preflight and restoration telemetry in a unique parent directory.  The
 # second argument permits a caller to choose an immutable evidence location.
-readonly ARTIFACT_ROOT="${2:-/home/david/freetoken-amd/artifacts/qwen-dpm-${TEMPORARY_POLICY}-$(date -u +%Y%m%dT%H%M%SZ)}"
+readonly ARTIFACT_ROOT="${2:-${HOME}/freetoken-amd/artifacts/qwen-dpm-${TEMPORARY_POLICY}-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 # Keep the benchmark child absent.  run_qwen_scheduler_baseline.sh delegates to
 # a Python harness that creates this directory atomically to prevent artifact
 # collisions and preserve evidence integrity.
 readonly BENCHMARK_DIR="${ARTIFACT_ROOT}/benchmark"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly HARNESS="${ROOT_DIR}/source-qwen-harness-d6ee8ce/scripts/gmk-evo-x2/run_qwen_scheduler_baseline.sh"
 readonly POLICY_LOG="${ARTIFACT_ROOT}/dpm-policy.txt"
 

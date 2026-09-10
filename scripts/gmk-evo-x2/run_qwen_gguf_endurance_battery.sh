@@ -20,7 +20,7 @@ readonly SESSION_COUNT="${2:-60}"
 readonly INTERVAL_SECONDS="${3:-60}"
 
 # Keep all fixed GMKtec EVO-X2 paths explicit for reproducibility and host isolation.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 # Allow an isolated candidate worktree to reuse the exact endurance contract.
 # The caller must choose a path under the dedicated Qwen source root, so this
 # override cannot accidentally execute arbitrary code or touch port 1919.

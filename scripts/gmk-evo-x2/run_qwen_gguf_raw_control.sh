@@ -17,7 +17,7 @@ readonly CHECKOUT="${1:?usage: run_qwen_gguf_raw_control.sh ISOLATED_CHECKOUT [D
 readonly DECODE_TOKENS="${2:-512}"
 # GMKtec EVO-X2's persistent project root keeps models, artifacts, and production
 # recovery tooling outside the disposable candidate checkout.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly PRODUCTION_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly MODEL_PATH="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
 readonly TOKENIZER_PATH="${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4"

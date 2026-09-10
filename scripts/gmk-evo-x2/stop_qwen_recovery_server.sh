@@ -12,7 +12,7 @@ set -euo pipefail
 # Keep the protected service identity explicit rather than inferring it from a
 # PID file that might be stale after a reboot or failed experimental run.
 readonly PORT="1919"
-readonly MODEL_PATH="/home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4"
+readonly MODEL_PATH="${HOME}/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4"
 
 # Resolve the actual TCP listener because it is the authoritative owner of the
 # endpoint that this helper is permitted to stop.

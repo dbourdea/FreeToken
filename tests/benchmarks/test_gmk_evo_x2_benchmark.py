@@ -181,7 +181,7 @@ class QwenRecoveryContextTests(unittest.TestCase):
         self.assertIn('setsid nohup "${VENV_PYTHON}" -m freetoken.cli serve', recovery.read_text(encoding="utf-8"))
         contents = stopper.read_text(encoding="utf-8")
         self.assertIn('readonly PORT="1919"', contents)
-        self.assertIn('readonly MODEL_PATH="/home/david/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4"', contents)
+        self.assertIn('readonly MODEL_PATH="${HOME}/freetoken-amd/models/Qwen3.6-35B-A3B-NVFP4"', contents)
         self.assertIn('[[ "${pgid}" == "${pid}" ]]', contents)
         self.assertIn('kill -TERM -- "-${pgid}"', contents)
 

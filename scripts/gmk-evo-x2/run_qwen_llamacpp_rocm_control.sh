@@ -11,7 +11,7 @@ set -euo pipefail
 # Keep the precise source revision, model revision, local model path, and API
 # identity visible in the command itself so the comparison can be reproduced
 # without guessing which llama.cpp build or Qwen quantization was selected.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly LLAMA_SERVER="${ROOT_DIR}/llama.cpp-rocm10-b10141/build-rocm10-clang/bin/llama-server"
 readonly MODEL_DIR="${ROOT_DIR}/models/controls/qwen36-35b-a3b-unsloth-a483e9e6"

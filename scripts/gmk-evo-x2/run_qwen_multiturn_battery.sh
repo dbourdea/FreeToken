@@ -13,7 +13,7 @@ readonly SESSION_COUNT="${2:-30}"
 # Default to the strict clean-memory gate. A caller may pass a higher,
 # explicitly recorded ceiling for a diagnostic characterization run.
 readonly MAX_SWAP_KIB="${GMK_EVO_X2_BATTERY_MAX_SWAP_KIB:-64}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly RUNNER="${SOURCE_DIR}/benchmarks/gmk_evo_x2/run_multiturn_state_suite.py"

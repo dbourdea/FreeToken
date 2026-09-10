@@ -9,7 +9,7 @@
 set -euo pipefail
 
 readonly CHECKOUT="${1:?usage: run_gemma4_llamacpp_vision_control.sh ISOLATED_CHECKOUT}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 # Use the maintained recovery checkout so a matched llama.cpp control cannot
 # finish with the protected Qwen API unavailable because of a retired path.
 readonly PRODUCTION_DIR="${ROOT_DIR}/source-qwen-recovery-d6ee8cef479c"

@@ -11,7 +11,7 @@ set -euo pipefail
 
 # Keep the fixed GMKtec EVO-X2 paths explicit to prevent comparison with another
 # llama.cpp build or benchmark harness revision.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly FREETOKEN_HEALTH_URL="http://127.0.0.1:1919/health"
 readonly CONTROL_SCRIPT="${SOURCE_DIR}/scripts/gmk-evo-x2/run_qwen_llamacpp_rocm_control.sh"

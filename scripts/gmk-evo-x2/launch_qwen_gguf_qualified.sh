@@ -29,7 +29,7 @@ readonly CUDA_GRAPH_MAX_BS="${4:-0}"
 
 # Keep durable models, kernel caches, and artifacts separate from the checked
 # out source so source switching cannot delete benchmark evidence or weights.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 # This is the isolated Q4-capable checkout used for the native GGUF controls.
 # A caller may select a separately created candidate worktree for a recorded
 # experiment, but the validation below limits that override to this host's

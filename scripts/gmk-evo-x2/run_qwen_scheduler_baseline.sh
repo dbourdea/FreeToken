@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Accept a caller-supplied artifact root so each run has immutable evidence.
 readonly ARTIFACT_DIR="${1:?usage: run_qwen_scheduler_baseline.sh ARTIFACT_DIR}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 # Keep benchmark code independent from the source checkout serving the normal
 # API. A deployed server checkout can intentionally stay frozen while a newer

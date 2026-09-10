@@ -11,7 +11,7 @@ set -euo pipefail
 # never silently replaced by a later run.
 readonly ARTIFACT_DIR="${1:?usage: capture_validation_manifest.sh ARTIFACT_DIR [EXPECTED_HOST]}"
 readonly EXPECTED_HOST="${2:-david-Gmktec-x2-2}"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 
 # The program runs only where this validation program is authorized.  A caller

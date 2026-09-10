@@ -17,7 +17,7 @@ readonly INTERVAL_SECONDS="${3:-60}"
 
 # Keep every host-specific path explicit so an invocation cannot silently
 # operate on another machine's service or an arbitrary source checkout.
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly Q4_SOURCE_DIR="${FREETOKEN_Q4_SOURCE_DIR:?set FREETOKEN_Q4_SOURCE_DIR to an isolated Q4 worktree}"
 readonly RECOVERY_SOURCE_DIR="${FREETOKEN_RECOVERY_SOURCE_DIR:?set FREETOKEN_RECOVERY_SOURCE_DIR to the recovery-launcher worktree}"
 readonly Q4_LAUNCHER="${Q4_SOURCE_DIR}/scripts/gmk-evo-x2/launch_qwen_gguf_qualified.sh"

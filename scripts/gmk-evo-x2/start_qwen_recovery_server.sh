@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Keep every recovery run separate from previous logs and benchmark artifacts.
 readonly RUN_ID="qwen-reboot-recovery-$(date -u +%Y%m%dT%H%M%SZ)"
-readonly ROOT_DIR="/home/david/freetoken-amd"
+readonly ROOT_DIR="${FREETOKEN_ROOT_DIR:-${HOME}/freetoken-amd}"
 readonly SOURCE_DIR="${ROOT_DIR}/source-qwen-harness-d6ee8ce"
 readonly VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
 readonly MODEL_DIR="${ROOT_DIR}/models/Qwen3.6-35B-A3B-NVFP4"
