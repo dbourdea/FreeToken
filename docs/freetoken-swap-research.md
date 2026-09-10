@@ -84,6 +84,8 @@ Remaining limits are explicit: no claim of long-context qualification, comprehen
 
 ### Native recovery regression suite
 
+The additional Linux real-process suite passes both normal SIGTERM and SIGTERM-resistant child cases on GMKtek EVO-X2, without loading models or interrupting the protected workload. It uses isolated loopback HTTP test children and verifies previous-engine readiness recovery, restored arguments and pidfile, two durable replacement receipts, process-group worker cleanup, and a closed listening port. This strengthens OS lifecycle evidence but is not GPU model-failure qualification.
+
 The daemon suite passes 69 tests with 2 platform skips. Added coverage exercises replacement launch failure, recovery launch failure, readiness error and timeout, recovery readiness failure, accounting failure preservation, replacement exit and persisted-state cleanup, one-use recovery tickets, and invalidation by newer lifecycle operations. An HTTP integration test blocks the only proxy worker during readiness and confirms that an operator stop completes through the separate lifecycle worker without triggering stale recovery. These are controlled CPU tests with fake child processes, not new real-model measurements.
 
 ## Privacy and publication

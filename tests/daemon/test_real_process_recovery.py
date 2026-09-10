@@ -103,6 +103,7 @@ def test_real_readiness_rollback_and_process_group_cleanup(tmp_path, resistant):
         manager.stop()
         assert store.load() is None
         assert all(child.reaped.is_set() and child.proc.poll() is not None for child in children)
+        assert all(child.proc.returncode == (-9 if resistant else -15) for child in children)
         deadline = time.monotonic() + 3
         while any(running(pid) for pid in workers) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -112,6 +113,9 @@ def test_real_readiness_rollback_and_process_group_cleanup(tmp_path, resistant):
     finally:
         # Test-owned sessions only. Always clean up even if an assertion fails.
         for child in children:
-            if child.proc.poll() is None:
+            try:
                 os.killpg(child.pid, 9)
+            except ProcessLookupError:
+                pass
+            if child.proc.poll() is None:
                 child.proc.wait(timeout=3)
