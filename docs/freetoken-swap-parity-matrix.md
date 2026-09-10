@@ -24,9 +24,9 @@ Status labels:
 | OpenAI Responses endpoint | Native route uses the same admission and proxy contract | Add explicit cancellation and response-object lifecycle proof. |
 | Anthropic Messages and token-count routing | Native routes use the same admission and proxy contract | Deterministic HTTP Messages test exists; add token-count and live failure proof. |
 | Unknown-model status and direct upstream access | Native stable unknown-model error and `/upstream/{profile}/...` passthrough through the same lease | Deterministic tests cover GET passthrough, query forwarding, and rejection of unsafe direct `prepare-stop`; add real-engine coverage. |
-| FIFO, priority, exclusive group routing | Integrated only | Native queue and group admission with deterministic tests |
-| Matrix capacity policy and eviction costs | Integrated only | Native validated capacity policy, observable selection, memory-qualified live tests |
-| Persistent resident models | Integrated only | Native capacity admission and protected persistent lifecycle tests |
+| FIFO, priority, exclusive group routing | Native priority-aware FIFO queue and one-engine exclusive admission | Add concurrent priority ordering and group transition tests against a real engine. |
+| Matrix capacity policy and eviction costs | Native explicit one-resident-model policy exposes active group, resident model, available slots, and eviction counters | Multi-resident matrix solving and memory-qualified eviction cost selection are missing. |
+| Persistent resident models | Native persistent group protects the sole resident slot until explicit unload | Deterministic capacity-protection test exists. Multi-resident preload is unavailable with the current one-engine supervisor. |
 | TTL and unload timeout | Integrated only | Native timer, explicit unload, process cleanup and accounting tests |
 | Load/unload management API and running-model list | Partial native status/start/stop routes | Compatible configured/running, unload one/all endpoints and behavior tests |
 | Profiles | Native named catalog profiles, different API | Native profile listing/activation compatibility policy and tests |

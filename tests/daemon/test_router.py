@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 
-from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings
+from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
 from freetoken.daemon.app import build_app
 from freetoken.daemon.inference_proxy import UpstreamResponse
 from freetoken.daemon.logring import LogRing
@@ -255,3 +255,27 @@ def test_router_reload_rejects_redefining_active_profile():
         router.replace_catalog(replacement)
     assert exc.value.status_code == 409
     lease.release()
+
+
+def test_persistent_group_protects_the_single_resident_slot_until_unloaded():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "keep": ModelProfile("keep", "keep.gguf", (), group="resident"),
+            "other": ModelProfile("other", "other.gguf", ()),
+        },
+        settings=RouterSettings(groups=(
+            RoutingGroup("resident", ("keep",), swap=False, persistent=True),
+        )),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router.acquire("keep").release()
+    with pytest.raises(RoutingError, match="single resident-model slot") as exc:
+        router.acquire("other")
+    assert exc.value.code == "capacity_unavailable"
+    assert router.status()["residentProfiles"] == ["keep"]
+    assert router.evict_idle("keep") is True
+    router.acquire("other").release()
+    assert manager.calls == [
+        ("start", "keep.gguf"), ("stop", 30.0), ("start", "other.gguf"),
+    ]

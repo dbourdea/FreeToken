@@ -118,6 +118,12 @@ class ModelCatalog:
     def public(self) -> list[dict[str, Any]]:
         return [self._profiles[name].public() for name in sorted(self._profiles)]
 
+    def group_for(self, name: str) -> RoutingGroup | None:
+        for group in self.settings.groups:
+            if name in group.members:
+                return group
+        return None
+
 
 def _finite_seconds(value: object, field: str, *, minimum: float, maximum: float) -> float:
     if (not isinstance(value, (int, float)) or isinstance(value, bool)

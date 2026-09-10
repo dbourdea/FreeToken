@@ -107,6 +107,11 @@ class RoutingCoordinator:
                 if self._leases:
                     self._cond.wait()
                     continue
+                block = self._capacity_block(profile)
+                if block is not None:
+                    self._pending.remove(ticket)
+                    self._cond.notify_all()
+                    raise RoutingError("capacity_unavailable", block, status_code=409)
                 self._switching = True
                 self._pending.remove(ticket)
                 break
@@ -147,8 +152,13 @@ class RoutingCoordinator:
 
     def status(self) -> dict:
         with self._cond:
+            group = self._catalog.group_for(self._active_name) if self._active_name else None
             return {
                 "activeProfile": self._active_name,
+                "activeGroup": group.name if group else None,
+                "residentProfiles": [self._active_name] if self._active_name else [],
+                "persistent": bool(group and group.persistent),
+                "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
                 "activeRequests": self._leases,
                 "switching": self._switching,
                 "queuedRequests": len(self._pending),
@@ -271,6 +281,24 @@ class RoutingCoordinator:
         timer = self._timer_factory(ttl, lambda: self.evict_idle(profile.name))
         self._idle_timer = timer
         timer.start()
+
+    def _capacity_block(self, target: ModelProfile) -> str | None:
+        """Return a capacity-policy explanation, if a swap cannot be admitted."""
+        if self._active_name is None or self._active_name == target.name:
+            return None
+        active_group = self._catalog.group_for(self._active_name)
+        target_group = self._catalog.group_for(target.name)
+        if active_group is not None and active_group.persistent:
+            return (
+                f"active profile {self._active_name!r} is persistent and consumes the "
+                "single resident-model slot; unload it before selecting another profile"
+            )
+        if target_group is not None and target_group.persistent:
+            return (
+                f"profile {target.name!r} requires a persistent resident slot; unload the "
+                "current profile before selecting it"
+            )
+        return None
 
     def _matches_active(self, profile: ModelProfile, port: int) -> bool:
         state = self._manager.status()
