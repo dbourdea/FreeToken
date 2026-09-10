@@ -72,3 +72,6 @@ comparison reference until native request routing reaches the acceptance gates.
 
 Every row moves to Native only after deterministic tests and relevant live
 evidence are linked here. No endpoint name alone establishes parity.
+
+The privacy-safe native live acceptance matrix is maintained in
+[native qualification runbook](freetoken-swap-native-qualification.md).
