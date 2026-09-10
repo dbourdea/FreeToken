@@ -322,6 +322,25 @@ def build_app(
     async def router_status():
         return router.status()
 
+    @app.get("/router/models", dependencies=auth)
+    async def router_models():
+        """Configured profiles annotated with the sole engine's live residency."""
+        route_state = router.status()
+        engine = manager.status()
+        active = route_state["activeProfile"]
+        data = []
+        for profile in router.catalog.public():
+            profile = dict(profile)
+            profile["configured"] = True
+            profile["resident"] = profile["name"] == active and bool(engine.get("running"))
+            profile["activeRequests"] = route_state["activeRequests"] if profile["resident"] else 0
+            data.append(profile)
+        return {"data": data, "capacity": route_state["capacity"]}
+
+    @app.get("/router/profiles", dependencies=auth)
+    async def router_profiles():
+        return {"data": router.catalog.public(), "activeProfile": router.status()["activeProfile"]}
+
     @app.get("/router/requests", dependencies=auth)
     async def router_requests():
         with inflight_lock:
@@ -494,7 +513,7 @@ def build_app(
             content = json.loads(response.body)
             rollback = await run(lifecycle_pool, manager.recover_switch, ticket, body.force)
             if rollback.get("launched"):
-                profile = catalog.get(body.name)
+                profile = router.catalog.get(body.name)
                 rollback["readiness"] = await run(proxy_pool, functools.partial(
                     wait_for_ready, manager, probe, pid=rollback["pid"],
                     port=rollback["port"], timeout_s=profile.ready_timeout_s,

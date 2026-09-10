@@ -28,8 +28,8 @@ Status labels:
 | Matrix capacity policy and eviction costs | Native explicit one-resident-model policy exposes active group, resident model, available slots, and eviction counters | Multi-resident matrix solving and memory-qualified eviction cost selection are missing. |
 | Persistent resident models | Native persistent group protects the sole resident slot until explicit unload | Deterministic capacity-protection test exists. Multi-resident preload is unavailable with the current one-engine supervisor. |
 | TTL and unload timeout | Integrated only | Native timer, explicit unload, process cleanup and accounting tests |
-| Load/unload management API and running-model list | Partial native status/start/stop routes | Compatible configured/running, unload one/all endpoints and behavior tests |
-| Profiles | Native named catalog profiles, different API | Native profile listing/activation compatibility policy and tests |
+| Load/unload management API and running-model list | Native router status, configured plus resident `/router/models`, explicit unload, engine lifecycle controls | Add load-all or multi-resident management only when the supervisor supports more than one engine. |
+| Profiles | Native `/router/profiles`, configured model catalog, and profile activation through routed request or existing explicit engine controls | Add a documented profile-transform policy beyond alias selection if FreeToken needs it. |
 | API keys | Native daemon token, different header and scope | Router inference and management key policy with authorization tests |
 | Logs and bounded streaming logs | Native engine log snapshot only | Bounded router/proxy/upstream log buffers and SSE log streams |
 | Prometheus and activity/performance metrics | Native `/metrics` exposes bounded router admission, queue, activation, failure, and eviction counters; engine metrics remain separately available | Add TTFT, throughput, cancellation, process, and memory measurements with direct/cold/warm/alternating benchmark evidence. |
