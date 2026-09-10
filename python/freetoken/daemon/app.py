@@ -23,7 +23,9 @@ from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
 from .catalog import CatalogError, ModelCatalog
+from .inference_proxy import RequestModelError, open_upstream, request_model
 from .readiness import wait_for_ready
+from .router import RoutingCoordinator, RoutingError
 from .serve_manager import Conflict, SwitchLaunchError
 from .version import DAEMON_VERSION
 
@@ -135,12 +137,16 @@ def build_app(
     wall_now: Callable[[], float] | None = None,
     shutdown_hook: Callable[[], None] | None = None,
     catalog: ModelCatalog | None = None,
+    router: RoutingCoordinator | None = None,
 ) -> FastAPI:
     import time as _time
 
     wall_now = wall_now or _time.time
     app = FastAPI(title="FreeToken daemon", version=DAEMON_VERSION)
     catalog = catalog or ModelCatalog.empty()
+    router = router or RoutingCoordinator(
+        manager, catalog, probe, default_port=default_serve_port
+    )
 
     if shutdown_hook is not None:
 
@@ -160,9 +166,17 @@ def build_app(
 
     auth = [Depends(require_token)]
 
-    async def run(pool: ThreadPoolExecutor, fn, *args):
+    def require_router_key(authorization: str | None = Header(default=None)) -> None:
+        keys = catalog.settings.api_keys
+        if not keys:
+            return
+        supplied = authorization.removeprefix("Bearer ") if authorization else None
+        if supplied not in keys:
+            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+    async def run(pool: ThreadPoolExecutor, fn, *args, **kwargs):
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(pool, functools.partial(fn, *args))
+        return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
     def resolve_port(explicit: int | None) -> int:
         if explicit is not None:
@@ -196,6 +210,66 @@ def build_app(
             "uptimeS": int(wall_now() - started_wall) if started_wall else 0,
             "engineRunning": bool(st.get("running")),
         }
+
+    async def route_inference(request: Request):
+        """Select a configured model, then stream the engine response unchanged.
+
+        The lease spans the full downstream iterator. If a client disconnects,
+        Starlette closes that iterator, which closes the upstream socket and
+        releases admission for the next model swap.
+        """
+        body = await request.body()
+        try:
+            model = request_model(body)
+        except RequestModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            lease = await run(lifecycle_pool, router.acquire, model)
+        except RoutingError as exc:
+            content = {"error": {"message": str(exc), "type": exc.code}}
+            if exc.recovery is not None:
+                content["recovery"] = exc.recovery
+            return JSONResponse(status_code=exc.status_code, content=content)
+        try:
+            upstream = await run(
+                proxy_pool,
+                open_upstream,
+                port=lease.port,
+                path_and_query=request.url.path + (f"?{request.url.query}" if request.url.query else ""),
+                headers=dict(request.headers),
+                body=body,
+            )
+        except Exception as exc:  # the lease must not strand a pending swap on connect failure
+            lease.release()
+            return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "upstream_unavailable"}})
+
+        def stream_response():
+            try:
+                yield from upstream.chunks()
+            finally:
+                lease.release()
+
+        headers = {
+            key: value for key, value in upstream.headers.items()
+            if key.lower() not in {"content-length", "transfer-encoding"}
+        }
+        return StreamingResponse(
+            stream_response(),
+            status_code=upstream.status,
+            headers=headers,
+            media_type=upstream.headers.get("Content-Type"),
+        )
+
+    # FreeToken's supported inference surface. All routes use the same native
+    # admission and proxy path so an OpenAI or Anthropic client cannot bypass
+    # lifecycle, accounting, readiness, or cancellation ownership.
+    @app.post("/v1/chat/completions", dependencies=[Depends(require_router_key)])
+    @app.post("/v1/completions", dependencies=[Depends(require_router_key)])
+    @app.post("/v1/responses", dependencies=[Depends(require_router_key)])
+    @app.post("/v1/messages", dependencies=[Depends(require_router_key)])
+    @app.post("/v1/messages/count_tokens", dependencies=[Depends(require_router_key)])
+    async def inference_proxy(request: Request):
+        return await route_inference(request)
 
     # ---- engine lifecycle ----
 

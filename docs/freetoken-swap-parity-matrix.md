@@ -19,10 +19,10 @@ Status labels:
 | Model catalog and aliases | Native TOML catalog with validated model, port, args, description, readiness timeout | Add YAML-compatible import or documented translation, atomic reload, tests for invalid and changed configuration |
 | Start, stop, switch, PID identity, re-adoption | Native and tested | Preserve as router substrate; exercise automatic-request ownership |
 | Readiness and diagnostic health | Native `/ready` plus diagnostic `/health` | Preserve exact HTTP behavior through the unified router |
-| Automatic OpenAI model-ID routing | Integrated only through unmodified llama-swap | **Missing native router**, including request queue and model selection |
-| OpenAI completion and chat completion forwarding | Integrated only | Native request-preserving proxy and SSE tests |
-| OpenAI Responses endpoint | FreeToken server route exists; integrated routing only | Native routing and cancellation contract tests |
-| Anthropic Messages and token-count routing | FreeToken server route exists; integrated routing only | Native routing and request-model extraction tests |
+| Automatic OpenAI model-ID routing | Native single-engine coordinator with priority-aware admission and health-gated activation | `tests/daemon/test_router.py` covers cold activation, same-model concurrent leases, safe swap waiting, and unknown-model errors. Linux and GMKtek EVO-X2 evidence remains required. |
+| OpenAI completion and chat completion forwarding | Native request-byte-preserving proxy, including SSE body forwarding | Deterministic HTTP tests cover `/v1/chat/completions`; direct, cold, warm, cancellation, and performance evidence remains required. |
+| OpenAI Responses endpoint | Native route uses the same admission and proxy contract | Add explicit cancellation and response-object lifecycle proof. |
+| Anthropic Messages and token-count routing | Native routes use the same admission and proxy contract | Deterministic HTTP Messages test exists; add token-count and live failure proof. |
 | Unknown-model status and direct upstream access | Integrated only | Native compatible error response and `/upstream/{model}/...` behavior |
 | FIFO, priority, exclusive group routing | Integrated only | Native queue and group admission with deterministic tests |
 | Matrix capacity policy and eviction costs | Integrated only | Native validated capacity policy, observable selection, memory-qualified live tests |
@@ -51,8 +51,10 @@ comparison reference until native request routing reaches the acceptance gates.
 
 1. Define a versioned router configuration and strict parser, including models,
    API keys, TTL, routing groups, priorities, and safe defaults.
-2. Add a request-preserving native proxy with model selection, FIFO admission,
-   SSE forwarding, cancellation, and an observable running-state registry.
+2. Add a request-preserving native proxy with model selection, priority-aware
+   FIFO admission, SSE forwarding, cancellation, and an observable running-state registry.
+   The first implementation is present in `daemon/router.py` and
+   `daemon/inference_proxy.py`; it is not yet live-qualified.
 3. Connect proxy decisions to the existing `ServeManager` accounting, recovery,
    re-adoption, readiness, and process identity safeguards.
 4. Add unload, profile, log, metrics, and configuration-reload management APIs.
