@@ -34,11 +34,11 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | --- | --- | --- |
 | Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented |
 | Model catalog and lifecycle controls | Validated TOML catalog, authenticated profile endpoints, native process manager | Implemented and CPU-tested |
-| Automatic model routing | Unmodified llama-swap directly supervising FreeToken; prior real Qwen A-to-B-to-A runs | Bounded live verification passed |
+| Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; native real-engine qualification remains required |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU and bounded live evidence |
 | Concurrency and unloading | Prior same-model and conflicting-model concurrent requests plus idle eviction | Bounded live verification passed |
 | Rollback protections | Launch/readiness recovery, newer lifecycle intent wins, accounting preservation, actual Linux process-group tests; real invalid-GGUF failure followed by Qwen3.6 readiness and generation recovery | Implemented and bounded live verification passed |
-| Client cancellation | Same-instance active-to-idle transition without normal-completion increment, followed by A-to-B-to-A streaming recovery | Bounded FreeToken GPU verification passed |
+| Client cancellation | Native opaque router request IDs, active-request list, explicit cancel endpoint, upstream socket close, lease release, and cancellation metrics; prior direct-mode same-instance test | Implemented and deterministic HTTP tested; native same-instance GPU verification remains required |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, prior restore and completion checks, no interruption during combined-tree checks | Maintained |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
