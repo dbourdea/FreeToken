@@ -346,6 +346,63 @@ def test_native_router_concurrent_canaries_require_same_residency(native_router_
     }
 
 
+def test_native_router_conflicting_request_canary_queues_then_switches(
+    native_router_qualifier, monkeypatch
+):
+    cancelled = threading.Event()
+    statuses = iter((
+        {"activeProfile": "model-a", "activations": 10},
+        {
+            "activeProfile": "model-a", "activations": 10,
+            "queuedRequests": 1, "activeRequests": 1,
+            "activeIdentityMatchesEngine": True,
+        },
+        {"activeProfile": "model-b", "activations": 11, "activeRequests": 0},
+        {"activeProfile": "model-a", "activations": 12, "activeRequests": 0},
+    ))
+
+    class ActiveResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"1"}}]}\n\n'
+            cancelled.wait(2)
+
+    def request_json(url, body=None, **kwargs):
+        if url.endswith("/router/status"):
+            return b"{}", next(statuses)
+        assert url.endswith("/router/requests/native-qualification-conflict/cancel")
+        cancelled.set()
+        return b"{}", {"cancelled": True, "id": "native-qualification-conflict"}
+
+    canary_calls = []
+
+    def fake_canary(base, model, *, direct):
+        canary_calls.append(model)
+        if model == "model-b":
+            cancelled.wait(2)
+        return f"data: {model}\n\ndata: [DONE]\n\n".encode(), {"passed": True}
+
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: ActiveResponse())
+    monkeypatch.setattr(native_router_qualifier, "canary", fake_canary)
+
+    active, waiting, restored, observation = native_router_qualifier.conflicting_request_canary(
+        "http://test", "model-a", "model-b", seconds=2
+    )
+
+    assert b"data: [DONE]" not in active
+    assert b"model-b" in waiting and b"model-a" in restored
+    assert canary_calls == ["model-b", "model-a"]
+    assert observation["queuedBehindActive"] is True
+    assert observation["activationDelta"] == 2
+    assert observation["passed"] is True
+
+
 def test_native_router_cancellation_canary_requires_idle_without_completion_credit(native_router_qualifier):
     state = {"active": 0, "cancellations": 0, "terminal": 0}
     cancelled = threading.Event()

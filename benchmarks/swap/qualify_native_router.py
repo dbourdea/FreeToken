@@ -235,6 +235,99 @@ def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[
     }
 
 
+def conflicting_request_canary(
+    base: str, active_model: str, waiting_model: str, *, seconds: float = 180
+) -> tuple[bytes, bytes, bytes, dict]:
+    """Hold A, prove B queues, cancel A, then complete B and restore A."""
+    request_id = "native-qualification-conflict"
+    _, before = request_json(base + "/router/status")
+    prior_activations = before.get("activations")
+    if before.get("activeProfile") != active_model or not isinstance(prior_activations, int):
+        raise RuntimeError("conflicting-request qualification requires active model A")
+    body = {
+        "model": active_model,
+        "messages": [{"role": "user", "content": "Count upward slowly and do not stop."}],
+        "temperature": 0, "max_tokens": 2048, "stream": True,
+    }
+    request = urllib.request.Request(
+        base + "/v1/chat/completions", data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-FT-Request-ID": request_id},
+    )
+    active_raw = bytearray()
+    first_chunk = threading.Event()
+    active_finished = threading.Event()
+    waiting_result: list[tuple[bytes, dict]] = []
+    active_errors: list[BaseException] = []
+    waiting_errors: list[BaseException] = []
+
+    def consume_active() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=seconds) as response:
+                for chunk in response:
+                    active_raw.extend(chunk)
+                    first_chunk.set()
+        except Exception as exc:
+            active_errors.append(exc)
+        finally:
+            active_finished.set()
+
+    def consume_waiting() -> None:
+        try:
+            waiting_result.append(canary(base, waiting_model, direct=False))
+        except BaseException as exc:
+            waiting_errors.append(exc)
+
+    active_worker = threading.Thread(target=consume_active, daemon=True)
+    active_worker.start()
+    if not first_chunk.wait(seconds):
+        raise TimeoutError("active conflicting stream produced no first chunk")
+    waiting_worker = threading.Thread(target=consume_waiting, daemon=True)
+    waiting_worker.start()
+    deadline = time.monotonic() + seconds
+    queued: dict | None = None
+    while time.monotonic() < deadline:
+        queued = request_json(base + "/router/status", timeout=3)[1]
+        if queued.get("queuedRequests") == 1:
+            break
+        time.sleep(0.1)
+    if (
+        queued is None or queued.get("queuedRequests") != 1
+        or queued.get("activeProfile") != active_model
+        or queued.get("activeRequests") != 1
+        or queued.get("activeIdentityMatchesEngine") is not True
+    ):
+        raise RuntimeError("waiting model did not queue behind the active stream")
+    if request_json(base + f"/router/requests/{request_id}/cancel", {}, timeout=30)[1] != {
+        "cancelled": True, "id": request_id,
+    }:
+        raise RuntimeError("active conflicting stream cancellation was not acknowledged")
+    if not active_finished.wait(seconds):
+        raise TimeoutError("active conflicting stream did not close")
+    waiting_worker.join(seconds)
+    if waiting_worker.is_alive() or waiting_errors or len(waiting_result) != 1:
+        raise RuntimeError("waiting model did not complete after active-stream cancellation")
+    waiting_raw, waiting_row = waiting_result[0]
+    _, after_waiting = request_json(base + "/router/status")
+    if (
+        waiting_row.get("passed") is not True
+        or after_waiting.get("activeProfile") != waiting_model
+        or after_waiting.get("activeRequests") != 0
+        or after_waiting.get("activations") != prior_activations + 1
+    ):
+        raise RuntimeError("waiting model did not receive exactly one post-drain activation")
+    restored_raw, restored_row = canary(base, active_model, direct=False)
+    _, restored = request_json(base + "/router/status")
+    if restored_row.get("passed") is not True or restored.get("activations") != prior_activations + 2:
+        raise RuntimeError("conflicting-request qualification did not restore model A")
+    if b"data: [DONE]" in active_raw:
+        raise RuntimeError("active conflicting stream completed normally instead of being cancelled")
+    return bytes(active_raw), waiting_raw, restored_raw, {
+        "activeProfile": active_model, "waitingProfile": waiting_model,
+        "queuedBehindActive": True, "activeIdentityPreservedWhileQueued": True,
+        "activationDelta": 2, "restoredProfile": active_model, "passed": True,
+    }
+
+
 def stop_process_group(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is not None:
         return
@@ -720,6 +813,13 @@ def main() -> int:
                 "passed": readopted_completion.get("passed") is True,
             }
             detached_engine = None
+            conflict_a_raw, conflict_b_raw, conflict_restored_raw, conflict = conflicting_request_canary(
+                base, "model-a", "model-b"
+            )
+            (artifacts / "conflict-active-a.partial.sse").write_bytes(conflict_a_raw)
+            (artifacts / "conflict-waiting-b.sse").write_bytes(conflict_b_raw)
+            (artifacts / "conflict-restored-a.sse").write_bytes(conflict_restored_raw)
+            result["conflictingRequest"] = conflict
             result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
             persistent_raw, persistent = persistent_capacity_canary(
                 base, catalog_path, args.model_a, args.model_b
@@ -739,6 +839,7 @@ def main() -> int:
                 and result.get("failedSwitch", {}).get("passed") is True
                 and result.get("reAdoption", {}).get("passed") is True
                 and result.get("persistentCapacity", {}).get("passed") is True
+                and result.get("conflictingRequest", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)
