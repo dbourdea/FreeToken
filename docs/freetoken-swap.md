@@ -82,7 +82,9 @@ not substitute for live engine token-throughput qualification.
 than reporting its configured alias as resident.
 `POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
-and an active request. `POST /router/load` activates a named profile through
+and an active request. An unload body containing `name` targets that profile;
+an omitted body unloads all residents, which is exactly the current resident
+under the explicit one-engine capacity policy. `POST /router/load` activates a named profile through
 the same native lifecycle transaction without fabricating an inference request.
 `GET /router/logs?since=` is a bounded SSE event stream;
 it records only event type, alias, registered route template, status,

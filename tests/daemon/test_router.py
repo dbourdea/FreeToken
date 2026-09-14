@@ -823,6 +823,35 @@ def test_router_management_load_preserves_failed_switch_recovery_evidence():
     assert router.status()["activeIdentityMatchesEngine"] is True
 
 
+def test_router_management_unloads_one_or_all_under_single_resident_policy():
+    manager = Manager()
+    catalog_doc = catalog()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        assert client.post("/router/load", json={"name": "low"}).status_code == 200
+        wrong = client.post("/router/unload", json={"name": "high"})
+        assert wrong.json()["unloaded"] is False
+        assert wrong.json()["router"]["activeProfile"] == "low"
+        one = client.post("/router/unload", json={"name": "low"})
+        assert one.json()["unloaded"] is True
+        assert one.json()["router"]["activeProfile"] is None
+
+        assert client.post("/router/load", json={"name": "high"}).status_code == 200
+        all_residents = client.post("/router/unload")
+        assert all_residents.json()["unloaded"] is True
+        assert all_residents.json()["router"]["residentProfiles"] == []
+
+    assert manager.calls == [
+        ("start", "low.gguf"), ("stop", 30.0),
+        ("start", "high.gguf"), ("stop", 30.0),
+    ]
+
+
 def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
     manager = Manager()
     catalog_doc = ModelCatalog(
