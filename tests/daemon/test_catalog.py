@@ -99,7 +99,7 @@ unlisted = true
             "[models.two]\nmodel='two.gguf'\naliases=['shared']\n",
             "assigned to both",
         ),
-        ("[models.one]\nmodel='one.gguf'\naliases=['bad/name']\n", "distinct valid"),
+        ("[models.one]\nmodel='one.gguf'\naliases=['bad//name']\n", "distinct valid"),
     ],
 )
 def test_catalog_rejects_ambiguous_or_invalid_model_aliases(tmp_path, models, message):
@@ -107,6 +107,45 @@ def test_catalog_rejects_ambiguous_or_invalid_model_aliases(tmp_path, models, me
     path.write_text(models, encoding="utf-8")
     with pytest.raises(CatalogError, match=message):
         ModelCatalog.load(str(path))
+
+
+@pytest.mark.parametrize("model_id", ["bad//name", "bad/../name", "/bad"])
+def test_catalog_rejects_unsafe_namespaced_model_ids(tmp_path, model_id):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[models."{model_id}"]\nmodel = "model.gguf"\n', encoding="utf-8"
+    )
+    with pytest.raises(CatalogError, match="slash-separated"):
+        ModelCatalog.load(str(path))
+
+
+def test_catalog_supports_namespaced_model_ids_and_longest_upstream_prefix(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[router]
+include_aliases_in_list = true
+
+[models.author]
+model = "parent.gguf"
+
+[models."author/model"]
+model = "exact.gguf"
+aliases = ["org/compat"]
+""",
+        encoding="utf-8",
+    )
+    catalog = ModelCatalog.load(str(path))
+
+    assert catalog.get("org/compat").name == "author/model"
+    assert catalog.listed_model_ids() == ("author", "author/model", "org/compat")
+    requested, profile, remaining = catalog.resolve_upstream_path("author/model/api/x/y")
+    assert (requested, profile.name, remaining) == (
+        "author/model", "author/model", "/api/x/y",
+    )
+    requested, profile, remaining = catalog.resolve_upstream_path("org/compat")
+    assert (requested, profile.name, remaining) == ("org/compat", "author/model", "/")
+    with pytest.raises(CatalogError, match="does not begin"):
+        catalog.resolve_upstream_path("missing/model/v1/chat")
 
 
 def test_readiness_waits_for_engine_health_not_just_a_listening_process():
@@ -289,6 +328,7 @@ priority = -5
     ("[router]\ninclude_aliases_in_list = 'yes'", "include_aliases_in_list"),
     ("[router]\nglobal_concurrency_limit = -1", "global_concurrency_limit"),
     ("concurrency_limit = true", "concurrency_limit"),
+    ('[router.groups."bad/name"]\nmembers = ["a"]', "router group names"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),
     ("[router.groups.g]\nmembers = ['a']\nexclusive = false", "exclusive"),

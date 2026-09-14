@@ -531,8 +531,11 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                     "data": [
                         {"id": "model-a", "created": 10 if self.path == "/v1/models" else 11},
                         {"id": "model-b", "created": 10 if self.path == "/v1/models" else 11},
+                        {"id": "compat/model-a", "created": 10 if self.path == "/v1/models" else 11},
                     ],
                 }
+            elif self.path == "/upstream/compat/model-a/v1/stats":
+                body = {"running_requests": 0}
             elif self.path == "/router/models":
                 body = {"data": [
                     {"name": "model-a", "resident": True},
@@ -578,10 +581,12 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["unauthenticatedInferenceRejected"] is True
     assert observation["residentProfile"] == "model-a"
     assert observation["modelListAliasVerified"] is True
+    assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
         "/router/status", "/router/status",
-        "/v1/models", "/models", "/router/models", "/router/profiles", "/metrics",
+        "/v1/models", "/models", "/upstream/compat/model-a/v1/stats",
+        "/router/models", "/router/profiles", "/metrics",
         "/router/logs?since=0",
     ]
     assert b"management_loaded" in (tmp_path / "control-router-log.sse").read_bytes()
@@ -677,9 +682,11 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
 
     assert catalog.settings.upstream_timeout_s == 660
     assert catalog.settings.api_keys == ("private-key",)
+    assert catalog.settings.include_aliases_in_list is True
     assert catalog.get("model-a").model == "first.gguf"
     assert catalog.get("model-a").port == 0
     assert catalog.get("model-a").ttl_s == 0
+    assert catalog.get("compat/model-a").name == "model-a"
     assert "model-a" in catalog.get("model-a").args
     assert catalog.get("model-b").model == "second.gguf"
 

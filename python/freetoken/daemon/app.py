@@ -22,6 +22,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
+from urllib.parse import quote_from_bytes
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
@@ -55,6 +56,34 @@ def _cors_request_headers(value: str | None) -> str:
         part for raw in value.split(",")
         if (part := raw.strip()) and _HTTP_TOKEN.fullmatch(part)
     )
+
+
+def _escaped_path_suffix(raw_path: bytes, decoded_prefix: str) -> str | None:
+    """Remove a decoded prefix while retaining the suffix's original escaping."""
+    prefix = decoded_prefix.encode("utf-8")
+    raw_index = prefix_index = 0
+    while raw_index < len(raw_path) and prefix_index < len(prefix):
+        end = raw_index + 1
+        value = raw_path[raw_index]
+        if value == ord("%"):
+            if raw_index + 3 > len(raw_path):
+                return None
+            try:
+                value = int(raw_path[raw_index + 1:raw_index + 3], 16)
+            except ValueError:
+                return None
+            end = raw_index + 3
+        if value != prefix[prefix_index]:
+            return None
+        raw_index = end
+        prefix_index += 1
+    if prefix_index != len(prefix):
+        return None
+    suffix = raw_path[raw_index:]
+    try:
+        return suffix.decode("ascii")
+    except UnicodeDecodeError:
+        return quote_from_bytes(suffix, safe="/%:@!$&'()*+,;=-._~")
 
 
 def _extract_api_key(authorization: str | None, x_api_key: str | None) -> str | None:
@@ -708,20 +737,37 @@ def build_app(
         return response
 
     @app.api_route(
-        "/upstream/{model}/{upstream_path:path}",
+        "/upstream/{upstream_path:path}",
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
         dependencies=[Depends(require_router_key)],
     )
-    async def upstream_proxy(request: Request, model: str, upstream_path: str):
+    async def upstream_proxy(request: Request, upstream_path: str):
+        try:
+            model, _, remaining_path = router.catalog.resolve_upstream_path(upstream_path)
+        except CatalogError as exc:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"message": str(exc), "type": "unknown_model"}},
+            )
         # The daemon alone may call prepare-stop. Exposing it through an
         # arbitrary passthrough would bypass durable accounting and leave a
         # misleading routing lease behind.
-        normalized = upstream_path.lstrip("/")
+        normalized = remaining_path.lstrip("/")
         if normalized == "v1/admin/prepare-stop":
             raise HTTPException(status_code=403, detail="upstream prepare-stop is daemon-managed")
-        suffix = f"?{request.url.query}" if request.url.query else ""
+        raw_path = request.scope.get("raw_path")
+        escaped_path = (
+            _escaped_path_suffix(raw_path, f"/upstream/{model}")
+            if isinstance(raw_path, bytes) else None
+        )
+        if escaped_path is None:
+            raise HTTPException(status_code=400, detail="invalid escaped upstream path")
+        if not escaped_path:
+            escaped_path = "/"
+        raw_query = request.scope.get("query_string", b"")
+        suffix = f"?{raw_query.decode('ascii')}" if raw_query else ""
         return await forward_routed(
-            request, model, path_and_query="/" + normalized + suffix, body=await request.body()
+            request, model, path_and_query=escaped_path + suffix, body=await request.body()
         )
 
     @app.get("/router/status", dependencies=auth)

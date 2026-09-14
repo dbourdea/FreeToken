@@ -26,7 +26,8 @@ persistent = false
 
 [models.coding]
 model = "/models/coding.gguf"
-aliases = ["coding-compatible"]
+# Slash-namespaced IDs are valid; every segment uses letters, digits, `.`, `_`, or `-`.
+aliases = ["coding-compatible", "local/coding-compatible"]
 port = 1919
 args = ["--served-model-name", "coding", "--max-seq-len-override", "32768"]
 ready_timeout_s = 300

@@ -67,7 +67,10 @@ Profiles accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
 `unlisted`, readiness, TTL/unload, priority, group, and safe top-level
 request-filter fields. Alternate IDs resolve to the same canonical profile and
 resident process. Alias names must be unique and cannot collide with canonical
-profile names. An unlisted profile and all its aliases remain routable and
+profile names. Canonical and alternate model IDs may use slash-separated safe
+segments such as `organization/model`; empty, traversal-like, and non-ASCII
+segments are rejected, and the complete ID is limited to 128 characters.
+Group names and request-filter fields remain non-namespaced. An unlisted profile and all its aliases remain routable and
 manageable but are omitted from `GET /v1/models`. Set
 `router.include_aliases_in_list = true` to list aliases for visible profiles;
 canonical visible IDs are always listed. `args`
@@ -172,8 +175,11 @@ inference and, absent a daemon token, router management. Explicit Authorization
 credentials take precedence over `X-Api-Key`; malformed Basic may fall back to
 it. Invalid requests include a `WWW-Authenticate` challenge. An explicit daemon
 `X-FT-Token` remains the dedicated control-plane override. The guarded
-`/upstream/{profile}/...` passthrough uses the same lease but refuses a direct
-engine `prepare-stop`, which only the lifecycle owner may invoke.
+`/upstream/{model-id}/...` passthrough uses the same lease but refuses a direct
+engine `prepare-stop`, which only the lifecycle owner may invoke. For
+slash-namespaced IDs, the longest configured canonical or alternate ID wins;
+encoded model separators and the remaining escaped path and query are
+forwarded without decoding.
 
 These are illustrative paths, not a list of qualified models. In particular, dense Qwen GGUF support requires a compatible AMD/model-loader branch and cannot be inferred from this control-plane PR.
 

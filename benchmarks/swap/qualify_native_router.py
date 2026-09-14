@@ -420,6 +420,9 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
 
     models_raw, models = request_json(base + "/v1/models", timeout=10)
     _, models_alias = request_json(base + "/models", timeout=10)
+    _, namespaced_stats = request_json(
+        base + "/upstream/compat/model-a/v1/stats", timeout=10
+    )
     routed_raw, routed = request_json(base + "/router/models", timeout=10)
     profiles_raw, profiles = request_json(base + "/router/profiles", timeout=10)
     metrics_raw = request_bytes(base + "/metrics", timeout=10)
@@ -449,11 +452,12 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     )
     resident = [item.get("name") for item in routed_rows if item.get("resident")]
     if (
-        not {"model-a", "model-b"}.issubset(aliases)
+        not {"model-a", "model-b", "compat/model-a"}.issubset(aliases)
         or routed_names != profile_names
         or not {"model-a", "model-b"}.issubset(routed_names)
         or resident != ["model-a"]
         or profiles.get("activeProfile") != "model-a"
+        or not isinstance(namespaced_stats, dict)
         or b"freetoken_swap_admissions_total" not in metrics_raw
     ):
         raise RuntimeError("authenticated native control-plane responses are inconsistent")
@@ -489,6 +493,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "profileCount": len(profile_names),
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
+        "namespacedUpstreamVerified": True,
         "apiKeyFormsVerified": ["bearer", "basic", "x-api-key"],
         "metricsAvailable": True,
         "routerLogSseAvailable": True,
@@ -788,7 +793,9 @@ def native_catalog_text(
         "--max-running-requests", "1", "--graph", "1", "--memory-ratio", "0.75",
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
     ]
-    catalog = ["[router]", "upstream_timeout_s = 660", ""]
+    catalog = [
+        "[router]", "upstream_timeout_s = 660", "include_aliases_in_list = true", "",
+    ]
     if api_key is not None:
         catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]
     if persistent_a:
@@ -803,6 +810,8 @@ def native_catalog_text(
         ]
         if persistent_a and alias == "model-a":
             profile_lines.append('group = "resident"')
+        if alias == "model-a":
+            profile_lines.append('aliases = ["compat/model-a"]')
         profile_lines.extend((
             "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), ""
         ))

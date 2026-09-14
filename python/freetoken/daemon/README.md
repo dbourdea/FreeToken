@@ -76,6 +76,7 @@ vectors for `ft serve`, never shell commands.
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
 | `GET /router/logs?since=` | SSE, bounded native router admission/proxy/cancellation events. It is separate from engine stdout and records route templates only—never concrete paths, request bodies, headers, query strings, model paths, or keys. |
+| `/upstream/{model-id}/...` | Guarded direct passthrough with longest-prefix slash-namespaced ID resolution and escaped suffix preservation. |
 | `GET /engine/metrics` | `{ramBytes,vramBytes}` — the serve tree's own footprint only. |
 | `GET /engine/health` | Proxied serve `/health` + daemon reachability. |
 | `GET /engine/stats` | Proxied serve `/v1/stats`. |

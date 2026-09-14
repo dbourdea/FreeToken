@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in the Python 3.10 p
     import tomli as tomllib
 
 
-_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SIMPLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class CatalogError(ValueError):
@@ -107,10 +107,12 @@ class ModelCatalog:
         aliases: dict[str, str] = {}
         canonical = set(self._profiles)
         for name, profile in self._profiles.items():
+            _model_id(name)
+            _model_id(profile.name)
             if name != profile.name:
                 raise CatalogError(f"profile key {name!r} must match profile name {profile.name!r}")
             for alias in profile.aliases:
-                alias = _profile_name(alias)
+                alias = _model_id(alias)
                 if alias in canonical:
                     raise CatalogError(f"model alias {alias!r} conflicts with a configured profile")
                 if alias in aliases:
@@ -138,7 +140,7 @@ class ModelCatalog:
             raise CatalogError("catalog requires a [models] table")
         profiles: dict[str, ModelProfile] = {}
         for name, value in models.items():
-            profiles[_profile_name(name)] = _profile(_profile_name(name), value)
+            profiles[_model_id(name)] = _profile(_model_id(name), value)
         return cls(profiles, _router_settings(raw.get("router", {}), profiles), path=path)
 
     def get(self, name: str) -> ModelProfile:
@@ -165,6 +167,20 @@ class ModelCatalog:
             if self.settings.include_aliases_in_list:
                 result.extend(profile.aliases)
         return tuple(result)
+
+    def resolve_upstream_path(self, path: str) -> tuple[str, ModelProfile, str]:
+        """Resolve the longest configured model-ID prefix from a decoded path."""
+        parts = path.strip("/").split("/")
+        match: tuple[str, ModelProfile, str] | None = None
+        for index in range(1, len(parts) + 1):
+            candidate = "/".join(parts[:index])
+            canonical = self._aliases.get(candidate, candidate)
+            profile = self._profiles.get(canonical)
+            if profile is not None:
+                match = candidate, profile, "/" + "/".join(parts[index:])
+        if match is None:
+            raise CatalogError("upstream path does not begin with a configured model ID")
+        return match
 
     def group_for(self, name: str) -> RoutingGroup | None:
         for group in self.settings.groups:
@@ -217,7 +233,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     groups: list[RoutingGroup] = []
     claimed: set[str] = set()
     for raw_name, raw_group in raw_groups.items():
-        name = _profile_name(raw_name)
+        name = _simple_name(raw_name, "router group names")
         if not isinstance(raw_group, dict):
             raise CatalogError(f"router.groups.{name} must be a table")
         unknown = sorted(set(raw_group) - {"members", "swap", "exclusive", "persistent"})
@@ -270,9 +286,26 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     )
 
 
-def _profile_name(name: object) -> str:
-    if not isinstance(name, str) or not _NAME.fullmatch(name):
-        raise CatalogError("profile names must match [A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+def _simple_name(name: object, label: str = "names") -> str:
+    if not isinstance(name, str) or not _SIMPLE_NAME.fullmatch(name):
+        raise CatalogError(f"{label} must match [A-Za-z0-9][A-Za-z0-9._-]{{0,127}}")
+    return name
+
+
+def _valid_model_id(name: object) -> bool:
+    return bool(
+        isinstance(name, str)
+        and len(name) <= 128
+        and all(_SIMPLE_NAME.fullmatch(segment) for segment in name.split("/"))
+    )
+
+
+def _model_id(name: object) -> str:
+    if not _valid_model_id(name):
+        raise CatalogError(
+            "model IDs must be slash-separated [A-Za-z0-9][A-Za-z0-9._-] segments "
+            "with at most 128 characters total"
+        )
     return name
 
 
@@ -325,10 +358,10 @@ def _profile(name: str, value: object) -> ModelProfile:
         raise CatalogError(f"models.{name}.priority must be an integer from -1000 through 1000")
     group = value.get("group")
     if group is not None:
-        group = _profile_name(group)
+        group = _simple_name(group, f"models.{name}.group")
     drop_fields = value.get("drop_fields", [])
     if (not isinstance(drop_fields, list) or len(drop_fields) > 32
-            or not all(isinstance(field, str) and _NAME.fullmatch(field) for field in drop_fields)
+            or not all(isinstance(field, str) and _SIMPLE_NAME.fullmatch(field) for field in drop_fields)
             or "model" in drop_fields or len(set(drop_fields)) != len(drop_fields)):
         raise CatalogError(
             f"models.{name}.drop_fields must be distinct safe top-level names other than model"
@@ -336,7 +369,7 @@ def _profile(name: str, value: object) -> ModelProfile:
     aliases = value.get("aliases", [])
     if (
         not isinstance(aliases, list)
-        or not all(isinstance(alias, str) and _NAME.fullmatch(alias) for alias in aliases)
+        or not all(_valid_model_id(alias) for alias in aliases)
         or len(set(aliases)) != len(aliases)
     ):
         raise CatalogError(f"models.{name}.aliases must be distinct valid profile names")

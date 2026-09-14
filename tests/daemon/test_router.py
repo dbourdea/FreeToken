@@ -598,6 +598,49 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
     assert router.status()["activeRequests"] == 0
 
 
+def test_namespaced_upstream_uses_longest_model_prefix_and_preserves_escaped_suffix(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({
+        "author": ModelProfile("author", "parent.gguf", ()),
+        "author/model": ModelProfile(
+            "author/model", "exact.gguf", (), aliases=("org/compat",)
+        ),
+    })
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    calls = []
+
+    def upstream(**kwargs):
+        calls.append(kwargs)
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        exact = client.post(
+            "/upstream/author/model/api/x%2Fy?preview=a%2Fb", content=b"exact"
+        )
+        encoded_alias = client.get("/upstream/org%2Fcompat/v1/chat")
+        automatic = client.post("/v1/chat/completions", json={"model": "org/compat"})
+        bare = client.get("/upstream/org/compat")
+        blocked = client.post("/upstream/author/model/v1/admin/prepare-stop")
+        unknown = client.get("/upstream/missing/model/v1/chat")
+
+    assert exact.status_code == encoded_alias.status_code == automatic.status_code == 200
+    assert bare.status_code == 200
+    assert blocked.status_code == 403
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["type"] == "unknown_model"
+    assert manager.calls == [("start", "exact.gguf")]
+    assert [call["path_and_query"] for call in calls] == [
+        "/api/x%2Fy?preview=a%2Fb", "/v1/chat", "/v1/chat/completions", "/",
+    ]
+    assert calls[0]["body"] == b"exact"
+
+
 @pytest.mark.parametrize(
     "path",
     (
