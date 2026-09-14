@@ -286,7 +286,11 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
         calls.append(kwargs)
         return UpstreamResponse(
             status=200,
-            headers={"Content-Type": "text/event-stream", "X-Upstream": "yes"},
+            headers={
+                "Content-Type": "text/event-stream", "X-Upstream": "yes",
+                "Connection": "keep-alive", "Keep-Alive": "timeout=5",
+                "Transfer-Encoding": "chunked", "Content-Length": "999",
+            },
             raw=BytesIO(b"data: first\\n\\ndata: [DONE]\\n\\n"),
         )
 
@@ -308,6 +312,10 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
             assert response.status_code == 200
             assert response.content == b"data: first\\n\\ndata: [DONE]\\n\\n"
             assert response.headers["x-upstream"] == "yes"
+            assert "connection" not in response.headers
+            assert "keep-alive" not in response.headers
+            assert "transfer-encoding" not in response.headers
+            assert "content-length" not in response.headers
         status = client.get("/router/status")
         assert status.status_code == 200
         assert status.json()["activeRequests"] == 0

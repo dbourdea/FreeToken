@@ -26,7 +26,13 @@ from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
 from .catalog import CatalogError, ModelCatalog
-from .inference_proxy import RequestModelError, filter_request_body, open_upstream, request_model
+from .inference_proxy import (
+    RequestModelError,
+    filter_request_body,
+    open_upstream,
+    request_model,
+    response_headers,
+)
 from .logring import LogRing
 from .readiness import wait_for_ready
 from .router import RoutingCoordinator, RoutingError, allocate_loopback_port
@@ -465,10 +471,7 @@ def build_app(
                     responseBytes=byte_count,
                 )
 
-        headers = {
-            key: value for key, value in upstream.headers.items()
-            if key.lower() not in {"content-length", "transfer-encoding"}
-        }
+        headers = response_headers(upstream.headers)
         headers["X-FT-Request-ID"] = request_id
         return StreamingResponse(
             stream_response(),
