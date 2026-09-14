@@ -103,6 +103,30 @@ class RoutingCoordinator:
         self._last_queue_wait_ms: float | None = None
         self._last_response_bytes: int | None = None
         self._last_proxy_bytes_per_second: float | None = None
+        self._adopt_exact_catalog_resident()
+
+    def _adopt_exact_catalog_resident(self) -> None:
+        """Bind one unambiguous catalog profile to a manager-re-adopted engine.
+
+        Dynamic-port profiles match the concrete persisted port. If multiple
+        aliases describe the same process identity, fail closed rather than
+        inventing which alias owns residency.
+        """
+        state = self._manager.status()
+        port = state.get("port")
+        if not state.get("running") or not isinstance(port, int) or port <= 0:
+            return
+        args = self._manager.serve_args()
+        matches = [
+            profile for profile in self._catalog.profiles()
+            if profile.model == state.get("model")
+            and (profile.port == port or profile.port == 0)
+            and list(profile.args) == args
+        ]
+        if len(matches) != 1:
+            return
+        self._active_name = matches[0].name
+        self._schedule_idle_eviction()
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""

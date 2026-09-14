@@ -117,6 +117,44 @@ def test_dynamic_profile_port_is_stable_while_resident_and_fresh_after_a_swap():
     ]
 
 
+@pytest.mark.parametrize("configured_port", [1919, 0])
+def test_router_binds_unambiguous_exact_manager_re_adoption(configured_port):
+    manager = Manager()
+    manager.model = "adopted.gguf"
+    manager.port = 1919
+    manager.args = ["--served-model-name", "adopted"]
+    catalog_doc = ModelCatalog({
+        "adopted": ModelProfile(
+            "adopted", "adopted.gguf", tuple(manager.args), port=configured_port
+        ),
+    })
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    assert router.status()["activeProfile"] == "adopted"
+    assert router.status()["activeIdentityMatchesEngine"] is True
+    lease = router.acquire("adopted")
+    lease.release()
+    assert manager.calls == []
+    assert router.status()["activations"] == 0
+
+
+def test_router_refuses_ambiguous_or_argument_mismatched_re_adoption():
+    manager = Manager()
+    manager.model = "shared.gguf"
+    manager.port = 1919
+    manager.args = ["--actual"]
+    ambiguous = ModelCatalog({
+        "one": ModelProfile("one", "shared.gguf", tuple(manager.args), port=0),
+        "two": ModelProfile("two", "shared.gguf", tuple(manager.args), port=0),
+    })
+    mismatched = ModelCatalog({
+        "one": ModelProfile("one", "shared.gguf", ("--different",), port=1919),
+    })
+
+    assert RoutingCoordinator(manager, ambiguous, object(), ready_fn=ready).status()["activeProfile"] is None
+    assert RoutingCoordinator(manager, mismatched, object(), ready_fn=ready).status()["activeProfile"] is None
+
+
 def test_switch_waits_until_an_active_lease_finishes():
     manager = Manager()
     router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)

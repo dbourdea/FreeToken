@@ -124,6 +124,10 @@ class ModelCatalog:
     def public(self) -> list[dict[str, Any]]:
         return [self._profiles[name].public() for name in sorted(self._profiles)]
 
+    def profiles(self) -> tuple[ModelProfile, ...]:
+        """Return immutable profile values for internal identity matching."""
+        return tuple(self._profiles[name] for name in sorted(self._profiles))
+
     def group_for(self, name: str) -> RoutingGroup | None:
         for group in self.settings.groups:
             if name in group.members:
