@@ -378,14 +378,24 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
         assert "freetoken_swap_admissions_total 5" in metrics.text
         passthrough = client.get("/upstream/low/v1/models?limit=3")
         assert passthrough.status_code == 200
+        legacy_body = b'{"prompt":"fixture","max_tokens":2}'
+        assert client.post("/generate", content=legacy_body).status_code == 404
+        legacy = client.post(
+            "/upstream/low/generate", content=legacy_body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert legacy.status_code == 200
+        assert legacy.content == response.content
         blocked = client.post("/upstream/low/v1/admin/prepare-stop")
         assert blocked.status_code == 403
     assert manager.calls == [("start", "low.gguf")]
     assert [item["path_and_query"] for item in calls] == [
         "/v1/chat/completions", "/v1/completions", "/v1/responses",
-        "/v1/messages", "/v1/messages/count_tokens", "/v1/models?limit=3",
+        "/v1/messages", "/v1/messages/count_tokens", "/v1/models?limit=3", "/generate",
     ]
-    assert calls[-1]["method"] == "GET"
+    assert calls[-2]["method"] == "GET"
+    assert calls[-1]["method"] == "POST"
+    assert calls[-1]["body"] == legacy_body
     assert calls[-1]["timeout_s"] == 900.0
     assert router.status()["activeRequests"] == 0
 

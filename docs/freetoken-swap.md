@@ -94,6 +94,13 @@ Router bearer keys and the daemon `X-FT-Token` are terminated at the router and
 never forwarded to the engine; ordinary non-hop-by-hop application headers are
 otherwise preserved.
 
+FreeToken's legacy `POST /generate` body has no model identifier, so exposing it
+at the stable router URL would require an implicit default and violate explicit
+model-ID ownership. It is therefore intentionally absent there. Clients that
+need this legacy protocol must select a configured alias explicitly with
+`POST /upstream/{profile}/generate`; that guarded route still acquires the same
+router lease and preserves the request and SSE response bytes.
+
 `GET /ready` is an unauthenticated, side-effect-free readiness probe for the
 stable router URL. It returns 200 only while a resident routed engine reports
 FreeToken's `status=ok` and `maintenance=serving` **and** still exactly matches
