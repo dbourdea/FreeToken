@@ -488,7 +488,10 @@ def build_app(
         except RequestModelError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except CatalogError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"message": str(exc), "type": "unknown_model"}},
+            )
         suffix = f"?{request.url.query}" if request.url.query else ""
         return await forward_routed(request, model, path_and_query=request.url.path + suffix, body=body)
 

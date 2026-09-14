@@ -340,6 +340,37 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
     assert router.status()["activeRequests"] == 0
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/v1/chat/completions",
+        "/v1/completions",
+        "/v1/responses",
+        "/v1/messages",
+        "/v1/messages/count_tokens",
+    ),
+)
+def test_all_routed_text_endpoints_share_stable_unknown_model_error(path, monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"known": ModelProfile("known", "known.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("unknown model reached upstream")),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(path, json={"model": "missing"})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["type"] == "unknown_model"
+    assert "missing" in response.json()["error"]["message"]
+    assert manager.calls == []
+
+
 def test_router_preserves_upstream_error_status_headers_and_body(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
