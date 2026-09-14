@@ -439,6 +439,60 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
     }
 
 
+def persistent_capacity_canary(
+    base: str, catalog_path: Path, model_a: str, model_b: str
+) -> tuple[bytes, dict]:
+    """Prove a singleton persistent group reserves the sole resident slot."""
+    if request_json(base + "/router/unload", {}, timeout=45)[1].get("unloaded") is not True:
+        raise RuntimeError("could not unload before persistent capacity qualification")
+    catalog_path.write_text(
+        native_catalog_text(model_a, model_b, persistent_a=True), encoding="utf-8"
+    )
+    if request_json(base + "/router/reload", {}, timeout=30)[1].get("reloaded") is not True:
+        raise RuntimeError("persistent catalog reload was not acknowledged")
+    _, loaded_a = request_json(base + "/router/load", {"name": "model-a"}, timeout=660)
+    router_a, pid_a = loaded_a.get("router"), loaded_a.get("pid")
+    if (
+        loaded_a.get("profile") != "model-a" or not isinstance(pid_a, int) or pid_a <= 0
+        or not isinstance(router_a, dict) or router_a.get("persistent") is not True
+        or router_a.get("activeIdentityMatchesEngine") is not True
+    ):
+        raise RuntimeError("model-a did not occupy the persistent resident slot")
+    rejection_raw = b""
+    try:
+        request_json(base + "/router/load", {"name": "model-b"}, timeout=30)
+    except urllib.error.HTTPError as exc:
+        rejection_raw = exc.read(1024 * 1024 + 1)
+        if exc.code != 409 or len(rejection_raw) > 1024 * 1024:
+            raise RuntimeError("persistent capacity conflict returned an invalid response") from exc
+    else:
+        raise RuntimeError("persistent resident allowed a conflicting activation")
+    try:
+        rejection = json.loads(rejection_raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("persistent capacity response was not JSON") from exc
+    if rejection.get("error", {}).get("type") != "capacity_unavailable":
+        raise RuntimeError("persistent capacity conflict returned the wrong error type")
+    _, still_a = request_json(base + "/router/status")
+    if (
+        still_a.get("activeProfile") != "model-a"
+        or still_a.get("activeIdentityMatchesEngine") is not True
+        or still_a.get("persistent") is not True
+        or request_json(base + "/engine/status")[1].get("pid") != pid_a
+    ):
+        raise RuntimeError("persistent capacity rejection disturbed the resident engine")
+    if request_json(base + "/router/unload", {"name": "model-a"}, timeout=45)[1].get("unloaded") is not True:
+        raise RuntimeError("explicit persistent unload failed")
+    _, loaded_b = request_json(base + "/router/load", {"name": "model-b"}, timeout=660)
+    if loaded_b.get("profile") != "model-b" or loaded_b.get("router", {}).get("activeIdentityMatchesEngine") is not True:
+        raise RuntimeError("released persistent capacity did not admit model-b")
+    return rejection_raw, {
+        "persistentProfile": "model-a", "conflictingProfile": "model-b",
+        "rejectedStatus": 409, "residentPidPreserved": True,
+        "explicitUnloadReleasedCapacity": True, "passed": True,
+    }
+
+
 def ttl_eviction_canary(
     base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45
 ) -> dict:
@@ -480,7 +534,7 @@ def ttl_eviction_canary(
 
 def native_catalog_text(
     model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0,
-    invalid_model: str | None = None,
+    invalid_model: str | None = None, persistent_a: bool = False,
 ) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
@@ -490,12 +544,22 @@ def native_catalog_text(
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
     ]
     catalog = ["[router]", "upstream_timeout_s = 660", ""]
-    for alias, model in (("model-a", model_a), ("model-b", model_b)):
+    if persistent_a:
         catalog.extend((
+            "[router.groups.resident]", 'members = ["model-a"]', "swap = false",
+            "exclusive = true", "persistent = true", "",
+        ))
+    for alias, model in (("model-a", model_a), ("model-b", model_b)):
+        profile_lines = [
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
             f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
-            "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
+        ]
+        if persistent_a and alias == "model-a":
+            profile_lines.append('group = "resident"')
+        profile_lines.extend((
+            "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), ""
         ))
+        catalog.extend(profile_lines)
     if invalid_model is not None:
         catalog.extend((
             "[models.model-invalid]", f"model = {json.dumps(invalid_model)}", "port = 0",
@@ -657,6 +721,11 @@ def main() -> int:
             }
             detached_engine = None
             result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
+            persistent_raw, persistent = persistent_capacity_canary(
+                base, catalog_path, args.model_a, args.model_b
+            )
+            (artifacts / "persistent-capacity-rejection.json").write_bytes(persistent_raw)
+            result["persistentCapacity"] = persistent
             result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
             final_engine_port = result["ttl"]["port"]
             save()
@@ -669,6 +738,7 @@ def main() -> int:
                 and result.get("reloadConflict", {}).get("passed") is True
                 and result.get("failedSwitch", {}).get("passed") is True
                 and result.get("reAdoption", {}).get("passed") is True
+                and result.get("persistentCapacity", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

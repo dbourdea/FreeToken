@@ -82,6 +82,10 @@ leaving its test-owned engine detached, starts a replacement daemon against the 
 private state, and requires the manager's adopted flag, engine PID, engine port, and
 router profile identity to match. A routed completion must succeed with zero router
 activations before the replacement daemon becomes the final cleanup owner.
+The harness then reloads a singleton persistent group while no model is resident,
+loads that profile, and requires a conflicting load to return HTTP 409 while the
+same PID remains exact and persistent. Explicit unload must release the slot and
+allow the conflicting profile to activate.
 Finally, it explicitly unloads its temporary resident, atomically reloads the private
 catalog with a two-second idle TTL, verifies TTL-driven eviction and listener closure,
 and leaves no temporary engine for daemon cleanup.

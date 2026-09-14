@@ -273,6 +273,53 @@ def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
     assert "ttl_s = 2" in catalog.read_text(encoding="utf-8")
 
 
+def test_native_router_persistent_capacity_canary_requires_release_before_switch(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    calls = {"model-b": 0}
+    rejection = b'{"error":{"type":"capacity_unavailable"}}'
+
+    def request_json(url, body=None, **kwargs):
+        if url.endswith("/router/unload"):
+            return b"{}", {"unloaded": True}
+        if url.endswith("/router/reload"):
+            return b"{}", {"reloaded": True}
+        if url.endswith("/router/status"):
+            return b"{}", {
+                "activeProfile": "model-a", "activeIdentityMatchesEngine": True,
+                "persistent": True,
+            }
+        if url.endswith("/engine/status"):
+            return b"{}", {"pid": 71}
+        assert url.endswith("/router/load")
+        if body == {"name": "model-a"}:
+            return b"{}", {
+                "profile": "model-a", "pid": 71,
+                "router": {"persistent": True, "activeIdentityMatchesEngine": True},
+            }
+        calls["model-b"] += 1
+        if calls["model-b"] == 1:
+            raise native_router_qualifier.urllib.error.HTTPError(
+                url, 409, "capacity", {}, io.BytesIO(rejection)
+            )
+        return b"{}", {
+            "profile": "model-b", "pid": 72,
+            "router": {"activeIdentityMatchesEngine": True},
+        }
+
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    catalog = tmp_path / "models.toml"
+    raw, observation = native_router_qualifier.persistent_capacity_canary(
+        "http://test", catalog, "a.gguf", "b.gguf"
+    )
+
+    assert raw == rejection
+    assert observation["passed"] is True
+    assert observation["residentPidPreserved"] is True
+    parsed = ModelCatalog.load(str(catalog))
+    assert parsed.group_for("model-a").persistent is True
+
+
 def test_native_router_concurrent_canaries_require_same_residency(native_router_qualifier, monkeypatch):
     snapshots = iter((
         {"activeProfile": "model-a", "activations": 4, "activeRequests": 0},
