@@ -14,6 +14,23 @@ Status labels:
 - **Inapplicable**: the current FreeToken server lacks the corresponding
   backend modality. The absent route is named explicitly rather than claimed.
 
+## Pinned-source inventory
+
+The following is a read-only source inventory, obtained with `git show` and
+`git ls-tree` from the pinned commit rather than from the damaged local working
+copy. It makes the scope of the comparison auditable without vendoring any
+llama-swap code.
+
+| Reference source at `41ec321…` | Observed responsibility | Native classification and evidence |
+| --- | --- | --- |
+| `internal/server/server.go` (`modelPostJSONRoutes`, `modelPostFormRoutes`, `modelGetRoutes`, `routes`) | Model-dispatched OpenAI, Anthropic, embeddings, rerank, audio, images, SDAPI, ComfyUI and upstream routes; list, health, unload, running, logs, metrics, UI, API group | Native text-generation routes and guarded passthrough are implemented and HTTP-tested. Embedding, rerank, image, speech, transcription, SDAPI and ComfyUI are **inapplicable** because FreeToken exposes no matching backend route. UI/MCP/Tailcat remain explicitly deferred product surfaces. |
+| `internal/config/{config,model_config,commands,filters,macros,selectors,profile,upstream,performance,peer,tailcat}.go` | YAML schema, command/macro expansion, request rewriting, profiles, peers, hardware/performance policy | Native allowlisted TOML parser rejects commands/macros and unsafe owned options; aliases, dynamic ports, readiness, TTL, groups, priorities, keys, upstream timeout, safe filters and atomic reload are behavior-tested. Arbitrary transforms, macros, peer and Tailcat policy are deferred rather than emulated unsafely. |
+| `internal/router/{router,base,loading,group,matrix,matrix_solver,peer}.go`, `internal/router/scheduler/fifo.go` | Loading, queueing, group/matrix and peer routing | Native single-owner FIFO/priority coordinator, exclusive one-resident capacity, persistent-group protection, leases, eviction and cancellation are tested. Multi-resident matrix solving and peers are deferred: the declared one-engine supervisor cannot prove safe concurrent residency. |
+| `internal/process/{process,process_command,runtime_*,treecleanup_*}.go` | Child launch, process identity, stop/reap/tree cleanup | Native `ServeManager` owns the child, durable state, exact identity/re-adoption, process-group cleanup, drain/abort accounting and rollback. Deterministic and Linux actual-child recovery tests cover this boundary. |
+| `internal/server/{auth,profiles,inflight,log,metrics,metrics_middleware,api,apigroup}.go`, `internal/logmon/*`, `internal/perf/*`, `internal/store/*` | API-key auth, profiles, inflight cancellation, log streams, Prometheus/activity/performance and persistence | Native bearer/control authentication, profiles, opaque cancellation, bounded engine/router logs, Prometheus router signals and durable accounting are implemented. Throughput, memory and extended performance evidence remain bounded live-test gates. |
+| `internal/server/{ui,apimcp,captures,tailcat}.go`, `ui/*`, `internal/mcptools/*`, `internal/tailcat/*` | Browser UI, embedded MCP, captures and Tailcat | **Deferred**, not silently compatible: FreeToken has no native UI/MCP/capture/Tailcat product contract in this feature. |
+| `internal/**/*_test.go`, `docs/kb/guides/**/*` | Reference behavioral tests and operator documentation | Native tests live in `tests/daemon`; the qualification runbook and completion audit separate deterministic, Linux and approved maintenance-window evidence. |
+
 | Pinned llama-swap capability | Current FreeToken state | Required native parity evidence |
 | --- | --- | --- |
 | Model catalog and aliases | Native TOML catalog with validated model, port, args, readiness, unload, and upstream response timeouts. `port = 0` requests a concrete kernel-selected loopback port for each activation. | Deterministic tests cover dynamic-port residency stability and a fresh target after a swap; native selector transforms remain intentionally unsupported except safe `drop_fields`. |
