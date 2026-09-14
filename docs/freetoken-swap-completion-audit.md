@@ -1,19 +1,22 @@
 # FreeToken swap completion audit
 
 This audit preserves the full integration goal. A draft PR and passing CPU tests
-do not establish that every lifecycle behavior is qualified on real models.
+do not establish that every lifecycle behavior is qualified on real models. It
+distinguishes historical evidence from current-branch evidence: neither is
+silently promoted to proof for a later native-router implementation.
 
-## Combined source verification
+## Historical combined-source verification
 
 - Swap source: `64dcc683d4e767fb4af8b7088ebb58564b1b7535`.
 - AMD model-repair source: `de23ad6a9e74aecc72b9f6b9e81b8c3376ff2e60`.
 - Git's clean merge-tree result: `c3c0ae54a09857b98bba83cfc75b91264e6eeb43`.
 - The combined tree was archived into an isolated temporary directory on
   GMKtek EVO-X2. Neither branch nor the live runtime was replaced by that tree.
-- Linux validation: 114 daemon, privacy, benchmark, and reproducibility tests
+- Historical Linux validation: 114 daemon, privacy, benchmark, and reproducibility tests
   passed, including the real child-process recovery tests. No skips.
 - Combined-tree Qwen validation: 21 grouped-output, SSM, and config tests passed.
-- The protected llama.cpp service remained active throughout these CPU checks.
+- The protected llama.cpp service remained active throughout those CPU checks.
+  This archived combined tree is not the current `freetoken-swap` branch.
 
 Reproduce the combined-tree CPU suites from the extracted source, with its
 `python` directory on `PYTHONPATH` and the required test dependencies installed:
@@ -28,19 +31,30 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   tests/models/test_qwen35_gguf_config.py -q
 ```
 
+## Current checkout verification
+
+- Read-only comparison reference: `mostlygeek/llama-swap`
+  `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
+- Local deterministic verification on the current Windows checkout: 120 daemon
+  tests passed and 6 Linux-only tests were skipped. This proves CPU/HTTP
+  behavior only; it does not substitute for Linux real-child or real-model
+  evidence.
+- No current-branch maintenance-window benchmark artifact has been published.
+  Raw paths, prompts, responses, logs, and host data must remain private.
+
 ## Requirement evidence and gaps
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented |
+| Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented and reverified locally |
 | Model catalog and lifecycle controls | Validated TOML catalog, authenticated profile endpoints, native process manager | Implemented and CPU-tested |
-| Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; native real-engine qualification remains required |
-| Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU and bounded live evidence |
-| Concurrency and unloading | Prior same-model and conflicting-model concurrent requests plus idle eviction | Bounded live verification passed |
-| Rollback protections | Launch/readiness recovery, newer lifecycle intent wins, accounting preservation, actual Linux process-group tests; real invalid-GGUF failure followed by Qwen3.6 readiness and generation recovery | Implemented and bounded live verification passed |
-| Client cancellation | Native opaque router request IDs, active-request list, explicit cancel endpoint, upstream socket close, lease release, and cancellation metrics; prior direct-mode same-instance test | Implemented and deterministic HTTP tested; native same-instance GPU verification remains required |
+| Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
+| Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU/HTTP tested; current native real-engine evidence required |
+| Concurrency and unloading | Same-model and conflicting-model admission plus idle eviction are deterministically tested | Current native real-engine verification required |
+| Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and Linux real-child tests are implemented; historical invalid-GGUF evidence is retained separately | Current Linux/current-branch recovery execution required |
+| Client cancellation | Native opaque router request IDs, active-request list, explicit cancel endpoint, upstream socket close, lease release, and cancellation metrics | Deterministic HTTP tested; current native same-instance GPU verification required |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
-| Production protection | Isolated test paths, explicit maintenance gate, prior restore and completion checks, no interruption during combined-tree checks | Maintained |
+| Production protection | Isolated test paths, explicit maintenance gate, historical restore/completion checks, no interruption during combined-tree checks | Maintained; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
 | FreeToken-only publication | Draft PRs 1 and 2 in `dbourdea/FreeToken`; both reported mergeable | Submitted, not merged |
 
@@ -50,9 +64,10 @@ instruction to merge either PR or change the repository's release strategy.
 GitHub reported no status checks for either PR at this audit. The test results
 above are independently executed evidence, not claims of passing hosted CI.
 
-## Final live completion gates
+## Historical maintenance-window evidence
 
-The user approved another maintenance window. Both live gates passed:
+The following records describe an earlier approved window, not current-branch
+completion proof:
 
 1. GPU stream cancellation reached terminal idle on the same backend, without
    a normal-completion increment. Post-disconnect A-to-B-to-A streaming,
@@ -64,12 +79,22 @@ The user approved another maintenance window. Both live gates passed:
    verified completion. Final process/listener checks found no test runtime
    remaining. The accounting gap for the crashed loader is explicitly degraded.
 
-The approved window is closed. No permanent production activation, merge, or
-upstream submission was performed. The PRs remain drafts for maintainer review;
-submission and verification do not authorize merging or production promotion.
-Long-context quality, broad model compatibility, direct-router automatic
-rollback, and long-duration endurance remain explicitly unclaimed limitations,
-not capabilities inferred from these bounded tests.
+The approved historical window is closed. No permanent production activation,
+merge, or upstream submission was performed. Long-context quality, broad model
+compatibility, direct-router automatic rollback, and long-duration endurance
+remain explicitly unclaimed limitations.
+
+## Current completion gates
+
+The current native router is **not complete** until an approved GMKtek EVO-X2
+maintenance window runs the current branch's
+`benchmarks/swap/qualify_native_router.py`, retains its raw artifacts privately,
+and records sanitized direct, warm-routed, cold-routed, and alternating-model
+results. It must also run the Linux real-child tests, exercise cancellation,
+concurrency, TTL, reload, failed-load rollback, accounting, and re-adoption on
+the current branch, then restore and health-check the protected workload. No
+merge, permanent service activation, or publication of raw artifacts is
+authorized by this audit.
 
 See [integration behavior](freetoken-swap.md) and
 [source research and live-test limitations](freetoken-swap-research.md).
