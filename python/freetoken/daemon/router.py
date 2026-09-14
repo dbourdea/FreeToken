@@ -92,6 +92,8 @@ class RoutingCoordinator:
         self._switching = False
         self._manual_lifecycle_owner: object | None = None
         self._manual_lifecycle_tokens: set[object] = set()
+        self._shutdown_requested = False
+        self._shutdown_owner: object | None = None
         self._idle_timer: object | None = None
         self._evictions = 0
         self._admissions = 0
@@ -139,6 +141,10 @@ class RoutingCoordinator:
         port = self._port_for(profile)
         queued_at = time.monotonic()
         with self._cond:
+            if self._shutdown_requested:
+                raise RoutingError(
+                    "router_shutting_down", "router shutdown is in progress", status_code=503
+                )
             if cancellation is not None and cancellation.is_set():
                 raise RoutingError(
                     "request_cancelled", "request cancelled before admission", status_code=409
@@ -147,6 +153,12 @@ class RoutingCoordinator:
             self._next_sequence += 1
             self._pending.append(ticket)
             while True:
+                if self._shutdown_requested:
+                    self._pending.remove(ticket)
+                    self._cond.notify_all()
+                    raise RoutingError(
+                        "router_shutting_down", "router shutdown is in progress", status_code=503
+                    )
                 if cancellation is not None and cancellation.is_set():
                     self._pending.remove(ticket)
                     self._cond.notify_all()
@@ -216,6 +228,10 @@ class RoutingCoordinator:
     def begin_manual_lifecycle(self, *, preempt_manual: bool = False) -> object:
         """Reserve the lifecycle barrier for one legacy engine operation."""
         with self._cond:
+            if self._shutdown_requested:
+                raise RoutingError(
+                    "router_shutting_down", "router shutdown is in progress", status_code=503
+                )
             manual_owned = self._manual_lifecycle_owner is not None
             routed_owned = bool(
                 self._active_name is not None or self._leases
@@ -267,6 +283,7 @@ class RoutingCoordinator:
                 "persistent": bool(active_identity_matches and group and group.persistent),
                 "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
                 "activeRequests": self._leases,
+                "shuttingDown": self._shutdown_requested,
                 "switching": self._switching,
                 "queuedRequests": len(self._pending),
                 "idleEvictionScheduled": self._idle_timer is not None,
@@ -308,14 +325,14 @@ class RoutingCoordinator:
         stale successful health response.
         """
         with self._cond:
-            if self._switching or not self._active_matches_engine_locked():
+            if self._shutdown_requested or self._switching or not self._active_matches_engine_locked():
                 return False
             state = self._manager.status()
             port = state.get("port")
             if not isinstance(port, int) or port <= 0:
                 return False
             health = (probe or self._probe).fresh_health(port)
-            if self._switching or not self._active_matches_engine_locked():
+            if self._shutdown_requested or self._switching or not self._active_matches_engine_locked():
                 return False
             return bool(
                 health.get("reachable")
@@ -384,6 +401,7 @@ class RoutingCoordinator:
         values = {
             "active_requests": status["activeRequests"],
             "queued_requests": status["queuedRequests"],
+            "shutting_down": int(status["shuttingDown"]),
             "active_identity_matches_engine": int(status["activeIdentityMatchesEngine"]),
             "admissions_total": status["admissions"],
             "activations_total": status["activations"],
@@ -434,6 +452,8 @@ class RoutingCoordinator:
         admission before entering the manager lifecycle transaction.
         """
         with self._cond:
+            if self._shutdown_requested:
+                return False
             active = self._active_name
             if name is not None and active != name:
                 return False
@@ -462,6 +482,51 @@ class RoutingCoordinator:
             self._evictions += 1
             self._cond.notify_all()
         return True
+
+    def begin_shutdown(self) -> object:
+        """Close admission immediately, before executor-side lifecycle work can queue."""
+        with self._cond:
+            if self._shutdown_requested:
+                raise RoutingError(
+                    "router_shutting_down", "router shutdown is already in progress", status_code=409
+                )
+            owner = object()
+            self._shutdown_requested = True
+            self._shutdown_owner = owner
+            self._cancel_idle_timer()
+            self._cond.notify_all()
+            return owner
+
+    def finish_shutdown(
+        self, owner: object, timeout: float | None = None, force: bool = False
+    ) -> dict:
+        """Drain existing ownership and permanently stop the sole managed child."""
+        with self._cond:
+            if self._shutdown_owner is not owner:
+                raise ValueError("shutdown reservation is not owned by caller")
+            while self._leases or self._switching:
+                self._cond.wait()
+            self._switching = True
+        try:
+            result = self._manager.shutdown(timeout, force)
+        except Exception:
+            with self._cond:
+                self._shutdown_requested = False
+                self._shutdown_owner = None
+                self._switching = False
+                self._schedule_idle_eviction()
+                self._cond.notify_all()
+            raise
+        with self._cond:
+            self._active_name = None
+            self._shutdown_owner = None
+            self._switching = False
+            self._cond.notify_all()
+        return result
+
+    def shutdown(self, timeout: float | None = None, force: bool = False) -> dict:
+        """Synchronous convenience wrapper for a complete shutdown transaction."""
+        return self.finish_shutdown(self.begin_shutdown(), timeout, force)
 
     @staticmethod
     def _new_timer(delay: float, callback: Callable[[], None]):

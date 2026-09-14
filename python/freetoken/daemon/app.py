@@ -247,9 +247,8 @@ def build_app(
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
-    async def run_manual_transaction(operation, *, preempt_manual: bool = False):
-        """Keep manual ownership until the complete transaction reaches a terminal state."""
-        owner = begin_manual_lifecycle(preempt_manual=preempt_manual)
+    async def run_to_completion(operation):
+        """Defer caller cancellation until an ownership transaction is terminal."""
         task = asyncio.create_task(operation())
         try:
             return await asyncio.shield(task)
@@ -264,6 +263,12 @@ def build_app(
                 else:
                     break
             raise
+
+    async def run_manual_transaction(operation, *, preempt_manual: bool = False):
+        """Keep manual ownership until the complete transaction reaches a terminal state."""
+        owner = begin_manual_lifecycle(preempt_manual=preempt_manual)
+        try:
+            return await run_to_completion(operation)
         finally:
             router.end_manual_lifecycle(owner)
 
@@ -826,17 +831,34 @@ def build_app(
         # leave the ~18GB serve orphaned, THEN bring the daemon down. We reply before uvicorn
         # actually stops (it notices should_exit within ~0.1s) so the client still gets a clean 200.
         try:
-            stopped = await run(lifecycle_pool, manager.shutdown, None, bool(body and body.force))
-        except (AccountingPrepareError, AccountingOutboxError) as exc:
-            return accounting_error(exc)
-        req = getattr(request.app.state, "request_shutdown", None)
-        if req is not None:
-            req()
-        return {
-            "stopping": True,
-            "already": stopped.get("already", False),
-            "accounting": stopped.get("accounting"),
-        }
+            owner = router.begin_shutdown()
+        except RoutingError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": {"message": str(exc), "type": exc.code}},
+            )
+
+        async def operation():
+            try:
+                stopped = await run(
+                    lifecycle_pool,
+                    router.finish_shutdown,
+                    owner,
+                    None,
+                    bool(body and body.force),
+                )
+            except (AccountingPrepareError, AccountingOutboxError) as exc:
+                return accounting_error(exc)
+            req = getattr(request.app.state, "request_shutdown", None)
+            if req is not None:
+                req()
+            return {
+                "stopping": True,
+                "already": stopped.get("already", False),
+                "accounting": stopped.get("accounting"),
+            }
+
+        return await run_to_completion(operation)
 
     @app.post("/engine/switch", dependencies=auth)
     async def engine_switch(body: SwitchBody):

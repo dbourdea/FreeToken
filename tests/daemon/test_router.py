@@ -1451,6 +1451,184 @@ def test_cancelled_manual_profile_switch_completes_failed_readiness_rollback():
     assert router.status()["switching"] is False
 
 
+def test_router_shutdown_drains_active_lease_and_rejects_queued_and_new_admission():
+    class ShutdownManager(Manager):
+        def shutdown(self, timeout=None, force=False):
+            self.calls.append(("shutdown", force))
+            self.model = None
+            return {"stopped": True, "already": False, "accounting": None}
+
+    manager = ShutdownManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    active = router.acquire("low")
+    queued_result = {}
+
+    def acquire_queued():
+        try:
+            router.acquire("high")
+        except RoutingError as exc:
+            queued_result["error"] = exc
+
+    queued = threading.Thread(target=acquire_queued)
+    queued.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        time.sleep(0.01)
+    assert router.status()["queuedRequests"] == 1
+
+    shutdown_result = {}
+    shutdown = threading.Thread(
+        target=lambda: shutdown_result.setdefault("result", router.shutdown(force=True))
+    )
+    shutdown.start()
+    for _ in range(100):
+        if router.status()["shuttingDown"]:
+            break
+        time.sleep(0.01)
+    queued.join(2)
+    assert not queued.is_alive()
+    assert queued_result["error"].code == "router_shutting_down"
+    assert shutdown.is_alive()
+    assert router.is_ready() is False
+    assert "freetoken_swap_shutting_down 1" in router.prometheus()
+    assert manager.calls == [("start", "low.gguf")]
+    with pytest.raises(RoutingError) as exc:
+        router.acquire("low")
+    assert exc.value.code == "router_shutting_down"
+
+    active.release()
+    shutdown.join(2)
+    assert not shutdown.is_alive()
+    assert shutdown_result["result"]["stopped"] is True
+    assert manager.calls == [("start", "low.gguf"), ("shutdown", True)]
+    assert router.status()["activeProfile"] is None
+
+
+def test_failed_router_shutdown_reopens_admission_and_preserves_resident():
+    class FailingShutdownManager(Manager):
+        def shutdown(self, timeout=None, force=False):
+            raise RuntimeError("stop failed")
+
+    manager = FailingShutdownManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    router.acquire("low").release()
+
+    with pytest.raises(RuntimeError, match="stop failed"):
+        router.shutdown()
+
+    assert router.status()["shuttingDown"] is False
+    assert router.status()["activeProfile"] == "low"
+    lease = router.acquire("low")
+    lease.release()
+
+
+def test_cancelled_daemon_shutdown_finishes_stop_and_requests_process_exit():
+    entered = threading.Event()
+    finish = threading.Event()
+
+    class BlockingShutdownManager(Manager):
+        def shutdown(self, timeout=None, force=False):
+            entered.set()
+            assert finish.wait(2)
+            self.model = None
+            return {"stopped": True, "already": False, "accounting": None}
+
+    manager = BlockingShutdownManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    exits = []
+
+    async def scenario(app):
+        app.state.request_shutdown = lambda: exits.append("requested")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            request = asyncio.create_task(client.post("/shutdown", json={"force": True}))
+            for _ in range(100):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert entered.is_set()
+            request.cancel()
+            request.cancel()
+            await asyncio.sleep(0.05)
+            assert not request.done()
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert exits == ["requested"]
+    assert router.status()["shuttingDown"] is True
+
+
+def test_daemon_shutdown_latches_before_single_lifecycle_worker_is_available():
+    start_entered = threading.Event()
+    finish_start = threading.Event()
+
+    class BlockingLifecycleManager(Manager):
+        def start(self, model, port, args):
+            self.calls.append(("start", model))
+            start_entered.set()
+            assert finish_start.wait(2)
+            self.model, self.port, self.args = model, port, list(args)
+            self.pid += 1
+            return {"pid": self.pid}
+
+        def shutdown(self, timeout=None, force=False):
+            self.calls.append(("shutdown", force))
+            self.model = None
+            return {"stopped": True, "already": False, "accounting": None}
+
+    manager = BlockingLifecycleManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    exits = []
+
+    async def scenario(app):
+        app.state.request_shutdown = lambda: exits.append("requested")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            manual = asyncio.create_task(client.post(
+                "/engine/start", json={"model": "legacy.gguf", "port": 1930}
+            ))
+            for _ in range(100):
+                if start_entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert start_entered.is_set()
+
+            shutdown = asyncio.create_task(client.post("/shutdown", json={}))
+            for _ in range(100):
+                if router.status()["shuttingDown"]:
+                    break
+                await asyncio.sleep(0.01)
+            assert router.status()["shuttingDown"] is True
+            assert not shutdown.done()
+            with pytest.raises(RoutingError) as exc:
+                router.acquire("low")
+            assert exc.value.code == "router_shutting_down"
+
+            finish_start.set()
+            assert (await manual).status_code == 200
+            response = await shutdown
+            assert response.status_code == 200
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert manager.calls == [("start", "legacy.gguf"), ("shutdown", False)]
+    assert exits == ["requested"]
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(

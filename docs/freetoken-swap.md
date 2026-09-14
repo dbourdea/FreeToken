@@ -18,6 +18,10 @@ a manual operation blocked in readiness; its newer manager intent invalidates
 stale rollback, and the older token cannot clear the stop's barrier. If the
 manual HTTP client disconnects, the barrier remains held until the complete
 executor-backed lifecycle transaction, including required rollback, terminates.
+Daemon shutdown uses the same coordinator: it closes admission, wakes queued
+requests with a stable shutdown error, drains active leases and lifecycle work,
+then permanently stops the manager-owned child. A failed stop reopens admission;
+a successful stop requests daemon exit even if the initiating client disconnects.
 
 The read-only, pinned llama-swap source remains a compatibility reference and
 an optional separate deployment mode, not a runtime dependency. That direct
