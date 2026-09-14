@@ -247,6 +247,25 @@ def build_app(
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
+    async def acquire_route(name: str):
+        """Keep executor-side admission owned if its HTTP task is cancelled."""
+        loop = asyncio.get_running_loop()
+        cancellation = threading.Event()
+        future = loop.run_in_executor(lifecycle_pool, router.acquire, name, cancellation)
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            def release_orphaned_lease(done) -> None:
+                try:
+                    lease = done.result()
+                except BaseException:
+                    return
+                lease.release()
+
+            future.add_done_callback(release_orphaned_lease)
+            router.cancel_acquire(cancellation)
+            raise
+
     def resolve_port(explicit: int | None) -> int:
         if explicit == 0:
             return allocate_loopback_port()
@@ -415,7 +434,7 @@ def build_app(
                 )
             reserved_request_ids.add(request_id)
         try:
-            lease = await run(lifecycle_pool, router.acquire, model)
+            lease = await acquire_route(model)
         except RoutingError as exc:
             with inflight_lock:
                 reserved_request_ids.discard(request_id)
@@ -636,7 +655,7 @@ def build_app(
         afterwards permits the configured idle-TTL policy to apply normally.
         """
         try:
-            lease = await run(lifecycle_pool, router.acquire, body.name)
+            lease = await acquire_route(body.name)
         except RoutingError as exc:
             router_event("management_load_failed", profile=body.name, code=exc.code)
             content = {"error": {"message": str(exc), "type": exc.code}}

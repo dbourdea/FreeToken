@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import json
 import time
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+import httpx
 from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
@@ -178,6 +180,54 @@ def test_switch_waits_until_an_active_lease_finishes():
     result.pop().release()
     thread.join(1)
     assert manager.calls == [("start", "low.gguf"), ("switch", "high.gguf")]
+
+
+def test_cancelled_queued_http_request_cannot_trigger_a_later_swap(monkeypatch):
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    active = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("cancelled queued request reached upstream"),
+    )
+
+    async def scenario(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            request = asyncio.create_task(client.post(
+                "/v1/chat/completions", json={"model": "high"},
+                headers={"X-FT-Request-ID": "cancelled-while-queued"},
+            ))
+            for _ in range(100):
+                if router.status()["queuedRequests"] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert router.status()["queuedRequests"] == 1
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            for _ in range(100):
+                if router.status()["queuedRequests"] == 0:
+                    break
+                await asyncio.sleep(0.01)
+            assert router.status()["queuedRequests"] == 0
+            retry = await client.post(
+                "/v1/chat/completions", json={"model": "missing"},
+                headers={"X-FT-Request-ID": "cancelled-while-queued"},
+            )
+            assert retry.status_code == 404
+            assert retry.json()["error"]["type"] == "unknown_model"
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), router=router,
+        )
+        asyncio.run(scenario(app))
+
+    active.release()
+    assert manager.calls == [("start", "low.gguf")]
+    assert router.status()["activeRequests"] == 0
 
 
 def test_queued_higher_priority_profile_runs_before_an_earlier_lower_priority_request():

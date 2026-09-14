@@ -128,7 +128,7 @@ class RoutingCoordinator:
         self._active_name = matches[0].name
         self._schedule_idle_eviction()
 
-    def acquire(self, name: str) -> RouteLease:
+    def acquire(self, name: str, cancellation: threading.Event | None = None) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
         try:
             profile = self._catalog.get(name)
@@ -137,10 +137,16 @@ class RoutingCoordinator:
         port = self._port_for(profile)
         queued_at = time.monotonic()
         with self._cond:
+            if cancellation is not None and cancellation.is_set():
+                raise RoutingError("request_cancelled", "request cancelled before admission")
             ticket = (-profile.priority, self._next_sequence, name)
             self._next_sequence += 1
             self._pending.append(ticket)
             while True:
+                if cancellation is not None and cancellation.is_set():
+                    self._pending.remove(ticket)
+                    self._cond.notify_all()
+                    raise RoutingError("request_cancelled", "request cancelled before admission")
                 head = min(self._pending)
                 if ticket != head:
                     self._cond.wait()
@@ -194,6 +200,12 @@ class RoutingCoordinator:
             self._last_activation_ms = round((time.monotonic() - activated_at) * 1000, 3)
             self._cond.notify_all()
         return RouteLease(self, profile, port, pid)
+
+    def cancel_acquire(self, cancellation: threading.Event) -> None:
+        """Wake a queued admission so it can observe caller cancellation."""
+        with self._cond:
+            cancellation.set()
+            self._cond.notify_all()
 
     def release(self, lease: RouteLease) -> None:
         with self._cond:
