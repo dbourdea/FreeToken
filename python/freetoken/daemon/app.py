@@ -197,7 +197,7 @@ def build_app(
     app.state.router_ring = router_ring
     inflight_lock = threading.Lock()
     inflight: dict[str, dict] = {}
-    reserved_request_ids: set[str] = set()
+    request_reservations: dict[str, dict] = {}
     watch_stop = threading.Event()
     watch_lock = threading.Lock()
     watch_state = {
@@ -247,10 +247,10 @@ def build_app(
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
-    async def acquire_route(name: str):
+    async def acquire_route(name: str, cancellation: threading.Event | None = None):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
         loop = asyncio.get_running_loop()
-        cancellation = threading.Event()
+        cancellation = cancellation or threading.Event()
         future = loop.run_in_executor(lifecycle_pool, router.acquire, name, cancellation)
         try:
             return await asyncio.shield(future)
@@ -264,6 +264,24 @@ def build_app(
 
             future.add_done_callback(release_orphaned_lease)
             router.cancel_acquire(cancellation)
+            router.record_cancellation()
+            raise
+
+    async def connect_upstream(**kwargs):
+        """Close a connector result that arrives after its HTTP task disconnects."""
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(proxy_pool, functools.partial(open_upstream, **kwargs))
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            def close_orphaned_upstream(done) -> None:
+                try:
+                    orphaned = done.result()
+                except BaseException:
+                    return
+                orphaned.close()
+
+            future.add_done_callback(close_orphaned_upstream)
             raise
 
     def resolve_port(explicit: int | None) -> int:
@@ -423,8 +441,9 @@ def build_app(
         # query. An upstream passthrough tail can itself contain a signed URL,
         # opaque bearer-like value, or tenant identifier.
         safe_route = getattr(request.scope.get("route"), "path", request.method)
+        admission_cancellation = threading.Event()
         with inflight_lock:
-            if request_id in reserved_request_ids:
+            if request_id in request_reservations:
                 router_event("request_conflict", profile=model, route=safe_route)
                 return JSONResponse(
                     status_code=409,
@@ -432,21 +451,40 @@ def build_app(
                         "message": "request id is already active", "type": "request_conflict",
                     }},
                 )
-            reserved_request_ids.add(request_id)
+            request_reservations[request_id] = {
+                "profile": model,
+                "cancellation": admission_cancellation,
+                "cancelled": False,
+            }
         try:
-            lease = await acquire_route(model)
+            lease = await acquire_route(model, admission_cancellation)
         except RoutingError as exc:
             with inflight_lock:
-                reserved_request_ids.discard(request_id)
+                request_reservations.pop(request_id, None)
             router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
             content = {"error": {"message": str(exc), "type": exc.code}}
             if exc.recovery is not None:
                 content["recovery"] = exc.recovery
             return JSONResponse(status_code=exc.status_code, content=content)
+        except BaseException:
+            with inflight_lock:
+                request_reservations.pop(request_id, None)
+            raise
+        with inflight_lock:
+            cancelled_before_connect = request_reservations[request_id]["cancelled"]
+            if cancelled_before_connect:
+                request_reservations.pop(request_id, None)
+        if cancelled_before_connect:
+            lease.release()
+            return JSONResponse(
+                status_code=409,
+                content={"error": {
+                    "message": "request cancelled before upstream connection",
+                    "type": "request_cancelled",
+                }},
+            )
         try:
-            upstream = await run(
-                proxy_pool,
-                open_upstream,
+            upstream = await connect_upstream(
                 port=lease.port,
                 path_and_query=path_and_query,
                 headers=dict(request.headers),
@@ -454,23 +492,44 @@ def build_app(
                 method=request.method,
                 timeout_s=router.upstream_timeout_s,
             )
+        except asyncio.CancelledError:
+            lease.release()
+            with inflight_lock:
+                request_reservations.pop(request_id, None)
+            router.record_cancellation()
+            router_event("request_cancelled", profile=model, route=safe_route)
+            raise
         except Exception as exc:  # the lease must not strand a pending swap on connect failure
             lease.release()
             with inflight_lock:
-                reserved_request_ids.discard(request_id)
+                request_reservations.pop(request_id, None)
             router_event("upstream_connect_failed", profile=model, route=safe_route)
             return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "upstream_unavailable"}})
         except BaseException:
             lease.release()
             with inflight_lock:
-                reserved_request_ids.discard(request_id)
+                request_reservations.pop(request_id, None)
             raise
         with inflight_lock:
-            inflight[request_id] = {
-                "profile": lease.profile.name,
-                "upstream": upstream,
-                "cancelled": False,
-            }
+            cancelled_while_connecting = request_reservations[request_id]["cancelled"]
+            if cancelled_while_connecting:
+                request_reservations.pop(request_id, None)
+            else:
+                inflight[request_id] = {
+                    "profile": lease.profile.name,
+                    "upstream": upstream,
+                    "cancelled": False,
+                }
+        if cancelled_while_connecting:
+            upstream.close()
+            lease.release()
+            return JSONResponse(
+                status_code=409,
+                content={"error": {
+                    "message": "request cancelled while opening upstream connection",
+                    "type": "request_cancelled",
+                }},
+            )
         router_event("admitted", profile=lease.profile.name, route=safe_route)
 
         def stream_response():
@@ -489,7 +548,7 @@ def build_app(
                     cancelled = bool(item.get("cancelled"))
                     if item.get("upstream") is upstream:
                         inflight.pop(request_id, None)
-                    reserved_request_ids.discard(request_id)
+                    request_reservations.pop(request_id, None)
                 router.record_stream(
                     ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
                     duration_s=ended - started,
@@ -613,20 +672,31 @@ def build_app(
     async def router_requests():
         with inflight_lock:
             data = [{"id": request_id, "profile": item["profile"]}
-                    for request_id, item in inflight.items()]
+                    for request_id, item in request_reservations.items()]
         return {"data": data}
 
     @app.post("/router/requests/{request_id}/cancel", dependencies=auth)
     async def router_cancel(request_id: str):
         with inflight_lock:
             item = inflight.get(request_id)
-            if item is not None:
+            reservation = request_reservations.get(request_id)
+            if reservation is not None and not reservation["cancelled"]:
+                reservation["cancelled"] = True
+                cancellation = reservation["cancellation"]
+            else:
+                cancellation = None
+            if item is not None and cancellation is not None:
                 item["cancelled"] = True
-        if item is None:
+        if cancellation is None:
             return {"cancelled": False, "reason": "not_found"}
-        item["upstream"].close()
+        if item is None:
+            router.cancel_acquire(cancellation)
+            profile = reservation["profile"]
+        else:
+            item["upstream"].close()
+            profile = item["profile"]
         router.record_cancellation()
-        router_event("request_cancelled", profile=item["profile"])
+        router_event("request_cancelled", profile=profile)
         return {"cancelled": True, "id": request_id}
 
     @app.get("/router/logs", dependencies=auth)

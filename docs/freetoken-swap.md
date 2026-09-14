@@ -82,7 +82,9 @@ not substitute for live engine token-throughput qualification.
 than reporting its configured alias as resident.
 `POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
-and an active request. An unload body containing `name` targets that profile;
+and a queued, connecting, or active request. The request list exposes reserved
+IDs from admission through stream completion, so an operator can cancel any
+owned phase. An unload body containing `name` targets that profile;
 an omitted body unloads all residents, which is exactly the current resident
 under the explicit one-engine capacity policy. `POST /router/load` activates a named profile through
 the same native lifecycle transaction without fabricating an inference request.

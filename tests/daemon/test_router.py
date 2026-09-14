@@ -211,6 +211,7 @@ def test_cancelled_queued_http_request_cannot_trigger_a_later_swap(monkeypatch):
                     break
                 await asyncio.sleep(0.01)
             assert router.status()["queuedRequests"] == 0
+            assert (await client.get("/router/requests")).json()["data"] == []
             retry = await client.post(
                 "/v1/chat/completions", json={"model": "missing"},
                 headers={"X-FT-Request-ID": "cancelled-while-queued"},
@@ -227,7 +228,61 @@ def test_cancelled_queued_http_request_cannot_trigger_a_later_swap(monkeypatch):
 
     active.release()
     assert manager.calls == [("start", "low.gguf")]
+    assert router.status()["cancellations"] == 1
     assert router.status()["activeRequests"] == 0
+
+
+def test_explicit_cancel_removes_a_queued_request_before_it_can_swap(monkeypatch):
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    active = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("cancelled queued request reached upstream"),
+    )
+
+    async def scenario(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            request = asyncio.create_task(client.post(
+                "/v1/chat/completions", json={"model": "high"},
+                headers={"X-FT-Request-ID": "operator-cancelled-queue"},
+            ))
+            for _ in range(100):
+                if router.status()["queuedRequests"] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert router.status()["queuedRequests"] == 1
+            assert (await client.get("/router/requests")).json()["data"] == [
+                {"id": "operator-cancelled-queue", "profile": "high"}
+            ]
+            cancelled = await client.post(
+                "/router/requests/operator-cancelled-queue/cancel"
+            )
+            assert cancelled.json() == {
+                "cancelled": True, "id": "operator-cancelled-queue"
+            }
+            repeated = await client.post(
+                "/router/requests/operator-cancelled-queue/cancel"
+            )
+            assert repeated.json() == {"cancelled": False, "reason": "not_found"}
+            response = await asyncio.wait_for(request, 1)
+            assert response.status_code == 409
+            assert response.json()["error"]["type"] == "request_cancelled"
+            assert (await client.get("/router/requests")).json()["data"] == []
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), router=router,
+        )
+        asyncio.run(scenario(app))
+
+    active.release()
+    assert manager.calls == [("start", "low.gguf")]
+    assert router.status()["queuedRequests"] == 0
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["cancellations"] == 1
 
 
 def test_queued_higher_priority_profile_runs_before_an_earlier_lower_priority_request():
@@ -494,6 +549,102 @@ def test_failed_upstream_connect_releases_lease_and_request_id_reservation(monke
     assert all(response.json()["error"]["type"] == "upstream_unavailable" for response in responses)
     assert router.status()["activeRequests"] == 0
     assert router.status()["admissions"] == 2
+
+
+def test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    connecting = threading.Event()
+    finish_connect = threading.Event()
+    raw = BytesIO(b"must not stream")
+
+    def upstream(**kwargs):
+        connecting.set()
+        assert finish_connect.wait(2)
+        return UpstreamResponse(200, {"Content-Type": "text/event-stream"}, raw)
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        response = []
+        thread = threading.Thread(target=lambda: response.append(client.post(
+            "/v1/chat/completions", json={"model": "low"},
+            headers={"X-FT-Request-ID": "cancel-during-connect"},
+        )))
+        thread.start()
+        assert connecting.wait(1)
+        assert client.get("/router/requests").json()["data"] == [
+            {"id": "cancel-during-connect", "profile": "low"}
+        ]
+        cancelled = client.post("/router/requests/cancel-during-connect/cancel")
+        assert cancelled.json() == {"cancelled": True, "id": "cancel-during-connect"}
+        finish_connect.set()
+        thread.join(2)
+        assert not thread.is_alive()
+
+    assert response[0].status_code == 409
+    assert response[0].json()["error"]["type"] == "request_cancelled"
+    assert raw.closed
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["admissions"] == 1
+    assert router.status()["cancellations"] == 1
+    assert router.status()["terminalStreams"] == 0
+
+
+def test_disconnect_while_upstream_connects_closes_orphaned_result(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    connecting = threading.Event()
+    finish_connect = threading.Event()
+    raw = BytesIO(b"must not stream")
+
+    def upstream(**kwargs):
+        connecting.set()
+        assert finish_connect.wait(2)
+        return UpstreamResponse(200, {"Content-Type": "text/event-stream"}, raw)
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+
+    async def scenario(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            request = asyncio.create_task(client.post(
+                "/v1/chat/completions", json={"model": "low"},
+                headers={"X-FT-Request-ID": "disconnect-during-connect"},
+            ))
+            for _ in range(100):
+                if connecting.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert connecting.is_set()
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            assert router.status()["activeRequests"] == 0
+            assert (await client.get("/router/requests")).json()["data"] == []
+            finish_connect.set()
+            for _ in range(100):
+                if raw.closed:
+                    break
+                await asyncio.sleep(0.01)
+            assert raw.closed
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert router.status()["admissions"] == 1
+    assert router.status()["cancellations"] == 1
+    assert router.status()["terminalStreams"] == 0
 
 
 def test_router_inference_requires_configured_bearer_key():

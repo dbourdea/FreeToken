@@ -138,7 +138,9 @@ class RoutingCoordinator:
         queued_at = time.monotonic()
         with self._cond:
             if cancellation is not None and cancellation.is_set():
-                raise RoutingError("request_cancelled", "request cancelled before admission")
+                raise RoutingError(
+                    "request_cancelled", "request cancelled before admission", status_code=409
+                )
             ticket = (-profile.priority, self._next_sequence, name)
             self._next_sequence += 1
             self._pending.append(ticket)
@@ -146,7 +148,9 @@ class RoutingCoordinator:
                 if cancellation is not None and cancellation.is_set():
                     self._pending.remove(ticket)
                     self._cond.notify_all()
-                    raise RoutingError("request_cancelled", "request cancelled before admission")
+                    raise RoutingError(
+                        "request_cancelled", "request cancelled before admission", status_code=409
+                    )
                 head = min(self._pending)
                 if ticket != head:
                     self._cond.wait()
