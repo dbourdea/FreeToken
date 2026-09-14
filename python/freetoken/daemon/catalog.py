@@ -46,6 +46,7 @@ class RouterSettings:
     upstream_timeout_s: float = 900.0
     scheduler: str = "fifo"
     groups: tuple[RoutingGroup, ...] = ()
+    include_aliases_in_list: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,8 @@ class ModelProfile:
     priority: int = 0
     group: str | None = None
     drop_fields: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    unlisted: bool = False
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -86,13 +89,32 @@ class ModelProfile:
             doc["group"] = self.group
         if self.drop_fields:
             doc["dropFields"] = list(self.drop_fields)
+        if self.aliases:
+            doc["aliases"] = list(self.aliases)
+        if self.unlisted:
+            doc["unlisted"] = True
         return doc
 
 
 class ModelCatalog:
     def __init__(self, profiles: dict[str, ModelProfile], settings: RouterSettings | None = None,
                  *, path: str | None = None):
-        self._profiles = profiles
+        self._profiles = dict(profiles)
+        aliases: dict[str, str] = {}
+        canonical = set(self._profiles)
+        for name, profile in self._profiles.items():
+            if name != profile.name:
+                raise CatalogError(f"profile key {name!r} must match profile name {profile.name!r}")
+            for alias in profile.aliases:
+                alias = _profile_name(alias)
+                if alias in canonical:
+                    raise CatalogError(f"model alias {alias!r} conflicts with a configured profile")
+                if alias in aliases:
+                    raise CatalogError(
+                        f"model alias {alias!r} is assigned to both {aliases[alias]!r} and {name!r}"
+                    )
+                aliases[alias] = name
+        self._aliases = aliases
         self.settings = settings or RouterSettings()
         self.path = path
 
@@ -117,7 +139,7 @@ class ModelCatalog:
 
     def get(self, name: str) -> ModelProfile:
         try:
-            return self._profiles[name]
+            return self._profiles[self._aliases.get(name, name)]
         except KeyError as exc:
             raise CatalogError(f"unknown model profile {name!r}") from exc
 
@@ -127,6 +149,18 @@ class ModelCatalog:
     def profiles(self) -> tuple[ModelProfile, ...]:
         """Return immutable profile values for internal identity matching."""
         return tuple(self._profiles[name] for name in sorted(self._profiles))
+
+    def listed_model_ids(self) -> tuple[str, ...]:
+        """Return the OpenAI-visible IDs without exposing hidden canonical profiles."""
+        result: list[str] = []
+        for name in sorted(self._profiles):
+            profile = self._profiles[name]
+            if profile.unlisted:
+                continue
+            result.append(name)
+            if self.settings.include_aliases_in_list:
+                result.extend(profile.aliases)
+        return tuple(result)
 
     def group_for(self, name: str) -> RoutingGroup | None:
         for group in self.settings.groups:
@@ -147,7 +181,10 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         value = {}
     if not isinstance(value, dict):
         raise CatalogError("router must be a table")
-    allowed = {"api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s", "scheduler", "groups"}
+    allowed = {
+        "api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s",
+        "scheduler", "groups", "include_aliases_in_list",
+    }
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise CatalogError(f"router: unsupported keys: {', '.join(unknown)}")
@@ -160,6 +197,9 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     scheduler = value.get("scheduler", "fifo")
     if scheduler != "fifo":
         raise CatalogError("router.scheduler currently supports only fifo")
+    include_aliases_in_list = value.get("include_aliases_in_list", False)
+    if not isinstance(include_aliases_in_list, bool):
+        raise CatalogError("router.include_aliases_in_list must be a boolean")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -214,6 +254,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         upstream_timeout_s=_finite_seconds(value.get("upstream_timeout_s", 900), "router.upstream_timeout_s", minimum=1, maximum=7200),
         scheduler=scheduler,
         groups=tuple(groups),
+        include_aliases_in_list=include_aliases_in_list,
     )
 
 
@@ -226,7 +267,10 @@ def _profile_name(name: object) -> str:
 def _profile(name: str, value: object) -> ModelProfile:
     if not isinstance(value, dict):
         raise CatalogError(f"models.{name} must be a table")
-    allowed = {"model", "args", "port", "description", "ready_timeout_s", "ttl_s", "unload_timeout_s", "priority", "group", "drop_fields"}
+    allowed = {
+        "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
+        "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
+    }
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise CatalogError(f"models.{name}: unsupported keys: {', '.join(unknown)}")
@@ -276,5 +320,17 @@ def _profile(name: str, value: object) -> ModelProfile:
         raise CatalogError(
             f"models.{name}.drop_fields must be distinct safe top-level names other than model"
         )
-    return ModelProfile(name, model, tuple(raw_args), port, description, ready_timeout_s,
-                        ttl_s, unload_timeout_s, priority, group, tuple(drop_fields))
+    aliases = value.get("aliases", [])
+    if (
+        not isinstance(aliases, list)
+        or not all(isinstance(alias, str) and _NAME.fullmatch(alias) for alias in aliases)
+        or len(set(aliases)) != len(aliases)
+    ):
+        raise CatalogError(f"models.{name}.aliases must be distinct valid profile names")
+    unlisted = value.get("unlisted", False)
+    if not isinstance(unlisted, bool):
+        raise CatalogError(f"models.{name}.unlisted must be a boolean")
+    return ModelProfile(
+        name, model, tuple(raw_args), port, description, ready_timeout_s,
+        ttl_s, unload_timeout_s, priority, group, tuple(drop_fields), tuple(aliases), unlisted,
+    )

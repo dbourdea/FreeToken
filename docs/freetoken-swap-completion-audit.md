@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 171 daemon
+- Local deterministic verification on the current Windows checkout: 177 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for Linux real-child or real-model
   evidence.
@@ -47,7 +47,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented and reverified locally |
-| Model catalog and lifecycle controls | Validated TOML catalog, authenticated profile endpoints, native process manager | Implemented and CPU-tested |
+| Model catalog and lifecycle controls | Validated TOML catalog, collision-safe alternate IDs, unlisted profiles, authenticated profile endpoints, native process manager | Implemented and CPU/HTTP tested |
 | Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU/HTTP tested; current native real-engine evidence required |
 | Concurrency and unloading | Same-model and conflicting-model admission plus idle eviction are deterministically tested | Current native real-engine verification required |

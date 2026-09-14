@@ -53,6 +53,62 @@ def test_catalog_marks_port_zero_as_an_explicit_dynamic_port(tmp_path):
     assert profile.public()["dynamicPort"] is True
 
 
+def test_catalog_resolves_collision_safe_aliases_and_hides_unlisted_models(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[router]
+include_aliases_in_list = true
+
+[models.visible]
+model = "visible.gguf"
+aliases = ["nickname", "compat-id"]
+
+[models.hidden]
+model = "hidden.gguf"
+aliases = ["private-name"]
+unlisted = true
+""",
+        encoding="utf-8",
+    )
+
+    catalog = ModelCatalog.load(str(path))
+
+    assert catalog.get("nickname") is catalog.get("visible")
+    assert catalog.get("private-name") is catalog.get("hidden")
+    assert catalog.listed_model_ids() == ("visible", "nickname", "compat-id")
+    default_listing = ModelCatalog({
+        "visible": catalog.get("visible"),
+        "hidden": catalog.get("hidden"),
+    })
+    assert default_listing.listed_model_ids() == ("visible",)
+    public = {profile["name"]: profile for profile in catalog.public()}
+    assert public["visible"]["aliases"] == ["nickname", "compat-id"]
+    assert public["hidden"]["unlisted"] is True
+
+
+@pytest.mark.parametrize(
+    "models,message",
+    [
+        (
+            "[models.one]\nmodel='one.gguf'\naliases=['two']\n"
+            "[models.two]\nmodel='two.gguf'\n",
+            "conflicts with a configured profile",
+        ),
+        (
+            "[models.one]\nmodel='one.gguf'\naliases=['shared']\n"
+            "[models.two]\nmodel='two.gguf'\naliases=['shared']\n",
+            "assigned to both",
+        ),
+        ("[models.one]\nmodel='one.gguf'\naliases=['bad/name']\n", "distinct valid"),
+    ],
+)
+def test_catalog_rejects_ambiguous_or_invalid_model_aliases(tmp_path, models, message):
+    path = tmp_path / "models.toml"
+    path.write_text(models, encoding="utf-8")
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
 def test_readiness_waits_for_engine_health_not_just_a_listening_process():
     class Manager:
         def status(self):
@@ -204,6 +260,7 @@ priority = -5
     ("[router]\nupstream_timeout_s = 0", "upstream_timeout_s"),
     ("drop_fields = ['model']", "drop_fields"),
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
+    ("[router]\ninclude_aliases_in_list = 'yes'", "include_aliases_in_list"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),
     ("[router.groups.g]\nmembers = ['a']\nexclusive = false", "exclusive"),

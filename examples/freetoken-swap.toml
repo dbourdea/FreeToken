@@ -12,6 +12,8 @@ default_ttl_s = 300
 unload_timeout_s = 30
 upstream_timeout_s = 900
 scheduler = "fifo"
+# Include alternate IDs in /v1/models. They remain routable when this is false.
+include_aliases_in_list = true
 
 [router.groups.interactive]
 members = ["coding", "chat"]
@@ -21,6 +23,7 @@ persistent = false
 
 [models.coding]
 model = "/models/coding.gguf"
+aliases = ["coding-compatible"]
 port = 1919
 args = ["--served-model-name", "coding", "--max-seq-len-override", "32768"]
 ready_timeout_s = 300
@@ -33,6 +36,9 @@ drop_fields = ["metadata"]
 
 [models.chat]
 model = "/models/chat.gguf"
+# Hidden profiles remain routable and manageable but are omitted from /v1/models,
+# along with all of their aliases.
+unlisted = true
 port = 1919
 args = ["--served-model-name", "chat", "--max-seq-len-override", "16384"]
 ready_timeout_s = 300

@@ -611,8 +611,8 @@ def build_app(
         return {
             "object": "list",
             "data": [
-                {"id": profile["name"], "object": "model", "created": 0, "owned_by": "freetoken"}
-                for profile in router.catalog.public()
+                {"id": model_id, "object": "model", "created": 0, "owned_by": "freetoken"}
+                for model_id in router.catalog.listed_model_ids()
             ],
         }
 

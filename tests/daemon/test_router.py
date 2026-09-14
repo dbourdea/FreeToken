@@ -551,6 +551,63 @@ def test_failed_upstream_connect_releases_lease_and_request_id_reservation(monke
     assert router.status()["admissions"] == 2
 
 
+def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "canonical": ModelProfile(
+                "canonical", "shared.gguf", (), aliases=("compat-id",)
+            ),
+            "hidden": ModelProfile(
+                "hidden", "hidden.gguf", (), aliases=("private-id",), unlisted=True
+            ),
+        },
+        settings=RouterSettings(include_aliases_in_list=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    calls = []
+
+    def upstream(**kwargs):
+        calls.append(kwargs)
+        return UpstreamResponse(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            raw=BytesIO(b'{"ok":true}'),
+        )
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        listed = client.get("/v1/models")
+        alias_response = client.post(
+            "/v1/chat/completions", content=b'{"model":"compat-id","max_tokens":1}',
+            headers={"Content-Type": "application/json"},
+        )
+        canonical_response = client.post(
+            "/v1/chat/completions", json={"model": "canonical", "max_tokens": 1}
+        )
+        hidden_response = client.post(
+            "/v1/chat/completions", json={"model": "private-id", "max_tokens": 1}
+        )
+        unloaded = client.post("/router/unload", json={"name": "private-id"})
+
+    assert [item["id"] for item in listed.json()["data"]] == ["canonical", "compat-id"]
+    assert alias_response.status_code == canonical_response.status_code == 200
+    assert hidden_response.status_code == 200
+    assert unloaded.json()["unloaded"] is True
+    assert manager.calls == [
+        ("start", "shared.gguf"),
+        ("switch", "hidden.gguf"),
+        ("stop", 30.0),
+    ]
+    assert calls[0]["body"] == b'{"model":"compat-id","max_tokens":1}'
+    assert router.status()["activeProfile"] is None
+
+
 def test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})

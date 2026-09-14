@@ -465,6 +465,11 @@ class RoutingCoordinator:
         with self._cond:
             if self._shutdown_requested:
                 return False
+            if name is not None:
+                try:
+                    name = self._catalog.get(name).name
+                except CatalogError:
+                    return False
             active = self._active_name
             if name is not None and active != name:
                 return False

@@ -44,6 +44,7 @@ model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
 port = 1922
 args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
 description = "GMKtek EVO-X2 candidate coding profile"
+aliases = ["qwen-coder-compatible"]
 ready_timeout_s = 300
 
 [models.qwen-chat]
@@ -61,8 +62,14 @@ ft daemon health
 
 `GET /models`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
 
-Profiles accept allowlisted `model`, `port`, `args`, `description`, readiness,
-TTL/unload, priority, group, and safe top-level request-filter fields. `args`
+Profiles accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
+`unlisted`, readiness, TTL/unload, priority, group, and safe top-level
+request-filter fields. Alternate IDs resolve to the same canonical profile and
+resident process. Alias names must be unique and cannot collide with canonical
+profile names. An unlisted profile and all its aliases remain routable and
+manageable but are omitted from `GET /v1/models`. Set
+`router.include_aliases_in_list = true` to list aliases for visible profiles;
+canonical visible IDs are always listed. `args`
 is passed as an argument vector to `ft serve`; it is never interpreted by a
 shell. A profile cannot set `--model` or `--port` in `args`, because those
 fields are owned by the supervisor and are part of its conflict and re-adoption
@@ -91,7 +98,8 @@ appear in `/router/logs`.
 
 The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions`,
 `/v1/completions`, `/v1/responses`, `/v1/messages`, and
-`/v1/messages/count_tokens`. Unknown aliases return a stable 404; unsupported
+`/v1/messages/count_tokens`. Canonical and alternate IDs share one canonical
+residency while preserving the client's request body. Unknown IDs return a stable 404; unsupported
 FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 `/router/profiles`, `/router/requests`, and `/metrics` expose configured and
 resident state, capacity, queues, lifecycle timing, response bytes and proxy
