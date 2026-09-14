@@ -68,9 +68,9 @@ signals. `POST /router/unload`, `/router/reload`, and
 and an active request. `POST /router/load` activates a named profile through
 the same native lifecycle transaction without fabricating an inference request.
 `GET /router/logs?since=` is a bounded SSE event stream;
-it records only event type, alias, route path, status, cancellation state, and
-response byte count—never prompts, request bodies, headers, query strings,
-model paths, or API keys.
+it records only event type, alias, registered route template, status,
+cancellation state, and response byte count—never prompts, request bodies,
+headers, concrete URL paths, query strings, model paths, or API keys.
 
 `GET /ready` is an unauthenticated, side-effect-free readiness probe for the
 stable router URL. It returns 200 only while a resident routed engine reports

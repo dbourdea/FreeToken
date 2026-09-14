@@ -296,9 +296,10 @@ def build_app(
         request_id = request.headers.get("x-ft-request-id") or uuid.uuid4().hex
         if not request_id.isascii() or not request_id or len(request_id) > 128:
             raise HTTPException(status_code=400, detail="X-FT-Request-ID must be 1 to 128 ASCII characters")
-        # Never include the query portion in router logs. Query parameters
-        # frequently contain signed URLs or application-level credentials.
-        safe_route = request.url.path
+        # Use FastAPI's registered route template, not the concrete path or
+        # query. An upstream passthrough tail can itself contain a signed URL,
+        # opaque bearer-like value, or tenant identifier.
+        safe_route = getattr(request.scope.get("route"), "path", request.method)
         try:
             lease = await run(lifecycle_pool, router.acquire, model)
         except RoutingError as exc:

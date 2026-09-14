@@ -442,7 +442,7 @@ def test_router_event_log_is_bounded_private_and_protected(monkeypatch):
         client = TestClient(app)
         assert client.get("/router/logs").status_code == 401
         response = client.post(
-            "/v1/chat/completions?access_token=do-not-log",
+            "/upstream/low/private-token-in-path?access_token=do-not-log",
             content=b'{"model":"low","messages":["private prompt"]}',
             headers={"Content-Type": "application/json", "Authorization": "Bearer router-test-key"},
         )
@@ -461,6 +461,7 @@ def test_router_event_log_is_bounded_private_and_protected(monkeypatch):
     serialized = json.dumps(events)
     assert "private prompt" not in serialized
     assert "do-not-log" not in serialized
+    assert "private-token-in-path" not in serialized
     assert "router-test-key" not in serialized
 
 
