@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from freetoken.daemon.catalog import ModelCatalog
+
 
 @pytest.fixture
 def qualifier():
@@ -171,6 +173,22 @@ def test_native_router_benchmark_captures_private_hardware_observation(
 
     assert hardware["engine"]["pid"] == 7
     assert (tmp_path / "warm-a.hardware.json").read_bytes() == captured
+
+
+def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_router_qualifier, tmp_path):
+    catalog_path = tmp_path / "models.toml"
+    catalog_path.write_text(
+        native_router_qualifier.native_catalog_text("first.gguf", "second.gguf"), encoding="utf-8"
+    )
+
+    catalog = ModelCatalog.load(str(catalog_path))
+
+    assert catalog.settings.upstream_timeout_s == 660
+    assert catalog.get("model-a").model == "first.gguf"
+    assert catalog.get("model-a").port == 0
+    assert catalog.get("model-a").ttl_s == 0
+    assert "model-a" in catalog.get("model-a").args
+    assert catalog.get("model-b").model == "second.gguf"
 
 
 @pytest.mark.parametrize(

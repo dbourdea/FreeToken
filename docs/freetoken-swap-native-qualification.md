@@ -59,7 +59,7 @@ engine metrics, accounting receipt IDs, and cleanup result.
 `benchmarks/swap/qualify_native_router.py` is the opt-in Linux harness for
 collecting the four required comparisons in one approved maintenance window.
 It starts a private native daemon with a private state directory and extension
-cache, then records private raw artifacts for: a direct request to the
+cache and a validated dynamic-port TOML catalog, then records private raw artifacts for: a direct request to the
 router-owned engine port, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It reads first-byte and final
 duration at the client, stores the corresponding `/router/status` snapshot and

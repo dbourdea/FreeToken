@@ -127,6 +127,23 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     return hardware
 
 
+def native_catalog_text(model_a: str, model_b: str) -> str:
+    """Return the allowlisted, dynamic-port catalog used by the private run."""
+    common_args = [
+        "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
+        "--max-seq-len-override", "4096", "--num-tokens", "4096", "--max-prefill-length", "512",
+        "--max-running-requests", "1", "--graph", "1", "--memory-ratio", "0.75",
+        "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
+    ]
+    catalog = ["[router]", "upstream_timeout_s = 660", ""]
+    for alias, model in (("model-a", model_a), ("model-b", model_b)):
+        catalog.extend((
+            f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
+            "ttl_s = 0", "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
+        ))
+    return "\n".join(catalog)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in (
@@ -161,20 +178,8 @@ def main() -> int:
     env["PYTHONPATH"] = str(Path(args.source) / "python")
     env["TORCH_EXTENSIONS_DIR"] = str(artifacts / "torch-extensions")
     env["MAX_JOBS"] = "2"
-    common_args = [
-        "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
-        "--max-seq-len-override", "4096", "--num-tokens", "4096", "--max-prefill-length", "512",
-        "--max-running-requests", "1", "--graph", "1", "--memory-ratio", "0.75",
-        "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
-    ]
-    catalog = ["[router]", "upstream_timeout_s = 660", ""]
-    for alias, model in (("model-a", args.model_a), ("model-b", args.model_b)):
-        catalog.extend((
-            f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
-            "unload_ttl_s = 0", "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
-        ))
     catalog_path = artifacts / "models.toml"
-    catalog_path.write_text("\n".join(catalog), encoding="utf-8")
+    catalog_path.write_text(native_catalog_text(args.model_a, args.model_b), encoding="utf-8")
     with (artifacts / "kernel-preflight.log").open("wb") as log:
         subprocess.run(
             [args.python, "-c", "from freetoken.kernel.gguf import _module; _module(); print('NATIVE_KERNEL_READY')"],
