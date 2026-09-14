@@ -121,8 +121,14 @@ def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, e
 def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     """Keep per-trial process and memory observations in the private artifact set."""
     raw, hardware = request_json(base + "/router/hardware")
-    if not isinstance(hardware.get("engine"), dict) or not isinstance(hardware.get("memory"), dict):
+    engine = hardware.get("engine")
+    memory = hardware.get("memory")
+    if not isinstance(engine, dict) or not isinstance(memory, dict):
         raise RuntimeError("router hardware observation has an invalid shape")
+    if not engine.get("running") or not isinstance(engine.get("pid"), int) or not isinstance(engine.get("port"), int):
+        raise RuntimeError("router hardware observation does not identify a running engine")
+    if not all(isinstance(memory.get(key), int) for key in ("ramBytes", "vramBytes")):
+        raise RuntimeError("router hardware observation lacks byte measurements")
     (artifacts / f"{label}.hardware.json").write_bytes(raw)
     return hardware
 

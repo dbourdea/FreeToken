@@ -164,15 +164,32 @@ def test_native_router_benchmark_validates_warm_and_swap_activation_labels(nativ
 def test_native_router_benchmark_captures_private_hardware_observation(
     native_router_qualifier, monkeypatch, tmp_path
 ):
-    captured = b'{"engine":{"running":true,"pid":7},"memory":{"ramBytes":3}}'
+    captured = b'{"engine":{"running":true,"pid":7,"port":1234},"memory":{"ramBytes":3,"vramBytes":4}}'
     monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (captured, {
-        "engine": {"running": True, "pid": 7}, "memory": {"ramBytes": 3},
+        "engine": {"running": True, "pid": 7, "port": 1234},
+        "memory": {"ramBytes": 3, "vramBytes": 4},
     }))
 
     hardware = native_router_qualifier.capture_hardware("http://test", tmp_path, "warm-a")
 
     assert hardware["engine"]["pid"] == 7
     assert (tmp_path / "warm-a.hardware.json").read_bytes() == captured
+
+
+@pytest.mark.parametrize(
+    "hardware",
+    [
+        {"engine": {"running": False, "pid": 7, "port": 1234}, "memory": {"ramBytes": 3, "vramBytes": 4}},
+        {"engine": {"running": True, "pid": None, "port": 1234}, "memory": {"ramBytes": 3, "vramBytes": 4}},
+        {"engine": {"running": True, "pid": 7, "port": 1234}, "memory": {"ramBytes": None, "vramBytes": 4}},
+    ],
+)
+def test_native_router_benchmark_rejects_incomplete_hardware_observation(
+    native_router_qualifier, monkeypatch, tmp_path, hardware
+):
+    monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (b"{}", hardware))
+    with pytest.raises(RuntimeError):
+        native_router_qualifier.capture_hardware("http://test", tmp_path, "bad")
 
 
 def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_router_qualifier, tmp_path):
