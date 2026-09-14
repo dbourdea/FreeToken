@@ -288,6 +288,7 @@ class RoutingCoordinator:
         values = {
             "active_requests": status["activeRequests"],
             "queued_requests": status["queuedRequests"],
+            "active_identity_matches_engine": int(status["activeIdentityMatchesEngine"]),
             "admissions_total": status["admissions"],
             "activations_total": status["activations"],
             "activation_failures_total": status["activationFailures"],

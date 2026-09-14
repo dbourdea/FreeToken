@@ -788,6 +788,8 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         stale_status = client.get("/router/status", headers={"Authorization": "Bearer router-test-key"})
         assert stale_status.json()["residentProfiles"] == []
         assert stale_status.json()["activeIdentityMatchesEngine"] is False
+        stale_metrics = client.get("/metrics", headers={"Authorization": "Bearer router-test-key"})
+        assert "freetoken_swap_active_identity_matches_engine 0" in stale_metrics.text
         stale_models = client.get("/router/models", headers={"Authorization": "Bearer router-test-key"})
         assert stale_models.json()["data"][0]["resident"] is False
         assert stale_models.json()["capacity"] == {"maxResidentModels": 1, "availableResidentSlots": 0}
