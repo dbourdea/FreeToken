@@ -1,8 +1,21 @@
-# freetoken-swap: named, safe model switching
+# freetoken-swap: native, safe model routing
 
-The native `ft daemon` catalog currently provides **manual** named-model switching. It is not yet an automatic inference router. It keeps FreeToken's native lifecycle transaction and deliberately does not run shell commands from catalog entries. One daemon supervises one `ft serve` process at a time, so a model replacement is serialized with accounting, graceful drain, process-group cleanup, durable state, and the existing health endpoints.
+`freetoken-swap` is the native `ft daemon` routing mode. A client sends a
+supported FreeToken OpenAI- or Anthropic-compatible request to the daemon's
+stable URL with an allowlisted catalog alias in JSON `model`. The daemon alone
+admits the request, starts or reuses one `ft serve` child, waits for its
+generation-aware readiness, and proxies ordinary and SSE bytes unchanged. Its
+lease stays active until the response closes, so another model cannot replace a
+stream in flight. The same owner performs accounting, graceful drain/abort,
+process-identity checks, cleanup, rollback, and re-adoption; **do not** put
+llama-swap or another supervisor in front of the same FreeToken child.
 
-For automatic request routing, the integration path is an unmodified, pinned llama-swap binary supervising FreeToken directly, using the new `/ready` endpoint. See [the example](../examples/freetoken-swap.yaml) and [compatibility research](freetoken-swap-research.md). This direct mode does not use the daemon's durable accounting outbox. Do not let both supervisors manage the same process or port. Real-model swap qualification remains required before production use.
+The read-only, pinned llama-swap source remains a compatibility reference and
+an optional separate deployment mode, not a runtime dependency. That direct
+mode cannot gain this daemon's accounting guarantees. See the
+[parity matrix](freetoken-swap-parity-matrix.md) for the source-backed
+capability classification and [research](freetoken-swap-research.md) for
+bounded qualification evidence and limits.
 
 The catalog is TOML and is optional. Start the daemon with `--catalog` or set `FREETOKEN_SWAP_CATALOG`:
 
@@ -27,9 +40,36 @@ ft daemon switch-profile qwen-chat
 ft daemon health
 ```
 
-`GET /models`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose the same control-plane capability. They require `X-FT-Token` whenever the daemon has a token configured. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
+`GET /models`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
 
-Profiles accept only `model`, `port`, `args`, `description`, and `ready_timeout_s` (default 120 seconds). `args` is passed as an argument vector to `ft serve`; it is never interpreted by a shell. A profile cannot set `--model` or `--port` in `args`, because those fields are owned by the supervisor and are part of its conflict and re-adoption identity. The model files and catalog remain local operational configuration, not repository content.
+Profiles accept allowlisted `model`, `port`, `args`, `description`, readiness,
+TTL/unload, priority, group, and safe top-level request-filter fields. `args`
+is passed as an argument vector to `ft serve`; it is never interpreted by a
+shell. A profile cannot set `--model` or `--port` in `args`, because those
+fields are owned by the supervisor and are part of its conflict and re-adoption
+identity. The model files and catalog remain local operational configuration,
+not repository content.
+
+## Native router API
+
+The routed inference surface is `POST /v1/chat/completions`,
+`/v1/completions`, `/v1/responses`, `/v1/messages`, and
+`/v1/messages/count_tokens`. Unknown aliases return a stable 404; unsupported
+FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
+`/router/profiles`, `/router/requests`, and `/metrics` expose configured and
+resident state, capacity, queues, lifecycle timing, cancellation, and eviction
+signals. `POST /router/unload`, `/router/reload`, and
+`/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
+and an active request. `GET /router/logs?since=` is a bounded SSE event stream;
+it records only event type, alias, route path, status, cancellation state, and
+response byte count—never prompts, request bodies, headers, query strings,
+model paths, or API keys.
+
+When `router.api_keys` is configured, bearer authentication protects inference
+and all router management endpoints. An explicit daemon `X-FT-Token` remains
+the dedicated control-plane override. The guarded
+`/upstream/{profile}/...` passthrough uses the same lease but refuses a direct
+engine `prepare-stop`, which only the lifecycle owner may invoke.
 
 These are illustrative paths, not a list of qualified models. In particular, dense Qwen GGUF support requires a compatible AMD/model-loader branch and cannot be inferred from this control-plane PR.
 

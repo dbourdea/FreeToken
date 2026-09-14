@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from .accounting import AccountingOutboxError, AccountingPrepareError
 from .catalog import CatalogError, ModelCatalog
 from .inference_proxy import RequestModelError, filter_request_body, open_upstream, request_model
+from .logring import LogRing
 from .readiness import wait_for_ready
 from .router import RoutingCoordinator, RoutingError
 from .serve_manager import Conflict, SwitchLaunchError
@@ -146,6 +147,7 @@ def build_app(
     catalog: ModelCatalog | None = None,
     router: RoutingCoordinator | None = None,
     catalog_path: str | None = None,
+    router_ring: LogRing | None = None,
 ) -> FastAPI:
     import time as _time
 
@@ -155,6 +157,13 @@ def build_app(
     router = router or RoutingCoordinator(
         manager, catalog, probe, default_port=default_serve_port
     )
+    # Keep router events separate from captured engine stdout. Apart from
+    # making an operator's engine-log view useful, this prevents a noisy child
+    # from evicting the bounded lifecycle/proxy audit trail. The event payload
+    # deliberately contains no headers, query strings, request body, or model
+    # path: those may carry credentials or prompts.
+    router_ring = router_ring or LogRing(capacity=1000)
+    app.state.router_ring = router_ring
     inflight_lock = threading.Lock()
     inflight: dict[str, dict] = {}
 
@@ -204,6 +213,22 @@ def build_app(
         st = manager.status()
         return st.get("port") or default_serve_port
 
+    def require_unowned_manual_lifecycle() -> None:
+        """Keep legacy engine controls from racing a routed lease or swap.
+
+        The endpoints remain useful for a daemon with no routed owner yet, but
+        once a profile has been admitted only the router may replace or stop
+        its child. Otherwise an operator request could kill a live SSE stream
+        behind the coordinator's back and leave its residency state false.
+        """
+        state = router.status()
+        if (state["activeProfile"] is not None or state["activeRequests"]
+                or state["switching"] or state["queuedRequests"]):
+            raise HTTPException(
+                status_code=409,
+                detail="router owns or is admitting an engine; use router unload or wait for leases",
+            )
+
     def accounting_error(exc: Exception) -> JSONResponse:
         code = (
             "accounting_outbox_failed"
@@ -231,6 +256,13 @@ def build_app(
             "engineRunning": bool(st.get("running")),
         }
 
+    def router_event(event: str, **fields: Any) -> None:
+        router_ring.append(
+            json.dumps({"event": event, **fields}, separators=(",", ":"), sort_keys=True),
+            kind="event",
+            ts=wall_now(),
+        )
+
     async def forward_routed(request: Request, model: str, *, path_and_query: str, body: bytes):
         """Select a configured model, then stream the engine response unchanged.
 
@@ -239,9 +271,16 @@ def build_app(
         releases admission for the next model swap.
         """
         started = time.monotonic()
+        request_id = request.headers.get("x-ft-request-id") or uuid.uuid4().hex
+        if not request_id.isascii() or not request_id or len(request_id) > 128:
+            raise HTTPException(status_code=400, detail="X-FT-Request-ID must be 1 to 128 ASCII characters")
+        # Never include the query portion in router logs. Query parameters
+        # frequently contain signed URLs or application-level credentials.
+        safe_route = request.url.path
         try:
             lease = await run(lifecycle_pool, router.acquire, model)
         except RoutingError as exc:
+            router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
             content = {"error": {"message": str(exc), "type": exc.code}}
             if exc.recovery is not None:
                 content["recovery"] = exc.recovery
@@ -259,26 +298,29 @@ def build_app(
             )
         except Exception as exc:  # the lease must not strand a pending swap on connect failure
             lease.release()
+            router_event("upstream_connect_failed", profile=model, route=safe_route)
             return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "upstream_unavailable"}})
-
-        request_id = request.headers.get("x-ft-request-id") or uuid.uuid4().hex
-        if not request_id.isascii() or not request_id or len(request_id) > 128:
-            upstream.close()
-            lease.release()
-            raise HTTPException(status_code=400, detail="X-FT-Request-ID must be 1 to 128 ASCII characters")
         with inflight_lock:
             if request_id in inflight:
                 upstream.close()
                 lease.release()
+                router_event("request_conflict", profile=model, route=safe_route)
                 return JSONResponse(status_code=409, content={"error": {"message": "request id is already active", "type": "request_conflict"}})
-            inflight[request_id] = {"profile": lease.profile.name, "upstream": upstream}
+            inflight[request_id] = {
+                "profile": lease.profile.name,
+                "upstream": upstream,
+                "cancelled": False,
+            }
+        router_event("admitted", profile=lease.profile.name, route=safe_route)
 
         def stream_response():
             first_byte_at = None
+            byte_count = 0
             try:
                 for chunk in upstream.chunks():
                     if first_byte_at is None:
                         first_byte_at = time.monotonic()
+                    byte_count += len(chunk)
                     yield chunk
             finally:
                 ended = time.monotonic()
@@ -288,8 +330,18 @@ def build_app(
                 )
                 lease.release()
                 with inflight_lock:
-                    if inflight.get(request_id, {}).get("upstream") is upstream:
+                    item = inflight.get(request_id, {})
+                    cancelled = bool(item.get("cancelled"))
+                    if item.get("upstream") is upstream:
                         inflight.pop(request_id, None)
+                router_event(
+                    "request_finished",
+                    profile=lease.profile.name,
+                    route=safe_route,
+                    status=upstream.status,
+                    cancelled=cancelled,
+                    responseBytes=byte_count,
+                )
 
         headers = {
             key: value for key, value in upstream.headers.items()
@@ -377,11 +429,19 @@ def build_app(
     async def router_cancel(request_id: str):
         with inflight_lock:
             item = inflight.get(request_id)
+            if item is not None:
+                item["cancelled"] = True
         if item is None:
             return {"cancelled": False, "reason": "not_found"}
         item["upstream"].close()
         router.record_cancellation()
+        router_event("request_cancelled", profile=item["profile"])
         return {"cancelled": True, "id": request_id}
+
+    @app.get("/router/logs", dependencies=auth)
+    async def router_logs(request: Request, since: int = 0):
+        """Bounded lifecycle/proxy event stream, separate from engine stdout."""
+        return _log_stream(request, router_ring, since)
 
     @app.get("/metrics", dependencies=auth)
     async def router_metrics():
@@ -442,6 +502,7 @@ def build_app(
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):
+        require_unowned_manual_lifecycle()
         port = resolve_port(body.port)
         try:
             return await run(lifecycle_pool, manager.start, body.model, port, list(body.args))
@@ -461,6 +522,7 @@ def build_app(
 
     @app.post("/engine/stop", dependencies=auth)
     async def engine_stop(body: StopBody | None = None):
+        require_unowned_manual_lifecycle()
         try:
             return await run(lifecycle_pool, manager.stop, None, bool(body and body.force))
         except (AccountingPrepareError, AccountingOutboxError) as exc:
@@ -486,6 +548,7 @@ def build_app(
 
     @app.post("/engine/switch", dependencies=auth)
     async def engine_switch(body: SwitchBody):
+        require_unowned_manual_lifecycle()
         port = resolve_port(body.port)
         try:
             return await run(
@@ -505,6 +568,7 @@ def build_app(
 
     @app.post("/engine/start-profile", dependencies=auth)
     async def engine_start_profile(body: ProfileBody):
+        require_unowned_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
             result = await run(lifecycle_pool, manager.start, model, port, args)
@@ -527,6 +591,7 @@ def build_app(
 
     @app.post("/engine/switch-profile", dependencies=auth)
     async def engine_switch_profile(body: ProfileBody):
+        require_unowned_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
             result, ticket = await run(

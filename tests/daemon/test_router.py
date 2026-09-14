@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import json
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -389,3 +390,69 @@ def test_request_filter_is_explicit_top_level_removal_and_default_is_byte_preser
     raw = b'{"model":"low", "metadata":{"private":true}, "user":"operator"}'
     assert filter_request_body(raw, ()) == raw
     assert filter_request_body(raw, ("metadata", "user")) == b'{"model":"low"}'
+
+
+def test_router_event_log_is_bounded_private_and_protected(monkeypatch):
+    """Router events are useful operational evidence without retaining prompts or secrets."""
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router_ring = LogRing(capacity=1)
+
+    def upstream(**kwargs):
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{"ok":true}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            router_ring=router_ring,
+        )
+        client = TestClient(app)
+        assert client.get("/router/logs").status_code == 401
+        response = client.post(
+            "/v1/chat/completions?access_token=do-not-log",
+            content=b'{"model":"low","messages":["private prompt"]}',
+            headers={"Content-Type": "application/json", "Authorization": "Bearer router-test-key"},
+        )
+        # A legacy direct lifecycle request must not replace a resident routed
+        # child behind the coordinator's lease/residency bookkeeping.
+        blocked = client.post("/engine/stop", headers={"Authorization": "Bearer router-test-key"})
+    assert response.status_code == 200
+    assert blocked.status_code == 409
+    assert manager.model == "low.gguf"
+    records, cursor = router_ring.since(0)
+    assert cursor == 2
+    assert len(records) == 1  # the configured bounded ring evicted admission
+    events = [json.loads(record["text"]) for record in records]
+    assert [event["event"] for event in events] == ["request_finished"]
+    assert events[-1]["responseBytes"] == len(b'{"ok":true}')
+    serialized = json.dumps(events)
+    assert "private prompt" not in serialized
+    assert "do-not-log" not in serialized
+    assert "router-test-key" not in serialized
+
+
+def test_invalid_router_request_id_cannot_activate_an_engine(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    def unexpected_upstream(**kwargs):  # pragma: no cover - establishes the no-activation contract
+        raise AssertionError("invalid request ids must be rejected before proxy connection")
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", unexpected_upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions", json={"model": "low"}, headers={"X-FT-Request-ID": "x" * 129},
+        )
+    assert response.status_code == 400
+    assert manager.calls == []
