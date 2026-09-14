@@ -575,6 +575,8 @@ def test_explicit_router_cancel_closes_an_inflight_upstream(monkeypatch):
         assert not thread.is_alive()
     assert response[0].status_code == 200
     assert router.status()["cancellations"] == 1
+    assert router.status()["terminalStreams"] == 0
+    assert "freetoken_swap_terminal_streams_total 0" in router.prometheus()
     assert router.status()["activeRequests"] == 0
 
 

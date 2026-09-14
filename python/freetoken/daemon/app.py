@@ -444,17 +444,18 @@ def build_app(
                     yield chunk
             finally:
                 ended = time.monotonic()
-                router.record_stream(
-                    ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
-                    duration_s=ended - started,
-                    response_bytes=byte_count,
-                )
-                lease.release()
                 with inflight_lock:
                     item = inflight.get(request_id, {})
                     cancelled = bool(item.get("cancelled"))
                     if item.get("upstream") is upstream:
                         inflight.pop(request_id, None)
+                router.record_stream(
+                    ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
+                    duration_s=ended - started,
+                    response_bytes=byte_count,
+                    completed=not cancelled,
+                )
+                lease.release()
                 router_event(
                     "request_finished",
                     profile=lease.profile.name,

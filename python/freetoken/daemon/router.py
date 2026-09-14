@@ -319,10 +319,12 @@ class RoutingCoordinator:
             self._cancellations += 1
 
     def record_stream(
-        self, *, ttft_s: float | None, duration_s: float, response_bytes: int
+        self, *, ttft_s: float | None, duration_s: float, response_bytes: int, completed: bool = True
     ) -> None:
+        """Record transport timing without crediting a router-cancelled stream as complete."""
         with self._cond:
-            self._terminal_streams += 1
+            if completed:
+                self._terminal_streams += 1
             self._last_ttft_ms = round(ttft_s * 1000, 3) if ttft_s is not None else None
             self._last_duration_ms = round(duration_s * 1000, 3)
             self._last_response_bytes = response_bytes
