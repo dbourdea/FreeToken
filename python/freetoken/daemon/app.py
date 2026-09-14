@@ -13,6 +13,7 @@ import collections
 import functools
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -21,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
@@ -38,6 +39,20 @@ from .readiness import wait_for_ready
 from .router import RoutingCoordinator, RoutingError, allocate_loopback_port
 from .serve_manager import Conflict, SwitchLaunchError
 from .version import DAEMON_VERSION
+
+
+_HTTP_TOKEN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_DEFAULT_CORS_HEADERS = "Content-Type, Authorization, Accept, X-Requested-With"
+
+
+def _cors_request_headers(value: str | None) -> str:
+    """Echo only syntactically valid HTTP header names in a CORS preflight."""
+    if value is None:
+        return _DEFAULT_CORS_HEADERS
+    return ", ".join(
+        part for raw in value.split(",")
+        if (part := raw.strip()) and _HTTP_TOKEN.fullmatch(part)
+    )
 
 
 class StartBody(BaseModel):
@@ -184,6 +199,25 @@ def build_app(
 
     wall_now = wall_now or _time.time
     app = FastAPI(title="FreeToken daemon", version=DAEMON_VERSION)
+
+    @app.middleware("http")
+    async def cors_preflight(request: Request, call_next):
+        # Match the pinned compatibility server's side-effect-free global
+        # preflight contract. Actual requests still pass through normal route
+        # authentication and lifecycle ownership.
+        if request.method != "OPTIONS":
+            return await call_next(request)
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": _cors_request_headers(
+                    request.headers.get("access-control-request-headers")
+                ),
+                "Access-Control-Max-Age": "86400",
+            },
+        )
     catalog = catalog or ModelCatalog.empty()
     router = router or RoutingCoordinator(
         manager, catalog, probe, default_port=default_serve_port
@@ -606,15 +640,18 @@ def build_app(
         return await route_inference(request)
 
     @app.get("/v1/models", dependencies=[Depends(require_router_key)])
-    async def openai_model_list():
+    async def openai_model_list(request: Request):
         """OpenAI-compatible alias listing without exposing local model paths."""
-        return {
+        response = JSONResponse(content={
             "object": "list",
             "data": [
                 {"id": model_id, "object": "model", "created": 0, "owned_by": "freetoken"}
                 for model_id in router.catalog.listed_model_ids()
             ],
-        }
+        })
+        if origin := request.headers.get("origin"):
+            response.headers["Access-Control-Allow-Origin"] = origin
+        return response
 
     @app.api_route(
         "/upstream/{model}/{upstream_path:path}",

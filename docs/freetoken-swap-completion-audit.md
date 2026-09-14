@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 177 daemon
+- Local deterministic verification on the current Windows checkout: 179 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for Linux real-child or real-model
   evidence.
@@ -49,7 +49,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented and reverified locally |
 | Model catalog and lifecycle controls | Validated TOML catalog, collision-safe alternate IDs, unlisted profiles, authenticated profile endpoints, native process manager | Implemented and CPU/HTTP tested |
 | Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
-| Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU/HTTP tested; current native real-engine evidence required |
+| Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions, side-effect-free sanitized browser preflight and authenticated model-list CORS | CPU/HTTP tested; current native real-engine evidence required |
 | Concurrency and unloading | Same-model and conflicting-model admission plus idle eviction are deterministically tested | Current native real-engine verification required |
 | Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and Linux real-child tests are implemented; historical invalid-GGUF evidence is retained separately | Current Linux/current-branch recovery execution required |
 | Client cancellation | Native opaque router request IDs, atomic duplicate-ID rejection before admission/upstream work, disconnect-aware admission, queued/connecting/active request list, explicit cancel endpoint across every owned phase, orphan socket close, lease release, and cancellation metrics. Failed, disconnected, or cancelled admission and failed upstream connection release ownership safely. | Deterministic HTTP tested; current native same-instance GPU verification required |

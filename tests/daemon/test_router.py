@@ -608,6 +608,57 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
     assert router.status()["activeProfile"] is None
 
 
+def test_browser_cors_preflight_is_side_effect_free_and_sanitizes_headers():
+    manager = Manager()
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), token="control-secret",
+        )
+        client = TestClient(app)
+        preflight = client.options(
+            "/does-not-exist",
+            headers={"Access-Control-Request-Headers": "Content-Type, bad header, X-FT-Token"},
+        )
+        default_preflight = client.options("/v1/chat/completions")
+
+    assert preflight.status_code == 204
+    assert preflight.headers["access-control-allow-origin"] == "*"
+    assert preflight.headers["access-control-allow-methods"] == (
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    )
+    assert preflight.headers["access-control-allow-headers"] == "Content-Type, X-FT-Token"
+    assert preflight.headers["access-control-max-age"] == "86400"
+    assert default_preflight.headers["access-control-allow-headers"] == (
+        "Content-Type, Authorization, Accept, X-Requested-With"
+    )
+    assert manager.calls == []
+
+
+def test_openai_model_list_reflects_browser_origin_without_weakening_authentication():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"visible": ModelProfile("visible", "private.gguf", ())},
+        settings=RouterSettings(api_keys=("router-key",)),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc,
+        )
+        client = TestClient(app)
+        denied = client.get("/v1/models", headers={"Origin": "https://client.example"})
+        listed = client.get(
+            "/v1/models",
+            headers={"Origin": "https://client.example", "Authorization": "Bearer router-key"},
+        )
+
+    assert denied.status_code == 401
+    assert listed.status_code == 200
+    assert listed.headers["access-control-allow-origin"] == "https://client.example"
+    assert [item["id"] for item in listed.json()["data"]] == ["visible"]
+
+
 def test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})

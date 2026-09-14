@@ -105,6 +105,11 @@ FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 resident state, capacity, queues, lifecycle timing, response bytes and proxy
 byte rate, cancellation, and eviction signals. These transport measurements do
 not substitute for live engine token-throughput qualification.
+Browser clients receive the pinned compatibility contract: any `OPTIONS`
+preflight is answered without lifecycle side effects, requested header names
+are restricted to valid HTTP tokens, and authenticated `GET /v1/models`
+reflects its `Origin`. Preflight never authorizes the corresponding request;
+inference and management routes still enforce their configured keys.
 `activeIdentityMatchesEngine` makes a stale or out-of-band child visible rather
 than reporting its configured alias as resident.
 `POST /router/unload`, `/router/reload`, and
