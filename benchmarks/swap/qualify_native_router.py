@@ -118,6 +118,15 @@ def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, e
     return activations
 
 
+def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
+    """Keep per-trial process and memory observations in the private artifact set."""
+    raw, hardware = request_json(base + "/router/hardware")
+    if not isinstance(hardware.get("engine"), dict) or not isinstance(hardware.get("memory"), dict):
+        raise RuntimeError("router hardware observation has an invalid shape")
+    (artifacts / f"{label}.hardware.json").write_bytes(raw)
+    return hardware
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in (
@@ -198,6 +207,7 @@ def main() -> int:
             )
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
+            direct_row["hardware"] = capture_hardware(base, artifacts, "direct-a")
             result["trials"].append(direct_row)
 
             for label, alias, expected_delta in (
@@ -215,6 +225,7 @@ def main() -> int:
                 row["expectedActivationDelta"] = expected_delta
                 (artifacts / f"{label}.sse").write_bytes(raw)
                 (artifacts / f"{label}.metrics").write_bytes(request_bytes(base + "/metrics"))
+                row["hardware"] = capture_hardware(base, artifacts, label)
                 result["trials"].append(row)
                 save()
             result["passed"] = len(result["trials"]) == 4 and all(x["passed"] for x in result["trials"])

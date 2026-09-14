@@ -159,6 +159,20 @@ def test_native_router_benchmark_validates_warm_and_swap_activation_labels(nativ
     ) == 2
 
 
+def test_native_router_benchmark_captures_private_hardware_observation(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    captured = b'{"engine":{"running":true,"pid":7},"memory":{"ramBytes":3}}'
+    monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (captured, {
+        "engine": {"running": True, "pid": 7}, "memory": {"ramBytes": 3},
+    }))
+
+    hardware = native_router_qualifier.capture_hardware("http://test", tmp_path, "warm-a")
+
+    assert hardware["engine"]["pid"] == 7
+    assert (tmp_path / "warm-a.hardware.json").read_bytes() == captured
+
+
 @pytest.mark.parametrize(
     "status,alias,prior,delta",
     [
