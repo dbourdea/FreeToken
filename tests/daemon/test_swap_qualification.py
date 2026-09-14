@@ -161,6 +161,40 @@ def test_native_router_benchmark_rejects_completed_stream_without_usage(native_r
     assert stream.closed
 
 
+def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    statuses = iter((
+        {"evictions": 2, "activeProfile": "model-a"},
+        {"evictions": 3, "activeProfile": None},
+    ))
+
+    def request_json(url, body=None, **kwargs):
+        if url.endswith("/router/status"):
+            return b"{}", next(statuses)
+        if url.endswith("/router/unload"):
+            return b'{"unloaded":true}', {"unloaded": True}
+        if url.endswith("/router/reload"):
+            return b'{"reloaded":true}', {"reloaded": True}
+        assert url.endswith("/router/load") and body == {"name": "model-a"}
+        return b'{"profile":"model-a","port":24567}', {"profile": "model-a", "port": 24567}
+
+    closed = []
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    monkeypatch.setattr(native_router_qualifier, "require_listener_closed", closed.append)
+    catalog = tmp_path / "models.toml"
+    observation = native_router_qualifier.ttl_eviction_canary(
+        "http://test", catalog, "/private/a.gguf", "/private/b.gguf", seconds=1
+    )
+
+    assert closed == [24567]
+    assert observation == {
+        "profile": "model-a", "ttlSeconds": 2, "port": 24567,
+        "evictionIncremented": True, "listenerClosed": True, "passed": True,
+    }
+    assert "ttl_s = 2" in catalog.read_text(encoding="utf-8")
+
+
 def test_native_router_concurrent_canaries_require_same_residency(native_router_qualifier, monkeypatch):
     snapshots = iter((
         {"activeProfile": "model-a", "activations": 4, "activeRequests": 0},

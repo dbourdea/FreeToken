@@ -290,7 +290,46 @@ def require_listener_closed(port: int) -> None:
             raise RuntimeError("temporary engine listener remains reachable after cleanup")
 
 
-def native_catalog_text(model_a: str, model_b: str) -> str:
+def ttl_eviction_canary(
+    base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45
+) -> dict:
+    """Exercise idle-TTL ownership cleanup against the temporary catalog only."""
+    _, before = request_json(base + "/router/status")
+    prior_evictions = before.get("evictions")
+    if not isinstance(prior_evictions, int):
+        raise RuntimeError("router status lacks eviction counter")
+    _, unloaded = request_json(base + "/router/unload", {}, timeout=45)
+    if unloaded.get("unloaded") is not True:
+        raise RuntimeError("could not unload the prior resident before TTL qualification")
+    catalog_path.write_text(native_catalog_text(model_a, model_b, ttl_s=2), encoding="utf-8")
+    _, reloaded = request_json(base + "/router/reload", {}, timeout=30)
+    if reloaded.get("reloaded") is not True:
+        raise RuntimeError("temporary TTL catalog reload was not acknowledged")
+    _, loaded = request_json(base + "/router/load", {"name": "model-a"}, timeout=660)
+    port = loaded.get("port")
+    if loaded.get("profile") != "model-a" or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise RuntimeError("TTL qualification did not activate a concrete model-a engine")
+    deadline = time.monotonic() + seconds
+    status: dict | None = None
+    while time.monotonic() < deadline:
+        status = request_json(base + "/router/status", timeout=3)[1]
+        if status.get("activeProfile") is None and status.get("evictions") == prior_evictions + 1:
+            break
+        time.sleep(0.1)
+    if status is None or status.get("activeProfile") is not None or status.get("evictions") != prior_evictions + 1:
+        raise TimeoutError("idle TTL did not evict the temporary resident engine")
+    require_listener_closed(port)
+    return {
+        "profile": "model-a",
+        "ttlSeconds": 2,
+        "port": port,
+        "evictionIncremented": True,
+        "listenerClosed": True,
+        "passed": True,
+    }
+
+
+def native_catalog_text(model_a: str, model_b: str, *, ttl_s: int = 0) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
         "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
@@ -302,7 +341,7 @@ def native_catalog_text(model_a: str, model_b: str) -> str:
     for alias, model in (("model-a", model_a), ("model-b", model_b)):
         catalog.extend((
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
-            "ttl_s = 0", "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
+            f"ttl_s = {ttl_s}", "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
         ))
     return "\n".join(catalog)
 
@@ -412,11 +451,15 @@ def main() -> int:
                 final_engine_port = row["hardware"]["engine"]["port"]
                 result["trials"].append(row)
                 save()
+            result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
+            final_engine_port = result["ttl"]["port"]
+            save()
             result["passed"] = (
                 len(result["trials"]) == 4
                 and all(x["passed"] for x in result["trials"])
                 and result.get("cancellation", {}).get("passed") is True
                 and result.get("concurrency", {}).get("passed") is True
+                and result.get("ttl", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)
