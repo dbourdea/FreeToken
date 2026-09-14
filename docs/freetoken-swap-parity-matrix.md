@@ -42,11 +42,11 @@ llama-swap code.
 | Anthropic Messages and token-count routing | Native routes use the same admission and proxy contract | Deterministic HTTP tests cover both Messages and token-count routing; add live failure proof. |
 | Unknown-model status and direct upstream access | Native stable unknown-model error and `/upstream/{profile}/...` passthrough through the same lease | Deterministic tests cover GET passthrough, query forwarding, and rejection of unsafe direct `prepare-stop`; add real-engine coverage. |
 | FIFO, priority, exclusive group routing | Native priority-aware FIFO queue and one-engine exclusive admission. The TOML parser rejects coexistence flags it cannot honor, while admitting singleton persistent protected slots. | Deterministic tests cover priority-before-earlier-low-priority queueing, accepted/rejected group policy and capacity protection. The private native harness holds A, proves B queues without disturbing A, cancels A, and requires ordered B then A activation; current GMKtek execution remains required. |
-| Matrix capacity policy and eviction costs | Native explicit one-resident-model policy exposes active group, resident model, available slots, and eviction counters | Multi-resident matrix solving and memory-qualified eviction cost selection are missing. |
+| Matrix or equivalent capacity policy and eviction costs | **Native equivalent policy:** the sole `ServeManager` child is the one resident slot; status exposes its exact identity, group, availability, queue, and eviction decisions. | Deterministic tests and the private maintenance harness cover exclusive transitions and persistent-slot protection. Multi-resident matrix solving and memory-ranked victim selection are **inapplicable under one-engine ownership** because there is never a choice among co-resident victims; they become deferred requirements only if FreeToken adds multi-engine ownership. |
 | Persistent resident models | Native persistent group protects the sole resident slot until explicit unload | Deterministic capacity-protection test exists. Multi-resident preload is unavailable with the current one-engine supervisor. |
 | TTL and unload timeout | Native timer schedules idle-only eviction; authenticated `POST /router/unload` uses the profile or global graceful-stop timeout and the existing accounting transaction | Deterministic lease/TTL and explicit-unload tests cover no eviction while leased, profile timeout selection, and durable manager cleanup; real-engine endurance remains separately bounded. |
 | Load/unload management API and running-model list | Native router status, configured plus resident `/router/models`, `POST /router/load`, and `POST /router/unload` through the same lifecycle coordinator. A named body unloads that profile; no body unloads all residents (the current resident under one-engine capacity). | Deterministic HTTP tests prove named mismatch preservation, named unload, and no-body unload-all. Load-all and multi-resident management are inapplicable to the explicit one-engine capacity policy. |
-| Profiles | Native `/router/profiles`, configured model catalog, and profile activation through routed request or existing explicit engine controls | Add a documented profile-transform policy beyond alias selection if FreeToken needs it. |
+| Profiles | **Native:** `/router/profiles`, validated aliases, per-profile lifecycle settings, arguments, priority, group membership, and safe `drop_fields`, with activation through routed requests or explicit controls | Arbitrary selector expressions and profile transforms are intentionally deferred because FreeToken has no corresponding safe product contract; unsupported configuration is rejected rather than evaluated. |
 | API keys | Native router bearer keys protect inference and, absent a separate daemon token, management; `X-FT-Token` remains the dedicated control-plane override | Deterministic authorization tests cover inference, router status, and atomic catalog-driven key rotation. |
 | Logs and bounded streaming logs | Native, separate bounded router event ring at authenticated `GET /router/logs?since=` with the same replay/resume/SSE contract as engine logs | Deterministic tests prove admission/completion events, privacy-safe payloads, bounded ring behavior, and management authorization. |
 | Prometheus and activity/performance metrics | Native `/metrics` exposes bounded router admission, queue wait, active-identity, activation time, failure, cancellation, eviction, normal-terminal-stream, last-TTFT, last-duration, response-byte, and proxy-byte-rate signals; router-cancelled streams are not credited as normal terminal completions; engine metrics remain separately available | `benchmarks/swap/qualify_native_router.py` collects private direct/warm/cold/alternating first-byte, duration, and streamed-usage-derived completion-token-rate evidence. It still requires an approved Linux GMKtek EVO-X2 execution, including model throughput, process, and memory observations. |
@@ -76,19 +76,18 @@ delegate automatic routing to llama-swap while retaining safety only in the
 manual daemon. The existing llama-swap integration remains a compatibility and
 comparison reference until native request routing reaches the acceptance gates.
 
-## Initial implementation sequence
+## Remaining acceptance sequence
 
-1. Define a versioned router configuration and strict parser, including models,
-   API keys, TTL, routing groups, priorities, and safe defaults.
-2. Add a request-preserving native proxy with model selection, priority-aware
-   FIFO admission, SSE forwarding, cancellation, and an observable running-state registry.
-   The first implementation is present in `daemon/router.py` and
-   `daemon/inference_proxy.py`; it is not yet live-qualified.
-3. Connect proxy decisions to the existing `ServeManager` accounting, recovery,
-   re-adoption, readiness, and process identity safeguards.
-4. Add unload, profile, log, metrics, and configuration-reload management APIs.
-5. Add group and capacity policies after single-model correctness, then qualify
-   all concurrent residency on measured GMKtek EVO-X2 capacity.
+1. Execute the current Linux real-process tests, including dynamic-port cleanup,
+   rollback, accounting, and router-bound re-adoption.
+2. In an approved GMKtek EVO-X2 maintenance window, run the private native
+   qualification harness through direct, warm, cold, alternating, cancellation,
+   same-model concurrency, conflicting-model drain, failed-switch recovery,
+   daemon re-adoption, reload-conflict, persistent-capacity, and TTL gates.
+3. Restore and health-check the protected workload, retain raw evidence privately,
+   and publish only sanitized aggregate observations in the final audit.
+4. Re-run deterministic and combined-tree compatibility suites at the final PR
+   head and keep the PR draft until all applicable evidence is linked.
 
 Every row moves to Native only after deterministic tests and relevant live
 evidence are linked here. No endpoint name alone establishes parity.
