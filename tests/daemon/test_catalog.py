@@ -287,6 +287,7 @@ unload_timeout_s = 45
 upstream_timeout_s = 42
 scheduler = "fifo"
 global_concurrency_limit = 4
+send_loading_state = true
 
 [router.groups.interactive]
 members = ["coding", "chat"]
@@ -299,6 +300,7 @@ ttl_s = 0
 unload_timeout_s = 60
 priority = 10
 concurrency_limit = 2
+send_loading_state = false
 group = "interactive"
 
 [models.chat]
@@ -310,12 +312,13 @@ priority = -5
     assert catalog.settings.default_ttl_s == 300
     assert catalog.settings.upstream_timeout_s == 42
     assert catalog.settings.global_concurrency_limit == 4
+    assert catalog.settings.send_loading_state is True
     assert catalog.settings.groups[0].members == ("coding", "chat")
     public = {item["name"]: item for item in catalog.public()}
     assert public["coding"] == {
         "name": "coding", "model": "coding.gguf", "args": [], "readyTimeoutS": 120.0,
         "ttlS": 0.0, "unloadTimeoutS": 60.0, "priority": 10,
-        "group": "interactive", "concurrencyLimit": 2,
+        "group": "interactive", "concurrencyLimit": 2, "sendLoadingState": False,
     }
     assert "api_keys" not in str(public)
 
@@ -327,7 +330,9 @@ priority = -5
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
     ("[router]\ninclude_aliases_in_list = 'yes'", "include_aliases_in_list"),
     ("[router]\nglobal_concurrency_limit = -1", "global_concurrency_limit"),
+    ("[router]\nsend_loading_state = 'yes'", "send_loading_state"),
     ("concurrency_limit = true", "concurrency_limit"),
+    ("send_loading_state = 1", "send_loading_state"),
     ('[router.groups."bad/name"]\nmembers = ["a"]', "router group names"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),

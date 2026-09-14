@@ -48,6 +48,7 @@ class RouterSettings:
     groups: tuple[RoutingGroup, ...] = ()
     include_aliases_in_list: bool = False
     global_concurrency_limit: int = 0
+    send_loading_state: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ class ModelProfile:
     aliases: tuple[str, ...] = ()
     unlisted: bool = False
     concurrency_limit: int = 0
+    send_loading_state: bool | None = None
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -97,6 +99,8 @@ class ModelProfile:
             doc["unlisted"] = True
         if self.concurrency_limit:
             doc["concurrencyLimit"] = self.concurrency_limit
+        if self.send_loading_state is not None:
+            doc["sendLoadingState"] = self.send_loading_state
         return doc
 
 
@@ -204,6 +208,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     allowed = {
         "api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s",
         "scheduler", "groups", "include_aliases_in_list", "global_concurrency_limit",
+        "send_loading_state",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -227,6 +232,9 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         or not 0 <= global_concurrency_limit <= 1_000_000
     ):
         raise CatalogError("router.global_concurrency_limit must be an integer from 0 through 1000000")
+    send_loading_state = value.get("send_loading_state", False)
+    if not isinstance(send_loading_state, bool):
+        raise CatalogError("router.send_loading_state must be a boolean")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -283,6 +291,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         groups=tuple(groups),
         include_aliases_in_list=include_aliases_in_list,
         global_concurrency_limit=global_concurrency_limit,
+        send_loading_state=send_loading_state,
     )
 
 
@@ -315,7 +324,7 @@ def _profile(name: str, value: object) -> ModelProfile:
     allowed = {
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
-        "concurrency_limit",
+        "concurrency_limit", "send_loading_state",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -385,8 +394,11 @@ def _profile(name: str, value: object) -> ModelProfile:
         raise CatalogError(
             f"models.{name}.concurrency_limit must be an integer from 0 through 1000000"
         )
+    send_loading_state = value.get("send_loading_state")
+    if send_loading_state is not None and not isinstance(send_loading_state, bool):
+        raise CatalogError(f"models.{name}.send_loading_state must be a boolean")
     return ModelProfile(
         name, model, tuple(raw_args), port, description, ready_timeout_s,
         ttl_s, unload_timeout_s, priority, group, tuple(drop_fields), tuple(aliases), unlisted,
-        concurrency_limit,
+        concurrency_limit, send_loading_state,
     )

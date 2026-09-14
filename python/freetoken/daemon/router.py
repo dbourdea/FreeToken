@@ -91,6 +91,7 @@ class RoutingCoordinator:
         self._cond = threading.Condition(threading.Lock())
         self._next_sequence = 0
         self._pending: list[tuple[int, int, str]] = []
+        self._pending_by_cancellation: dict[threading.Event, tuple[int, int, str]] = {}
         self._leases = 0
         self._reservations = 0
         self._profile_reservations: dict[str, int] = {}
@@ -145,7 +146,12 @@ class RoutingCoordinator:
         self._active_name = matches[0].name
         self._schedule_idle_eviction()
 
-    def acquire(self, name: str, cancellation: threading.Event | None = None) -> RouteLease:
+    def acquire(
+        self,
+        name: str,
+        cancellation: threading.Event | None = None,
+        on_reserved: Callable[[bool, int], None] | None = None,
+    ) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
         queued_at = time.monotonic()
         with self._cond:
@@ -165,16 +171,27 @@ class RoutingCoordinator:
             ticket = (-profile.priority, self._next_sequence, profile.name)
             self._next_sequence += 1
             self._pending.append(ticket)
+            if cancellation is not None:
+                self._pending_by_cancellation[cancellation] = ticket
+            if on_reserved is not None:
+                try:
+                    position = sorted(self._pending).index(ticket) + 1
+                    on_reserved(not self._active_profile_ready_locked(profile), position)
+                except BaseException:
+                    self._remove_pending_locked(ticket, cancellation)
+                    self._drop_concurrency_reservation_locked(profile)
+                    self._cond.notify_all()
+                    raise
             while True:
                 if self._shutdown_requested:
-                    self._pending.remove(ticket)
+                    self._remove_pending_locked(ticket, cancellation)
                     self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
                         "router_shutting_down", "router shutdown is in progress", status_code=503
                     )
                 if cancellation is not None and cancellation.is_set():
-                    self._pending.remove(ticket)
+                    self._remove_pending_locked(ticket, cancellation)
                     self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
@@ -192,13 +209,13 @@ class RoutingCoordinator:
                     # cold requests then reuse the committed resident target.
                     port = self._port_for(profile)
                 except BaseException:
-                    self._pending.remove(ticket)
+                    self._remove_pending_locked(ticket, cancellation)
                     self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise
                 if self._matches_active(profile, port):
                     self._cancel_idle_timer()
-                    self._pending.remove(ticket)
+                    self._remove_pending_locked(ticket, cancellation)
                     self._leases += 1
                     self._admissions += 1
                     self._last_queue_wait_ms = round((time.monotonic() - queued_at) * 1000, 3)
@@ -210,14 +227,14 @@ class RoutingCoordinator:
                     continue
                 block = self._capacity_block(profile)
                 if block is not None:
-                    self._pending.remove(ticket)
+                    self._remove_pending_locked(ticket, cancellation)
                     self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError("capacity_unavailable", block, status_code=409)
                 self._switching = True
                 self._activating_name = profile.name
                 self._activating_port = port
-                self._pending.remove(ticket)
+                self._remove_pending_locked(ticket, cancellation)
                 break
 
         activated_at = time.monotonic()
@@ -256,6 +273,22 @@ class RoutingCoordinator:
         with self._cond:
             cancellation.set()
             self._cond.notify_all()
+
+    def queue_position(self, cancellation: threading.Event) -> int | None:
+        """Return the current one-based scheduler position for a reserved request."""
+        with self._cond:
+            ticket = self._pending_by_cancellation.get(cancellation)
+            if ticket is None:
+                return None
+            return sorted(self._pending).index(ticket) + 1
+
+    def loading_feedback_enabled(self, name: str) -> bool:
+        """Resolve the per-profile loading setting over the global default atomically."""
+        with self._cond:
+            profile = self._catalog.get(name)
+            if profile.send_loading_state is not None:
+                return profile.send_loading_state
+            return self._catalog.settings.send_loading_state
 
     def begin_manual_lifecycle(self, *, preempt_manual: bool = False) -> object:
         """Reserve the lifecycle barrier for one legacy engine operation."""
@@ -658,6 +691,22 @@ class RoutingCoordinator:
                 "current profile before selecting it"
             )
         return None
+
+    def _remove_pending_locked(
+        self,
+        ticket: tuple[int, int, str],
+        cancellation: threading.Event | None,
+    ) -> None:
+        """Remove one pending ticket and its optional progress lookup atomically."""
+        self._pending.remove(ticket)
+        if cancellation is not None and self._pending_by_cancellation.get(cancellation) == ticket:
+            self._pending_by_cancellation.pop(cancellation, None)
+
+    def _active_profile_ready_locked(self, profile: ModelProfile) -> bool:
+        """Whether *profile* is the exact readiness-gated resident engine."""
+        if self._active_name != profile.name:
+            return False
+        return self._engine_matches(profile, self._port_for(profile))
 
     def _reserve_concurrency_locked(self, profile: ModelProfile) -> None:
         """Reserve active/queued capacity or reject immediately like the pinned scheduler."""

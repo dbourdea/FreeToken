@@ -280,6 +280,61 @@ def test_global_concurrency_limit_rejects_conflicting_model_before_it_queues():
     lease.release()
 
 
+def test_admission_reservation_reports_cold_queue_position_and_cleans_up_on_cancel():
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    active = router.acquire("low")
+    cancellation = threading.Event()
+    reserved = threading.Event()
+    cold = []
+    errors = []
+
+    def acquire_high():
+        try:
+            router.acquire(
+                "high", cancellation, lambda loading_required, position: (
+                    cold.append((loading_required, position)), reserved.set()
+                ),
+            )
+        except RoutingError as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=acquire_high)
+    thread.start()
+    assert reserved.wait(1)
+    assert cold == [(True, 1)]
+    assert router.queue_position(cancellation) == 1
+    router.cancel_acquire(cancellation)
+    thread.join(1)
+    assert not thread.is_alive()
+    assert [(error.code, error.status_code) for error in errors] == [("request_cancelled", 409)]
+    assert router.queue_position(cancellation) is None
+    assert router.status()["reservedRequests"] == 1
+    active.release()
+
+
+def test_admission_reservation_reports_warm_and_callback_failure_releases_capacity():
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    router.acquire("low").release()
+    observed = []
+    warm = router.acquire(
+        "low", threading.Event(), lambda loading_required, position: observed.append(
+            (loading_required, position)
+        )
+    )
+    assert observed == [(False, 1)]
+    warm.release()
+
+    def fail(_loading_required, _position):
+        raise RuntimeError("observer failed")
+
+    with pytest.raises(RuntimeError, match="observer failed"):
+        router.acquire("low", threading.Event(), fail)
+    assert router.status()["reservedRequests"] == 0
+    assert router.status()["queuedRequests"] == 0
+
+
 def test_http_concurrency_rejection_returns_retry_after_and_releases_request_id(monkeypatch):
     manager = Manager()
     profile = ModelProfile("low", "low.gguf", (), concurrency_limit=1)
@@ -1502,6 +1557,403 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         server.shutdown()
         server.server_close()
         worker.join(2)
+
+
+def test_streaming_chat_emits_cold_queue_feedback_then_preserves_upstream_sse(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "low": ModelProfile("low", "low.gguf", ()),
+            "high": ModelProfile("high", "high.gguf", ()),
+        },
+        settings=RouterSettings(send_loading_state=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("low")
+    upstream_body = b'data: {"token":"real"}\n\ndata: [DONE]\n\n'
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: UpstreamResponse(
+            200, {"Content-Type": "text/event-stream"}, BytesIO(upstream_body)
+        ),
+    )
+    responses = []
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(2) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        thread = threading.Thread(target=lambda: responses.append(client.post(
+            "/v1/chat/completions",
+            json={"model": "high", "stream": True, "messages": []},
+            headers={"X-FT-Request-ID": "cold-feedback"},
+        )))
+        thread.start()
+        for _ in range(100):
+            if router.status()["queuedRequests"] == 1:
+                break
+            time.sleep(0.01)
+        assert router.status()["queuedRequests"] == 1
+        active.release()
+        thread.join(3)
+        assert not thread.is_alive()
+
+    response = responses[0]
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["x-ft-request-id"] == "cold-feedback"
+    content = response.content.decode("utf-8")
+    assert '"reasoning_content":"freetoken-swap loading model: high\\n"' in content
+    assert '"reasoning_content":"\\nQueue position: #1 "' in content
+    assert response.content.endswith(upstream_body)
+    assert router.status()["reservedRequests"] == 0
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["terminalStreams"] == 1
+
+
+def test_loading_feedback_warm_path_and_per_model_disable_preserve_exact_response(monkeypatch):
+    upstream_body = b'data: {"token":"unchanged"}\n\ndata: [DONE]\n\n'
+
+    def upstream(**kwargs):
+        return UpstreamResponse(
+            201,
+            {"Content-Type": "text/event-stream", "X-Engine": "exact"},
+            BytesIO(upstream_body),
+        )
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    for warm, override in ((True, None), (False, False)):
+        manager = Manager()
+        profile = ModelProfile("low", "low.gguf", (), send_loading_state=override)
+        catalog_doc = ModelCatalog(
+            {"low": profile}, settings=RouterSettings(send_loading_state=True)
+        )
+        router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+        if warm:
+            router.acquire("low").release()
+        with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+            app = build_app(
+                manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+                lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            )
+            response = TestClient(app).post(
+                "/v1/chat/completions",
+                json={"model": "low", "stream": True, "messages": []},
+            )
+        assert response.status_code == 201
+        assert response.headers["x-engine"] == "exact"
+        assert response.content == upstream_body
+
+
+def test_loading_feedback_never_turns_concurrency_rejection_into_sse(monkeypatch):
+    manager = Manager()
+    profile = ModelProfile("low", "low.gguf", (), concurrency_limit=1)
+    catalog_doc = ModelCatalog(
+        {"low": profile}, settings=RouterSettings(send_loading_state=True)
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("over-limit request reached upstream"),
+    )
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions",
+            json={"model": "low", "stream": True, "messages": []},
+        )
+
+    assert response.status_code == 429
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["retry-after"] == "1"
+    assert response.json()["error"]["type"] == "concurrency_limit"
+    assert b"loading model" not in response.content
+    active.release()
+
+
+def test_loading_feedback_frames_activation_failure_and_done(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(send_loading_state=True),
+    )
+
+    def fail_ready(manager, probe, *, pid, port, timeout_s):
+        time.sleep(0.05)
+        return {"ready": False, "reason": "qualification failed"}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=fail_ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("failed activation reached upstream"),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions",
+            json={"model": "low", "stream": True, "messages": []},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert b"qualification failed" in response.content
+    assert b'"type":"engine_not_ready"' in response.content
+    assert response.content.endswith(b"data: [DONE]\n\n")
+    assert all(
+        not line or line.startswith(b"data: ")
+        for line in response.content.rstrip().splitlines()
+    )
+    assert router.status()["reservedRequests"] == 0
+    assert router.status()["activeRequests"] == 0
+
+
+def test_loading_feedback_frames_upstream_connect_failure_and_releases_lease(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(send_loading_state=True),
+    )
+
+    def slow_ready(manager, probe, *, pid, port, timeout_s):
+        time.sleep(0.05)
+        return {"ready": True, "health": {"status": "ok"}}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=slow_ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("connection refused")),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions",
+            json={"model": "low", "stream": True, "messages": []},
+        )
+
+    assert response.status_code == 200
+    assert b"connection refused" in response.content
+    assert b'"type":"upstream_unavailable"' in response.content
+    assert response.content.endswith(b"data: [DONE]\n\n")
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["reservedRequests"] == 0
+
+
+def test_loading_feedback_explicit_queue_cancellation_is_in_band_and_releases(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "low": ModelProfile("low", "low.gguf", ()),
+            "high": ModelProfile("high", "high.gguf", ()),
+        },
+        settings=RouterSettings(send_loading_state=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("cancelled request reached upstream"),
+    )
+    responses = []
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        thread = threading.Thread(target=lambda: responses.append(client.post(
+            "/v1/chat/completions",
+            json={"model": "high", "stream": True, "messages": []},
+            headers={"X-FT-Request-ID": "cancel-loading"},
+        )))
+        thread.start()
+        for _ in range(100):
+            if router.status()["queuedRequests"] == 1:
+                break
+            time.sleep(0.01)
+        assert router.status()["queuedRequests"] == 1
+        cancelled = client.post("/router/requests/cancel-loading/cancel")
+        assert cancelled.json() == {"cancelled": True, "id": "cancel-loading"}
+        thread.join(3)
+        assert not thread.is_alive()
+
+    assert responses[0].status_code == 200
+    assert b'"type":"request_cancelled"' in responses[0].content
+    assert responses[0].content.endswith(b"data: [DONE]\n\n")
+    assert router.status()["queuedRequests"] == 0
+    assert router.status()["reservedRequests"] == 1
+    active.release()
+
+
+def test_loading_feedback_cancellation_during_activation_is_not_completion_credit(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(send_loading_state=True),
+    )
+    activation_started = threading.Event()
+    finish_activation = threading.Event()
+
+    def blocking_ready(manager, probe, *, pid, port, timeout_s):
+        activation_started.set()
+        assert finish_activation.wait(2)
+        return {"ready": True, "health": {"status": "ok"}}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=blocking_ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("cancelled activation reached upstream"),
+    )
+    responses = []
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        thread = threading.Thread(target=lambda: responses.append(client.post(
+            "/v1/chat/completions",
+            json={"model": "low", "stream": True, "messages": []},
+            headers={"X-FT-Request-ID": "cancel-activation"},
+        )))
+        thread.start()
+        assert activation_started.wait(1)
+        cancelled = client.post("/router/requests/cancel-activation/cancel")
+        assert cancelled.json() == {"cancelled": True, "id": "cancel-activation"}
+        finish_activation.set()
+        thread.join(3)
+        assert not thread.is_alive()
+
+    assert responses[0].status_code == 200
+    assert b'"type":"request_cancelled"' in responses[0].content
+    assert responses[0].content.endswith(b"data: [DONE]\n\n")
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["reservedRequests"] == 0
+    assert router.status()["terminalStreams"] == 0
+    assert router.status()["cancellations"] == 1
+
+
+def test_loading_feedback_disconnect_cancels_queued_ownership(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "low": ModelProfile("low", "low.gguf", ()),
+            "high": ModelProfile("high", "high.gguf", ()),
+        },
+        settings=RouterSettings(send_loading_state=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("disconnected request reached upstream"),
+    )
+
+    async def scenario(app):
+        body = json.dumps({"model": "high", "stream": True, "messages": []}).encode()
+        disconnect = asyncio.Event()
+        request_sent = False
+        sent = []
+
+        async def receive():
+            nonlocal request_sent
+            if not request_sent:
+                request_sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+            "method": "POST", "scheme": "http", "path": "/v1/chat/completions",
+            "raw_path": b"/v1/chat/completions", "query_string": b"", "root_path": "",
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"x-ft-request-id", b"disconnect-loading"),
+            ],
+            "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 80),
+        }
+        request = asyncio.create_task(app(scope, receive, send))
+        for _ in range(100):
+            if router.status()["queuedRequests"] == 1:
+                break
+            await asyncio.sleep(0.01)
+        assert router.status()["queuedRequests"] == 1
+        disconnect.set()
+        await asyncio.wait_for(request, 2)
+        for _ in range(100):
+            if router.status()["queuedRequests"] == 0:
+                break
+            await asyncio.sleep(0.01)
+        assert router.status()["queuedRequests"] == 0
+        assert any(message["type"] == "http.response.start" for message in sent)
+
+    with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert router.status()["reservedRequests"] == 1
+    assert router.status()["cancellations"] == 1
+    active.release()
+    assert manager.calls == [("start", "low.gguf")]
+
+
+@pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/v1/chat/completions", {"model": "low", "stream": False, "messages": []}),
+        ("/v1/chat/completions", {"model": "low", "stream": 1, "messages": []}),
+        ("/v1/completions", {"model": "low", "stream": True, "prompt": ""}),
+        ("/v1/messages", {"model": "low", "stream": True, "messages": []}),
+    ],
+)
+def test_loading_feedback_is_only_for_strictly_streaming_chat_requests(
+    monkeypatch, path, payload
+):
+    body = b'{"ordinary":true}'
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(send_loading_state=True),
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: UpstreamResponse(
+            202, {"Content-Type": "application/json", "X-Mode": "ordinary"}, BytesIO(body)
+        ),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(path, json=payload)
+
+    assert response.status_code == 202
+    assert response.headers["x-mode"] == "ordinary"
+    assert response.content == body
 
 
 def test_request_filter_is_explicit_top_level_removal_and_default_is_byte_preserving():

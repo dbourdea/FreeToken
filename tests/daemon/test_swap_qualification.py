@@ -133,12 +133,50 @@ def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(nat
     assert observation["model"] == "model-a"
     assert observation["passed"] is True
     assert observation["firstByteSeconds"] is not None
+    assert observation["firstTokenSeconds"] == observation["firstByteSeconds"]
     assert observation["durationSeconds"] >= observation["firstByteSeconds"]
     assert observation["decodeSeconds"] == 1.0
     assert observation["completionTokens"] == 1
     assert observation["completionTokensPerSecond"] == 1.0
     assert observation["responseBytes"] == len(raw)
     assert stream.closed
+
+
+@pytest.mark.parametrize("expected", [True, False])
+def test_native_router_loading_feedback_gate(native_router_qualifier, expected):
+    frames = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"freetoken-swap "}}]}',
+        b'data: {"choices":[{"delta":{"reasoning_content":"loading model: model-b"}}]}',
+        b'data: {"choices":[{"delta":{"content":"4"}}]}',
+        b"data: [DONE]",
+    ]
+    raw = b"\n\n".join(frames[2:] if not expected else frames) + b"\n\n"
+    assert native_router_qualifier.validate_loading_feedback(raw, expected=expected) == {
+        "expected": expected, "observed": expected, "passed": True,
+    }
+    with pytest.raises(RuntimeError, match="loading feedback"):
+        native_router_qualifier.validate_loading_feedback(raw, expected=not expected)
+
+
+def test_native_router_canary_separates_loading_first_byte_from_first_token(
+    native_router_qualifier, monkeypatch
+):
+    stream = io.BytesIO(
+        b'data: {"choices":[{"delta":{"reasoning_content":"freetoken-swap loading model: a"}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"4"}}]}\n\n'
+        b'data: {"choices":[],"usage":{"completion_tokens":1}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+    clock = iter([10.0, 10.1, 15.0, 16.0])
+    monkeypatch.setattr(native_router_qualifier.time, "monotonic", lambda: next(clock))
+
+    _, observation = native_router_qualifier.canary("http://test", "model-a", direct=False)
+
+    assert observation["firstByteSeconds"] == pytest.approx(0.1)
+    assert observation["firstTokenSeconds"] == 5.0
+    assert observation["decodeSeconds"] == 1.0
+    assert observation["completionTokensPerSecond"] == 1.0
 
 
 def test_native_router_benchmark_rejects_nonterminal_or_wrong_answer_streams(native_router_qualifier, monkeypatch):
@@ -683,6 +721,7 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert catalog.settings.upstream_timeout_s == 660
     assert catalog.settings.api_keys == ("private-key",)
     assert catalog.settings.include_aliases_in_list is True
+    assert catalog.settings.send_loading_state is True
     assert catalog.get("model-a").model == "first.gguf"
     assert catalog.get("model-a").port == 0
     assert catalog.get("model-a").ttl_s == 0

@@ -370,13 +370,20 @@ def build_app(
         finally:
             router.end_manual_lifecycle(owner)
 
-    async def acquire_route(name: str, cancellation: threading.Event | None = None):
+    async def acquire_route(
+        name: str,
+        cancellation: threading.Event | None = None,
+        on_reserved: Callable[[bool, int], None] | None = None,
+    ):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
         loop = asyncio.get_running_loop()
         cancellation = cancellation or threading.Event()
-        future = loop.run_in_executor(lifecycle_pool, router.acquire, name, cancellation)
+        future = loop.run_in_executor(
+            lifecycle_pool, router.acquire, name, cancellation, on_reserved
+        )
+        shielded = asyncio.shield(future)
         try:
-            return await asyncio.shield(future)
+            return await shielded
         except asyncio.CancelledError:
             def release_orphaned_lease(done) -> None:
                 try:
@@ -386,6 +393,13 @@ def build_app(
                 lease.release()
 
             future.add_done_callback(release_orphaned_lease)
+            # ``asyncio.shield`` creates a wrapper future. If the underlying
+            # admission ends with an expected cancellation error after its
+            # waiter is gone, retrieve that exception instead of letting the
+            # event loop report it as unhandled.
+            shielded.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
             router.cancel_acquire(cancellation)
             router.record_cancellation()
             raise
@@ -559,8 +573,284 @@ def build_app(
                 "cancellation": admission_cancellation,
                 "cancelled": False,
             }
+
+        def loading_frame(text: str) -> bytes:
+            payload = {"choices": [{"delta": {"reasoning_content": text}}]}
+            return b"data: " + json.dumps(
+                payload, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8") + b"\n\n"
+
+        def loading_error(exc: BaseException) -> bytes:
+            error_type = exc.code if isinstance(exc, RoutingError) else "upstream_unavailable"
+            payload: dict[str, Any] = {"error": {"message": str(exc), "type": error_type}}
+            if isinstance(exc, RoutingError) and exc.recovery is not None:
+                payload["recovery"] = exc.recovery
+            return (
+                b"data: "
+                + json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                + b"\n\ndata: [DONE]\n\n"
+            )
+
+        stream_state = {"started": False}
+
+        def abandon_loading_acquisition(
+            acquisition: asyncio.Task, *, record_cancellation: bool = True
+        ) -> None:
+            """Wake an abandoned admission and release any lease it later returns."""
+            router.cancel_acquire(admission_cancellation)
+            if record_cancellation:
+                router.record_cancellation()
+
+            def release_if_admitted(done: asyncio.Task) -> None:
+                try:
+                    admitted = done.result()
+                except BaseException:
+                    return
+                admitted.release()
+
+            acquisition.add_done_callback(release_if_admitted)
+
+        async def loading_stream(acquisition: asyncio.Task):
+            """Bridge one admitted cold request into loading SSE, then its real response."""
+            lease = None
+            upstream = None
+            first_byte_at = None
+            byte_count = 0
+            cancelled = False
+            cancellation_recorded = False
+            last_position = None
+            try:
+                stream_state["started"] = True
+                yield loading_frame("━━━━━\n")
+                yield loading_frame(f"freetoken-swap loading model: {model}\n")
+                initial_position = reservation_state.get("queuePosition")
+                if isinstance(initial_position, int):
+                    last_position = initial_position
+                    yield loading_frame(f"\nQueue position: #{initial_position} ")
+                while not acquisition.done():
+                    position = router.queue_position(admission_cancellation)
+                    if position is not None and position != last_position:
+                        last_position = position
+                        yield loading_frame(f"\nQueue position: #{position} ")
+                    done, _ = await asyncio.wait({acquisition}, timeout=0.75)
+                    if acquisition in done:
+                        lease = acquisition.result()
+                    else:
+                        yield loading_frame(".")
+                if lease is None:
+                    lease = acquisition.result()
+
+                yield loading_frame("\n")
+                yield loading_frame(f"Done! ({time.monotonic() - started:.2f}s)\n")
+                yield loading_frame("━━━━━\n")
+                yield loading_frame(" \n")
+
+                with inflight_lock:
+                    cancelled_before_connect = request_reservations[request_id]["cancelled"]
+                if cancelled_before_connect:
+                    raise RoutingError(
+                        "request_cancelled",
+                        "request cancelled before upstream connection",
+                        status_code=409,
+                    )
+
+                upstream = await connect_upstream(
+                    port=lease.port,
+                    path_and_query=path_and_query,
+                    headers=dict(request.headers),
+                    body=body,
+                    method=request.method,
+                    timeout_s=router.upstream_timeout_s,
+                )
+                with inflight_lock:
+                    cancelled_while_connecting = request_reservations[request_id]["cancelled"]
+                    if not cancelled_while_connecting:
+                        inflight[request_id] = {
+                            "profile": lease.profile.name,
+                            "upstream": upstream,
+                            "cancelled": False,
+                        }
+                if cancelled_while_connecting:
+                    raise RoutingError(
+                        "request_cancelled",
+                        "request cancelled while opening upstream connection",
+                        status_code=409,
+                    )
+
+                router_event("admitted", profile=lease.profile.name, route=safe_route)
+                iterator = iter(upstream.chunks())
+
+                def next_chunk():
+                    try:
+                        return True, next(iterator)
+                    except StopIteration:
+                        return False, b""
+
+                loop = asyncio.get_running_loop()
+                while True:
+                    has_chunk, chunk = await loop.run_in_executor(proxy_pool, next_chunk)
+                    if not has_chunk:
+                        break
+                    if first_byte_at is None:
+                        first_byte_at = time.monotonic()
+                    byte_count += len(chunk)
+                    yield chunk
+            except asyncio.CancelledError:
+                cancelled = True
+                router.cancel_acquire(admission_cancellation)
+                router.record_cancellation()
+                cancellation_recorded = True
+                router_event("request_cancelled", profile=model, route=safe_route)
+                raise
+            except Exception as exc:
+                if isinstance(exc, RoutingError):
+                    router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
+                else:
+                    router_event("upstream_connect_failed", profile=model, route=safe_route)
+                yield loading_error(exc)
+            finally:
+                ended = time.monotonic()
+                # Starlette may finalize an async response iterator with
+                # ``GeneratorExit`` rather than injecting ``CancelledError``.
+                # A downstream that disappears must still synchronously wake
+                # and cancel any queued ownership.
+                if not acquisition.done():
+                    cancelled = True
+                    abandon_loading_acquisition(
+                        acquisition, record_cancellation=not cancellation_recorded
+                    )
+                elif lease is None:
+                    try:
+                        lease = acquisition.result()
+                    except BaseException:
+                        pass
+                    else:
+                        cancelled = True
+                        if not cancellation_recorded:
+                            router.record_cancellation()
+                if upstream is not None:
+                    upstream.close()
+                with inflight_lock:
+                    reservation = request_reservations.get(request_id, {})
+                    item = inflight.get(request_id, {})
+                    cancelled = (
+                        cancelled
+                        or bool(reservation.get("cancelled"))
+                        or bool(item.get("cancelled"))
+                    )
+                    if upstream is not None and item.get("upstream") is upstream:
+                        inflight.pop(request_id, None)
+                    request_reservations.pop(request_id, None)
+                if lease is not None:
+                    router.record_stream(
+                        ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
+                        duration_s=ended - started,
+                        response_bytes=byte_count,
+                        completed=not cancelled,
+                    )
+                    lease.release()
+                    router_event(
+                        "request_finished",
+                        profile=lease.profile.name,
+                        route=safe_route,
+                        status=upstream.status if upstream is not None else 200,
+                        cancelled=cancelled,
+                        responseBytes=byte_count,
+                    )
+
+        loading_eligible = False
+        if request.url.path == "/v1/chat/completions" and router.loading_feedback_enabled(model):
+            try:
+                request_doc = json.loads(body)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                request_doc = None
+            loading_eligible = isinstance(request_doc, dict) and request_doc.get("stream") is True
+
+        if loading_eligible:
+            loop = asyncio.get_running_loop()
+            reserved = asyncio.Event()
+            reservation_state: dict[str, bool] = {}
+
+            def on_reserved(loading_required: bool, queue_position: int) -> None:
+                reservation_state["loadingRequired"] = loading_required
+                reservation_state["queuePosition"] = queue_position
+                loop.call_soon_threadsafe(reserved.set)
+
+            acquisition = asyncio.create_task(
+                acquire_route(model, admission_cancellation, on_reserved)
+            )
+            reservation_wait = asyncio.create_task(reserved.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {acquisition, reservation_wait}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if acquisition in done:
+                    reservation_wait.cancel()
+                    lease = acquisition.result()
+                else:
+                    if reservation_state["loadingRequired"]:
+                        class AdmissionOwnedStreamingResponse(StreamingResponse):
+                            async def __call__(self, scope, receive, send) -> None:
+                                try:
+                                    await super().__call__(scope, receive, send)
+                                finally:
+                                    # ASGI cancellation may happen after the
+                                    # response object is returned but before
+                                    # its body iterator starts. The response,
+                                    # not an unstarted generator, must release
+                                    # that admission ownership.
+                                    if not stream_state["started"]:
+                                        with inflight_lock:
+                                            owned = request_id in request_reservations
+                                            request_reservations.pop(request_id, None)
+                                        if owned:
+                                            abandon_loading_acquisition(acquisition)
+
+                        return AdmissionOwnedStreamingResponse(
+                            loading_stream(acquisition),
+                            status_code=200,
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "X-FT-Request-ID": request_id,
+                            },
+                            media_type="text/event-stream",
+                        )
+                    lease = await acquisition
+            except RoutingError as exc:
+                reservation_wait.cancel()
+                with inflight_lock:
+                    request_reservations.pop(request_id, None)
+                router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
+                content = {"error": {"message": str(exc), "type": exc.code}}
+                if exc.recovery is not None:
+                    content["recovery"] = exc.recovery
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content=content,
+                    headers={"Retry-After": "1"} if exc.status_code == 429 else None,
+                )
+            except asyncio.CancelledError:
+                reservation_wait.cancel()
+                with inflight_lock:
+                    request_reservations.pop(request_id, None)
+                abandon_loading_acquisition(acquisition)
+                raise
+            except BaseException:
+                reservation_wait.cancel()
+                with inflight_lock:
+                    request_reservations.pop(request_id, None)
+                if not acquisition.done():
+                    abandon_loading_acquisition(acquisition, record_cancellation=False)
+                raise
+            finally:
+                if not reservation_wait.done():
+                    reservation_wait.cancel()
+        else:
+            lease = None
         try:
-            lease = await acquire_route(model, admission_cancellation)
+            if lease is None:
+                lease = await acquire_route(model, admission_cancellation)
         except RoutingError as exc:
             with inflight_lock:
                 request_reservations.pop(request_id, None)

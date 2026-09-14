@@ -93,11 +93,14 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     content: list[str] = []
     started = time.monotonic()
     first_byte_s: float | None = None
+    first_token_s: float | None = None
     completion_tokens: int | None = None
     with urllib.request.urlopen(request, timeout=660) as response:
         for chunk in response:
+            observed_s: float | None = None
             if first_byte_s is None:
-                first_byte_s = time.monotonic() - started
+                observed_s = time.monotonic() - started
+                first_byte_s = observed_s
             raw.extend(chunk)
             if len(raw) > 8 * 1024 * 1024:
                 raise RuntimeError("canary response exceeded private capture bound")
@@ -107,7 +110,12 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
                 if isinstance(usage, dict) and isinstance(usage.get("completion_tokens"), int):
                     completion_tokens = usage["completion_tokens"]
                 for choice in event.get("choices", []):
-                    content.append(choice.get("delta", {}).get("content") or "")
+                    value = choice.get("delta", {}).get("content") or ""
+                    if value and first_token_s is None:
+                        if observed_s is None:
+                            observed_s = time.monotonic() - started
+                        first_token_s = observed_s
+                    content.append(value)
     duration_s = time.monotonic() - started
     answer = "".join(content).strip()
     if b"data: [DONE]" not in raw:
@@ -116,14 +124,15 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         raise RuntimeError("deterministic quality gate failed")
     if not isinstance(completion_tokens, int) or completion_tokens <= 0:
         raise RuntimeError("streamed completion usage missing")
-    if first_byte_s is None or duration_s <= first_byte_s:
+    if first_byte_s is None or first_token_s is None or duration_s <= first_token_s:
         raise RuntimeError("stream timing did not permit token-throughput measurement")
-    decode_s = duration_s - first_byte_s
+    decode_s = duration_s - first_token_s
     completion_tokens_per_second = completion_tokens / decode_s
     return bytes(raw), {
         "route": "direct" if direct else "native_router",
         "model": model,
         "firstByteSeconds": first_byte_s,
+        "firstTokenSeconds": first_token_s,
         "durationSeconds": duration_s,
         "decodeSeconds": decode_s,
         "completionTokens": completion_tokens,
@@ -131,6 +140,29 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         "responseBytes": len(raw),
         "passed": True,
     }
+
+
+def validate_loading_feedback(raw: bytes, *, expected: bool) -> dict:
+    """Require the private SSE capture to match the expected router loading state."""
+    reasoning: list[str] = []
+    for line in raw.splitlines():
+        if not line.startswith(b"data: ") or line == b"data: [DONE]":
+            continue
+        try:
+            event = json.loads(line[6:])
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        for choice in event.get("choices", []):
+            delta = choice.get("delta", {}) if isinstance(choice, dict) else {}
+            value = delta.get("reasoning_content") if isinstance(delta, dict) else None
+            if isinstance(value, str):
+                reasoning.append(value)
+    combined = "".join(reasoning)
+    observed = "freetoken-swap loading model:" in combined
+    if observed != expected:
+        state = "missing" if expected else "unexpected"
+        raise RuntimeError(f"router loading feedback was {state} for this qualification trial")
+    return {"expected": expected, "observed": observed, "passed": True}
 
 
 def concurrent_canaries(base: str, model: str, *, seconds: float = 180) -> tuple[list[tuple[bytes, dict]], dict]:
@@ -794,7 +826,8 @@ def native_catalog_text(
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
     ]
     catalog = [
-        "[router]", "upstream_timeout_s = 660", "include_aliases_in_list = true", "",
+        "[router]", "upstream_timeout_s = 660", "include_aliases_in_list = true",
+        "send_loading_state = true", "",
     ]
     if api_key is not None:
         catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]
@@ -935,6 +968,9 @@ def main() -> int:
             ):
                 raw, row = canary(base, alias, direct=False)
                 row["scenario"] = label
+                row["loadingFeedback"] = validate_loading_feedback(
+                    raw, expected=expected_delta == 1
+                )
                 row["router"] = request_json(base + "/router/status")[1]
                 activation_count = validate_routed_trial(
                     row["router"], alias=alias, prior_activations=activation_count,

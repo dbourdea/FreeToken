@@ -39,6 +39,9 @@ bounded qualification evidence and limits.
 The catalog is TOML and is optional. Start the daemon with `--catalog` or set `FREETOKEN_SWAP_CATALOG`:
 
 ```toml
+[router]
+send_loading_state = true
+
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
 port = 1922
@@ -47,6 +50,7 @@ description = "GMKtek EVO-X2 candidate coding profile"
 aliases = ["qwen-coder-compatible"]
 concurrency_limit = 2
 ready_timeout_s = 300
+send_loading_state = false
 
 [models.qwen-chat]
 model = "/models/Qwen3.5-27B-Q4_K_M.gguf"
@@ -94,6 +98,17 @@ value caps all active, queued, and activating routed requests. Capacity is
 reserved before loading, so excess work is rejected immediately with HTTP 429,
 `Retry-After: 1`, and `error.type=concurrency_limit` rather than consuming a
 queue slot or launching an engine. Status and Prometheus expose reserved work.
+
+`router.send_loading_state = true` enables optional cold-load feedback for
+strictly streaming `POST /v1/chat/completions` requests. A profile can override
+the global setting with `models.<name>.send_loading_state = true` or `false`.
+After concurrency admission, a cold request receives HTTP 200 SSE reasoning
+deltas with loading and queue-position text until the readiness-gated engine is
+available, followed by the real upstream stream. Admission rejection remains a
+normal HTTP 429 JSON response. Once loading SSE has committed HTTP 200, a later
+activation or connection failure is delivered as an in-band `error` event and
+terminated with `data: [DONE]`. The default is disabled, and warm, non-chat, and
+non-streaming requests retain the ordinary byte/status/header-preserving proxy.
 
 The native capacity policy is deliberately one resident child. Therefore a
 nonpersistent group must use `swap = true, exclusive = true`; a persistent
