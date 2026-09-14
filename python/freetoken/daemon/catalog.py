@@ -179,8 +179,25 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
                  (("swap", True), ("exclusive", True), ("persistent", False))}
         if not all(isinstance(flag, bool) for flag in flags.values()):
             raise CatalogError(f"router.groups.{name} flags must be booleans")
+        # The native coordinator deliberately owns exactly one resident child.
+        # Accepting llama-swap's coexistence flags here would silently promise
+        # a scheduling policy we cannot implement. Fail atomically at reload
+        # time instead; an operator can express the supported policy as an
+        # exclusive swapping group, or a singleton persistent protected slot.
+        if not flags["exclusive"]:
+            raise CatalogError(
+                f"router.groups.{name}: single-resident native routing requires exclusive = true"
+            )
         if flags["persistent"] and flags["swap"]:
             raise CatalogError(f"router.groups.{name}: persistent groups must set swap = false")
+        if not flags["persistent"] and not flags["swap"]:
+            raise CatalogError(
+                f"router.groups.{name}: swap = false requires multi-resident routing and is unsupported"
+            )
+        if flags["persistent"] and len(members) != 1:
+            raise CatalogError(
+                f"router.groups.{name}: a persistent group needs exactly one member under single-resident routing"
+            )
         groups.append(RoutingGroup(name, tuple(members), **flags))
     membership = {member: group.name for group in groups for member in group.members}
     for name, profile in profiles.items():

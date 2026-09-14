@@ -136,6 +136,48 @@ def test_switch_waits_until_an_active_lease_finishes():
     assert manager.calls == [("start", "low.gguf"), ("switch", "high.gguf")]
 
 
+def test_queued_higher_priority_profile_runs_before_an_earlier_lower_priority_request():
+    manager = Manager()
+    catalog_doc = ModelCatalog({
+        "active": ModelProfile("active", "active.gguf", (), priority=0),
+        "low": ModelProfile("low", "low.gguf", (), priority=0),
+        "high": ModelProfile("high", "high.gguf", (), priority=10),
+    })
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("active")
+    completed = []
+
+    def acquire_then_release(name):
+        lease = router.acquire(name)
+        completed.append(name)
+        lease.release()
+
+    low_thread = threading.Thread(target=acquire_then_release, args=("low",))
+    high_thread = threading.Thread(target=acquire_then_release, args=("high",))
+    low_thread.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        threading.Event().wait(0.01)
+    assert router.status()["queuedRequests"] == 1
+    high_thread.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 2:
+            break
+        threading.Event().wait(0.01)
+    assert router.status()["queuedRequests"] == 2
+    active.release()
+    low_thread.join(1)
+    high_thread.join(1)
+    assert not low_thread.is_alive() and not high_thread.is_alive()
+    assert manager.calls == [
+        ("start", "active.gguf"),
+        ("switch", "high.gguf"),
+        ("switch", "low.gguf"),
+    ]
+    assert completed == ["high", "low"]
+
+
 def test_failed_readiness_restores_previous_engine_before_reporting_error():
     manager = Manager()
     router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)

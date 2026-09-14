@@ -55,6 +55,12 @@ activation. The daemon records the concrete assigned port and uses that same
 target for child identity, readiness, proxying, accounting, and re-adoption;
 an already resident dynamic profile keeps its port until it is unloaded.
 
+The native capacity policy is deliberately one resident child. Therefore a
+nonpersistent group must use `swap = true, exclusive = true`; a persistent
+protected slot must be a one-member group with `swap = false, exclusive = true`.
+Catalog reload rejects llama-swap coexistence configurations instead of silently
+pretending that multiple FreeToken engines are resident.
+
 ## Native router API
 
 The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions`,

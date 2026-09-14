@@ -206,6 +206,9 @@ priority = -5
     ("[router]\napi_keys = ['same', 'same']", "duplicates"),
     ("[router.groups.g]\nmembers = ['missing']", "configured models"),
     ("[router.groups.g]\nmembers = ['a']\npersistent = true", "persistent"),
+    ("[router.groups.g]\nmembers = ['a']\nexclusive = false", "exclusive"),
+    ("[router.groups.g]\nmembers = ['a']\nswap = false", "multi-resident"),
+    ("[models.b]\nmodel = 'b.gguf'\n[router.groups.g]\nmembers = ['a', 'b']\npersistent = true\nswap = false", "exactly one"),
     ("group = 'other'", "must match"),
 ])
 def test_router_policy_rejects_ambiguous_or_unsafe_configuration(tmp_path, router, message):
@@ -213,3 +216,20 @@ def test_router_policy_rejects_ambiguous_or_unsafe_configuration(tmp_path, route
     path.write_text("[models.a]\nmodel = 'a.gguf'\n" + router, encoding="utf-8")
     with pytest.raises(CatalogError, match=message):
         ModelCatalog.load(str(path))
+
+
+def test_router_policy_accepts_a_singleton_persistent_protected_slot(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text("""
+[router.groups.resident]
+members = ["a"]
+swap = false
+exclusive = true
+persistent = true
+
+[models.a]
+model = "a.gguf"
+group = "resident"
+""", encoding="utf-8")
+    group = ModelCatalog.load(str(path)).settings.groups[0]
+    assert (group.members, group.swap, group.exclusive, group.persistent) == (("a",), False, True, True)
