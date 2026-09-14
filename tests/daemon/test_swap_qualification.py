@@ -133,6 +133,7 @@ def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(nat
     assert observation["passed"] is True
     assert observation["firstByteSeconds"] is not None
     assert observation["durationSeconds"] >= observation["firstByteSeconds"]
+    assert observation["decodeSeconds"] == 1.0
     assert observation["completionTokens"] == 1
     assert observation["completionTokensPerSecond"] == 1.0
     assert observation["responseBytes"] == len(raw)

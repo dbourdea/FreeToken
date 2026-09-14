@@ -91,12 +91,14 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         raise RuntimeError("streamed completion usage missing")
     if first_byte_s is None or duration_s <= first_byte_s:
         raise RuntimeError("stream timing did not permit token-throughput measurement")
-    completion_tokens_per_second = completion_tokens / (duration_s - first_byte_s)
+    decode_s = duration_s - first_byte_s
+    completion_tokens_per_second = completion_tokens / decode_s
     return bytes(raw), {
         "route": "direct" if direct else "native_router",
         "model": model,
         "firstByteSeconds": first_byte_s,
         "durationSeconds": duration_s,
+        "decodeSeconds": decode_s,
         "completionTokens": completion_tokens,
         "completionTokensPerSecond": completion_tokens_per_second,
         "responseBytes": len(raw),
