@@ -161,6 +161,66 @@ def test_native_router_benchmark_rejects_completed_stream_without_usage(native_r
     assert stream.closed
 
 
+def test_native_router_cancellation_canary_requires_idle_without_completion_credit(native_router_qualifier):
+    state = {"active": 0, "cancellations": 0, "terminal": 0}
+    cancelled = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _json(self, body):
+            raw = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            assert self.path == "/router/status"
+            self._json({
+                "activeRequests": state["active"],
+                "cancellations": state["cancellations"],
+                "terminalStreams": state["terminal"],
+            })
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.path == "/v1/chat/completions":
+                state["active"] = 1
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"choices":[{"delta":{"content":"1"}}]}\n\n')
+                self.wfile.flush()
+                cancelled.wait(3)
+                state["active"] = 0
+                return
+            assert self.path == "/router/requests/native-qualification-cancel/cancel"
+            state["cancellations"] += 1
+            cancelled.set()
+            self._json({"cancelled": True, "id": "native-qualification-cancel"})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        raw, observation = native_router_qualifier.cancellation_canary(
+            f"http://127.0.0.1:{server.server_port}", "model-a", seconds=3
+        )
+        assert b'"content":"1"' in raw
+        assert b"data: [DONE]" not in raw
+        assert observation["passed"] is True
+        assert observation["cancellationIncremented"] is True
+        assert observation["normalCompletionCredited"] is False
+        assert state == {"active": 0, "cancellations": 1, "terminal": 0}
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(3)
+
+
 def test_native_router_benchmark_keeps_prometheus_capture_private_bytes(native_router_qualifier, monkeypatch):
     stream = io.BytesIO(b"freetoken_swap_admissions_total 3\n")
     monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)

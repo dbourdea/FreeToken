@@ -62,9 +62,13 @@ cache and a validated dynamic-port TOML catalog, then records private raw artifa
 router-owned engine port, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It requires streamed OpenAI usage,
 then records first-byte time, final duration, completion tokens, and usage-derived
-decode tokens/second at the client. It stores the corresponding `/router/status` snapshot and
-Prometheus `/metrics` response for each routed request, and fails if the
-activation counters do not prove the advertised warm/cold/alternating state.
+decode tokens/second at the client. Before the comparison sequence it also opens a
+long routed stream, explicitly cancels its opaque request ID, and fails unless the
+router returns to idle, increments cancellation telemetry, emits no normal terminal
+completion credit, and the retained private partial SSE lacks `[DONE]`. It stores the
+corresponding `/router/status` snapshot and Prometheus `/metrics` response for each
+routed comparison, and fails if activation counters do not prove the advertised
+warm/cold/alternating state.
 The direct comparison retains its router-owned load receipt and activation
 snapshot privately as well.
 It also saves the authenticated-local `/router/hardware` process and memory

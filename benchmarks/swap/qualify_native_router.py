@@ -16,6 +16,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -102,6 +103,83 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         "completionTokens": completion_tokens,
         "completionTokensPerSecond": completion_tokens_per_second,
         "responseBytes": len(raw),
+        "passed": True,
+    }
+
+
+def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[bytes, dict]:
+    """Prove native router cancellation reaches idle without a normal completion credit.
+
+    The raw partial SSE remains a private artifact.  The returned observation is
+    deliberately limited to lifecycle counters and timing-safe booleans.
+    """
+    request_id = "native-qualification-cancel"
+    _, before = request_json(base + "/router/status")
+    prior_cancellations = before.get("cancellations")
+    prior_terminal = before.get("terminalStreams")
+    if not isinstance(prior_cancellations, int) or not isinstance(prior_terminal, int):
+        raise RuntimeError("router status lacks cancellation counters")
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Count upward slowly and do not stop."}],
+        "temperature": 0,
+        "max_tokens": 2048,
+        "stream": True,
+    }
+    request = urllib.request.Request(
+        base + "/v1/chat/completions", data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-FT-Request-ID": request_id},
+    )
+    raw = bytearray()
+    first_chunk = threading.Event()
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def consume() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=seconds) as response:
+                for chunk in response:
+                    raw.extend(chunk)
+                    first_chunk.set()
+        except Exception as exc:  # cancellation may close a blocking HTTP read
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=consume, name="native-router-cancel", daemon=True)
+    started = time.monotonic()
+    worker.start()
+    if not first_chunk.wait(seconds):
+        raise TimeoutError("cancellation stream produced no first chunk")
+    _, cancelled = request_json(base + f"/router/requests/{request_id}/cancel", {}, timeout=30)
+    if cancelled != {"cancelled": True, "id": request_id}:
+        raise RuntimeError("router did not acknowledge the active cancellation request")
+    if not finished.wait(seconds):
+        raise TimeoutError("cancelled stream did not close")
+    deadline = time.monotonic() + seconds
+    status: dict | None = None
+    while time.monotonic() < deadline:
+        status = request_json(base + "/router/status", timeout=3)[1]
+        if status.get("activeRequests") == 0:
+            break
+        time.sleep(0.1)
+    if status is None or status.get("activeRequests") != 0:
+        raise TimeoutError("router did not return to idle after cancellation")
+    if status.get("cancellations") != prior_cancellations + 1:
+        raise RuntimeError("router cancellation counter did not increment")
+    if status.get("terminalStreams") != prior_terminal:
+        raise RuntimeError("cancelled stream was credited as a normal completion")
+    if b"data: [DONE]" in raw:
+        raise RuntimeError("cancelled stream reached a normal terminal event")
+    return bytes(raw), {
+        "route": "native_router",
+        "model": model,
+        "requestId": request_id,
+        "durationSeconds": time.monotonic() - started,
+        "responseBytes": len(raw),
+        "cancellationIncremented": True,
+        "normalCompletionCredited": False,
+        "streamReadError": repr(errors[0]) if errors else None,
         "passed": True,
     }
 
@@ -254,6 +332,11 @@ def main() -> int:
             final_engine_port = direct_row["hardware"]["engine"]["port"]
             result["trials"].append(direct_row)
 
+            cancel_raw, cancellation = cancellation_canary(base, "model-a")
+            (artifacts / "cancel-a.partial.sse").write_bytes(cancel_raw)
+            result["cancellation"] = cancellation
+            save()
+
             for label, alias, expected_delta in (
                 ("warm-a", "model-a", 0),
                 ("cold-b", "model-b", 1),
@@ -273,7 +356,11 @@ def main() -> int:
                 final_engine_port = row["hardware"]["engine"]["port"]
                 result["trials"].append(row)
                 save()
-            result["passed"] = len(result["trials"]) == 4 and all(x["passed"] for x in result["trials"])
+            result["passed"] = (
+                len(result["trials"]) == 4
+                and all(x["passed"] for x in result["trials"])
+                and result.get("cancellation", {}).get("passed") is True
+            )
     except BaseException as exc:
         result["error"] = repr(exc)
     finally:
