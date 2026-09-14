@@ -1321,6 +1321,70 @@ def test_manual_lifecycle_claim_rejects_router_ownership_and_requires_matching_t
     assert router.status()["switching"] is False
 
 
+def test_cancelled_manual_start_keeps_barrier_until_executor_finishes():
+    entered = threading.Event()
+    finish_manual = threading.Event()
+
+    class BlockingManager(Manager):
+        def start(self, model, port, args):
+            self.calls.append(("manual-start", model))
+            entered.set()
+            assert finish_manual.wait(2)
+            self.model, self.port, self.args = model, port, list(args)
+            self.pid += 1
+            return {"pid": self.pid}
+
+    manager = BlockingManager()
+    catalog_doc = catalog()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    routed_lease = []
+
+    async def scenario(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            manual = asyncio.create_task(client.post(
+                "/engine/start", json={"model": "manual.gguf", "port": 1930}
+            ))
+            for _ in range(100):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert entered.is_set()
+            manual.cancel()
+
+            def acquire_routed():
+                routed_lease.append(router.acquire("low"))
+
+            routed_thread = threading.Thread(target=acquire_routed)
+            routed_thread.start()
+            for _ in range(100):
+                if router.status()["queuedRequests"] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert router.status()["queuedRequests"] == 1
+            assert not manual.done()
+            assert manager.calls == [("manual-start", "manual.gguf")]
+            manual.cancel()
+            await asyncio.sleep(0.05)
+            assert not manual.done()
+            finish_manual.set()
+            with pytest.raises(asyncio.CancelledError):
+                await manual
+            routed_thread.join(2)
+            assert not routed_thread.is_alive()
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert manager.calls == [("manual-start", "manual.gguf"), ("switch", "low.gguf")]
+    routed_lease.pop().release()
+    assert router.status()["activeRequests"] == 0
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(

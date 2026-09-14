@@ -247,6 +247,24 @@ def build_app(
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
+    async def run_owned(pool: ThreadPoolExecutor, fn, *args, **kwargs):
+        """Do not release a lifecycle owner while its executor call still runs."""
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            while True:
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+                else:
+                    break
+            raise
+
     async def acquire_route(name: str, cancellation: threading.Event | None = None):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
         loop = asyncio.get_running_loop()
@@ -773,7 +791,7 @@ def build_app(
         owner = begin_manual_lifecycle()
         try:
             port = resolve_port(body.port)
-            return await run(lifecycle_pool, manager.start, body.model, port, list(body.args))
+            return await run_owned(lifecycle_pool, manager.start, body.model, port, list(body.args))
         except Conflict as exc:
             st = manager.status()
             return JSONResponse(
@@ -794,7 +812,7 @@ def build_app(
     async def engine_stop(body: StopBody | None = None):
         owner = begin_manual_lifecycle(preempt_manual=True)
         try:
-            return await run(lifecycle_pool, manager.stop, None, bool(body and body.force))
+            return await run_owned(lifecycle_pool, manager.stop, None, bool(body and body.force))
         except (AccountingPrepareError, AccountingOutboxError) as exc:
             return accounting_error(exc)
         finally:
@@ -823,7 +841,7 @@ def build_app(
         owner = begin_manual_lifecycle()
         try:
             port = resolve_port(body.port)
-            return await run(
+            return await run_owned(
                 lifecycle_pool,
                 manager.switch,
                 body.model,
@@ -845,8 +863,8 @@ def build_app(
         owner = begin_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
-            result = await run(lifecycle_pool, manager.start, model, port, args)
-            return await run(proxy_pool, profile_result, body.name, result, port)
+            result = await run_owned(lifecycle_pool, manager.start, model, port, args)
+            return await run_owned(proxy_pool, profile_result, body.name, result, port)
         except CatalogError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Conflict as exc:
@@ -870,17 +888,17 @@ def build_app(
         owner = begin_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
-            result, ticket = await run(
+            result, ticket = await run_owned(
                 lifecycle_pool, manager.switch_for_readiness, model, port, args, body.force
             )
-            response = await run(proxy_pool, profile_result, body.name, result, port)
+            response = await run_owned(proxy_pool, profile_result, body.name, result, port)
             if not isinstance(response, JSONResponse):
                 return response
             content = json.loads(response.body)
-            rollback = await run(lifecycle_pool, manager.recover_switch, ticket, body.force)
+            rollback = await run_owned(lifecycle_pool, manager.recover_switch, ticket, body.force)
             if rollback.get("launched"):
                 profile = router.catalog.get(body.name)
-                rollback["readiness"] = await run(proxy_pool, functools.partial(
+                rollback["readiness"] = await run_owned(proxy_pool, functools.partial(
                     wait_for_ready, manager, probe, pid=rollback["pid"],
                     port=rollback["port"], timeout_s=profile.ready_timeout_s,
                 ))
