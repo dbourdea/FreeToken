@@ -161,6 +161,28 @@ def test_native_router_benchmark_rejects_completed_stream_without_usage(native_r
     assert stream.closed
 
 
+def test_native_router_reload_conflict_canary_preserves_active_identity(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    def request_json(url, body=None, **kwargs):
+        if url.endswith("/router/reload"):
+            raise native_router_qualifier.urllib.error.HTTPError(url, 409, "conflict", {}, io.BytesIO())
+        assert url.endswith("/router/status")
+        return b"{}", {"activeProfile": "model-a", "activeIdentityMatchesEngine": True}
+
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    catalog = tmp_path / "models.toml"
+    observation = native_router_qualifier.reload_conflict_canary(
+        "http://test", catalog, "/private/a.gguf", "/private/b.gguf"
+    )
+
+    assert observation == {
+        "activeProfile": "model-a", "rejectedStatus": 409,
+        "activeIdentityPreserved": True, "passed": True,
+    }
+    assert "priority = 1" in catalog.read_text(encoding="utf-8")
+
+
 def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
     native_router_qualifier, monkeypatch, tmp_path
 ):

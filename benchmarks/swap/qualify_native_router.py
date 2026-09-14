@@ -290,6 +290,27 @@ def require_listener_closed(port: int) -> None:
             raise RuntimeError("temporary engine listener remains reachable after cleanup")
 
 
+def reload_conflict_canary(base: str, catalog_path: Path, model_a: str, model_b: str) -> dict:
+    """Prove an active profile's scheduler policy cannot change under its engine."""
+    catalog_path.write_text(native_catalog_text(model_a, model_b, model_a_priority=1), encoding="utf-8")
+    try:
+        request_json(base + "/router/reload", {}, timeout=30)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise RuntimeError("active catalog conflict returned the wrong status") from exc
+    else:
+        raise RuntimeError("active catalog scheduler redefinition was accepted")
+    _, status = request_json(base + "/router/status", timeout=30)
+    if status.get("activeProfile") != "model-a" or status.get("activeIdentityMatchesEngine") is not True:
+        raise RuntimeError("rejected catalog replacement changed active engine identity")
+    return {
+        "activeProfile": "model-a",
+        "rejectedStatus": 409,
+        "activeIdentityPreserved": True,
+        "passed": True,
+    }
+
+
 def ttl_eviction_canary(
     base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45
 ) -> dict:
@@ -329,7 +350,9 @@ def ttl_eviction_canary(
     }
 
 
-def native_catalog_text(model_a: str, model_b: str, *, ttl_s: int = 0) -> str:
+def native_catalog_text(
+    model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0
+) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
         "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
@@ -341,7 +364,8 @@ def native_catalog_text(model_a: str, model_b: str, *, ttl_s: int = 0) -> str:
     for alias, model in (("model-a", model_a), ("model-b", model_b)):
         catalog.extend((
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
-            f"ttl_s = {ttl_s}", "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
+            f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
+            "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
         ))
     return "\n".join(catalog)
 
@@ -451,6 +475,7 @@ def main() -> int:
                 final_engine_port = row["hardware"]["engine"]["port"]
                 result["trials"].append(row)
                 save()
+            result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
             result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
             final_engine_port = result["ttl"]["port"]
             save()
@@ -460,6 +485,7 @@ def main() -> int:
                 and result.get("cancellation", {}).get("passed") is True
                 and result.get("concurrency", {}).get("passed") is True
                 and result.get("ttl", {}).get("passed") is True
+                and result.get("reloadConflict", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)
