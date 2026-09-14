@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 169 daemon
+- Local deterministic verification on the current Windows checkout: 171 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for Linux real-child or real-model
   evidence.
@@ -53,6 +53,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Concurrency and unloading | Same-model and conflicting-model admission plus idle eviction are deterministically tested | Current native real-engine verification required |
 | Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and Linux real-child tests are implemented; historical invalid-GGUF evidence is retained separately | Current Linux/current-branch recovery execution required |
 | Client cancellation | Native opaque router request IDs, atomic duplicate-ID rejection before admission/upstream work, disconnect-aware admission, queued/connecting/active request list, explicit cancel endpoint across every owned phase, orphan socket close, lease release, and cancellation metrics. Failed, disconnected, or cancelled admission and failed upstream connection release ownership safely. | Deterministic HTTP tested; current native same-instance GPU verification required |
+| Authentication and observability | Bearer-protected inference/management, configured aliases and profiles, Prometheus metrics, bounded router-log SSE, and exact-origin qualification credentials | Deterministic HTTP tested; current native GMKtek control-plane execution required |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, historical restore/completion checks, no interruption during combined-tree checks | Maintained; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
@@ -94,7 +95,8 @@ and records sanitized direct, warm-routed, cold-routed, alternating-model,
 router-cancellation, same-model concurrency, conflicting-model queue/drain,
 failed-switch rollback/accounting,
 same-process re-adoption, active-reload-conflict, capacity-safe persistent residency,
-and TTL-eviction results. It must also run Linux real-child tests on
+TTL-eviction, unauthenticated 401, authenticated model/profile inventory,
+Prometheus, and bounded router-log results. It must also run Linux real-child tests on
 the current branch, then restore and health-check the protected workload. No
 merge, permanent service activation, or publication of raw artifacts is
 authorized by this audit.

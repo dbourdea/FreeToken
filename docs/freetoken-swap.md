@@ -157,6 +157,12 @@ FreeToken's `/health` remains a backwards-compatible diagnostic endpoint and can
 
 Use `ft serve` or `python -m freetoken.cli serve` in a process command. The legacy `python -m freetoken` entrypoint does not accept the `serve` subcommand. Use a revision-specific `TORCH_EXTENSIONS_DIR` and prebuild native GGUF kernels before a maintenance window so an abandoned shared build lock cannot stall model initialization. For SSE token metrics, clients should request `stream_options: {"include_usage": true}`.
 
+The opt-in native maintenance harness `benchmarks/swap/qualify_native_router.py`
+generates a private bearer key scoped only to its temporary daemon origin. Its
+acceptance result requires 401 responses without that key and authenticated
+model/profile inventory, Prometheus metrics, and bounded router-log SSE evidence;
+the key, catalog, headers, and raw captures are never publication artifacts.
+
 ## Cancellation qualification
 
 The opt-in Linux harness `benchmarks/swap/qualify.py --cancellation` adds a live disconnect gate to its maintenance-window run. It reads SSE incrementally, verifies that generation is active, closes the response after the first content delta, and polls backend statistics through `/upstream/model-a/v1/stats`. Passing requires the same backend instance to become idle without increasing the normal-completion count. A backend restart, an already-finished response, or a missing terminal abort fails the gate. It then checks fresh A-to-B-to-A streaming completions. Prefix bytes, backend snapshots, first-content timing, abort latency, and recovery responses are private artifacts.

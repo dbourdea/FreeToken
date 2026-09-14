@@ -471,6 +471,106 @@ def test_native_router_benchmark_keeps_prometheus_capture_private_bytes(native_r
     assert stream.closed
 
 
+def test_native_router_credentials_are_scoped_to_the_temporary_origin(
+    native_router_qualifier, monkeypatch
+):
+    requests = []
+
+    def urlopen(request, **kwargs):
+        requests.append(request)
+        return io.BytesIO(b'{}')
+
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", urlopen)
+    native_router_qualifier.configure_native_auth("http://native.test:1964", "private-key")
+
+    native_router_qualifier.request_json("http://native.test:1964/router/status")
+    native_router_qualifier.request_json("http://protected.test:8000/health")
+    native_router_qualifier.request_json("http://native.test:24567/v1/models")
+
+    assert requests[0].get_header("Authorization") == "Bearer private-key"
+    assert requests[1].get_header("Authorization") is None
+    assert requests[2].get_header("Authorization") is None
+
+
+def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
+    native_router_qualifier, tmp_path
+):
+    authorized_paths = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _send(self, body, *, content_type="application/json"):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.headers.get("Authorization") != "Bearer private-key":
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            authorized_paths.append(self.path)
+            if self.path == "/v1/models":
+                body = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
+            elif self.path == "/router/models":
+                body = {"data": [
+                    {"name": "model-a", "resident": True},
+                    {"name": "model-b", "resident": False},
+                ]}
+            elif self.path == "/router/profiles":
+                body = {
+                    "activeProfile": "model-a",
+                    "data": [{"name": "model-a"}, {"name": "model-b"}],
+                }
+            elif self.path == "/metrics":
+                self._send(
+                    b"freetoken_swap_admissions_total 1\n",
+                    content_type="text/plain; version=0.0.4",
+                )
+                return
+            elif self.path == "/router/logs?since=0":
+                self._send(
+                    b'event: router\ndata: {"event":"startup"}\n\n'
+                    b'event: router\ndata: {"event":"management_loaded"}\n\n',
+                    content_type="text/event-stream",
+                )
+                return
+            else:
+                self.send_error(404)
+                return
+            self._send(json.dumps(body).encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    native_router_qualifier.configure_native_auth(base, "private-key")
+    try:
+        observation = native_router_qualifier.control_plane_canary(base, tmp_path)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(3)
+
+    assert observation["passed"] is True
+    assert observation["unauthenticatedControlRejected"] is True
+    assert observation["unauthenticatedInferenceRejected"] is True
+    assert observation["residentProfile"] == "model-a"
+    assert authorized_paths == [
+        "/v1/models", "/router/models", "/router/profiles", "/metrics",
+        "/router/logs?since=0",
+    ]
+    assert b"management_loaded" in (tmp_path / "control-router-log.sse").read_bytes()
+    assert (tmp_path / "control-metrics.prom").read_bytes().startswith(
+        b"freetoken_swap_admissions_total"
+    )
+
+
 def test_native_router_benchmark_validates_warm_and_swap_activation_labels(native_router_qualifier):
     status_a = {"activeProfile": "model-a", "activeRequests": 0, "activations": 1}
     status_b = {"activeProfile": "model-b", "activeRequests": 0, "activations": 2}
@@ -546,12 +646,16 @@ def test_native_router_benchmark_requires_final_engine_listener_to_close(native_
 def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_router_qualifier, tmp_path):
     catalog_path = tmp_path / "models.toml"
     catalog_path.write_text(
-        native_router_qualifier.native_catalog_text("first.gguf", "second.gguf"), encoding="utf-8"
+        native_router_qualifier.native_catalog_text(
+            "first.gguf", "second.gguf", api_key="private-key"
+        ),
+        encoding="utf-8",
     )
 
     catalog = ModelCatalog.load(str(catalog_path))
 
     assert catalog.settings.upstream_timeout_s == 660
+    assert catalog.settings.api_keys == ("private-key",)
     assert catalog.get("model-a").model == "first.gguf"
     assert catalog.get("model-a").port == 0
     assert catalog.get("model-a").ttl_s == 0

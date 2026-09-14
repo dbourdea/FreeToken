@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import secrets
 import signal
 import socket
 import subprocess
@@ -22,16 +23,40 @@ import urllib.error
 import urllib.request
 
 
+_NATIVE_AUTH_BASE: str | None = None
+_NATIVE_API_KEY: str | None = None
+
+
+def configure_native_auth(base: str, api_key: str) -> None:
+    """Scope private router credentials to the exact temporary daemon origin."""
+    global _NATIVE_AUTH_BASE, _NATIVE_API_KEY
+    _NATIVE_AUTH_BASE = base.rstrip("/")
+    _NATIVE_API_KEY = api_key
+
+
+def _native_headers(url: str) -> dict[str, str]:
+    if (
+        _NATIVE_AUTH_BASE is not None
+        and _NATIVE_API_KEY is not None
+        and (url == _NATIVE_AUTH_BASE or url.startswith(_NATIVE_AUTH_BASE + "/"))
+    ):
+        return {"Authorization": f"Bearer {_NATIVE_API_KEY}"}
+    return {}
+
+
 def request_json(url: str, body: dict | None = None, *, timeout: float = 30) -> tuple[bytes, dict]:
     data = None if body is None else json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    request = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json", **_native_headers(url)}
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         raw = response.read()
     return raw, json.loads(raw)
 
 
 def request_bytes(url: str, *, timeout: float = 30) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+    request = urllib.request.Request(url, headers=_native_headers(url))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
 
@@ -61,7 +86,7 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     request = urllib.request.Request(
         url + "/v1/chat/completions",
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_native_headers(url)},
     )
     raw = bytearray()
     content: list[str] = []
@@ -179,7 +204,10 @@ def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[
     }
     request = urllib.request.Request(
         base + "/v1/chat/completions", data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "X-FT-Request-ID": request_id},
+        headers={
+            "Content-Type": "application/json", "X-FT-Request-ID": request_id,
+            **_native_headers(base),
+        },
     )
     raw = bytearray()
     first_chunk = threading.Event()
@@ -251,7 +279,10 @@ def conflicting_request_canary(
     }
     request = urllib.request.Request(
         base + "/v1/chat/completions", data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "X-FT-Request-ID": request_id},
+        headers={
+            "Content-Type": "application/json", "X-FT-Request-ID": request_id,
+            **_native_headers(base),
+        },
     )
     active_raw = bytearray()
     first_chunk = threading.Event()
@@ -354,6 +385,86 @@ def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, e
     return activations
 
 
+def control_plane_canary(base: str, artifacts: Path) -> dict:
+    """Qualify authenticated management, metrics, and bounded router-log access."""
+    unauthorized: dict[str, int] = {}
+    for path in ("/router/status", "/v1/models"):
+        request = urllib.request.Request(base + path)
+        try:
+            with urllib.request.urlopen(request, timeout=10):
+                pass
+        except urllib.error.HTTPError as exc:
+            unauthorized[path] = exc.code
+            exc.close()
+        else:
+            raise RuntimeError(f"unauthenticated request unexpectedly succeeded: {path}")
+    if set(unauthorized.values()) != {401}:
+        raise RuntimeError("native router did not reject unauthenticated control and inference")
+
+    models_raw, models = request_json(base + "/v1/models", timeout=10)
+    routed_raw, routed = request_json(base + "/router/models", timeout=10)
+    profiles_raw, profiles = request_json(base + "/router/profiles", timeout=10)
+    metrics_raw = request_bytes(base + "/metrics", timeout=10)
+    model_rows = models.get("data")
+    routed_rows = routed.get("data")
+    profile_rows = profiles.get("data")
+    if not all(
+        isinstance(rows, list) and all(isinstance(item, dict) for item in rows)
+        for rows in (model_rows, routed_rows, profile_rows)
+    ):
+        raise RuntimeError("authenticated native control-plane responses have invalid shapes")
+    aliases = sorted(item["id"] for item in model_rows if isinstance(item.get("id"), str))
+    routed_names = sorted(
+        item["name"] for item in routed_rows if isinstance(item.get("name"), str)
+    )
+    profile_names = sorted(
+        item["name"] for item in profile_rows if isinstance(item.get("name"), str)
+    )
+    resident = [item.get("name") for item in routed_rows if item.get("resident")]
+    if (
+        not {"model-a", "model-b"}.issubset(aliases)
+        or routed_names != profile_names
+        or not {"model-a", "model-b"}.issubset(routed_names)
+        or resident != ["model-a"]
+        or profiles.get("activeProfile") != "model-a"
+        or b"freetoken_swap_admissions_total" not in metrics_raw
+    ):
+        raise RuntimeError("authenticated native control-plane responses are inconsistent")
+
+    log_request = urllib.request.Request(
+        base + "/router/logs?since=0", headers=_native_headers(base)
+    )
+    log_frame = bytearray()
+    with urllib.request.urlopen(log_request, timeout=10) as response:
+        if response.headers.get_content_type() != "text/event-stream":
+            raise RuntimeError("router log endpoint did not return SSE")
+        while len(log_frame) <= 64 * 1024:
+            line = response.readline()
+            if not line:
+                break
+            log_frame.extend(line)
+            if b"management_loaded" in log_frame:
+                break
+    if len(log_frame) > 64 * 1024 or b"management_loaded" not in log_frame:
+        raise RuntimeError("router log stream lacked the bounded management event")
+
+    (artifacts / "control-v1-models.json").write_bytes(models_raw)
+    (artifacts / "control-router-models.json").write_bytes(routed_raw)
+    (artifacts / "control-router-profiles.json").write_bytes(profiles_raw)
+    (artifacts / "control-metrics.prom").write_bytes(metrics_raw)
+    (artifacts / "control-router-log.sse").write_bytes(log_frame)
+    return {
+        "unauthenticatedControlRejected": True,
+        "unauthenticatedInferenceRejected": True,
+        "aliasCount": len(aliases),
+        "profileCount": len(profile_names),
+        "residentProfile": "model-a",
+        "metricsAvailable": True,
+        "routerLogSseAvailable": True,
+        "passed": True,
+    }
+
+
 def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     """Keep per-trial process and memory observations in the private artifact set."""
     raw, hardware = request_json(base + "/router/hardware")
@@ -442,9 +553,14 @@ def stop_detached_engine(pid: int, port: int) -> None:
     raise RuntimeError("detached test-owned engine survived cleanup")
 
 
-def reload_conflict_canary(base: str, catalog_path: Path, model_a: str, model_b: str) -> dict:
+def reload_conflict_canary(
+    base: str, catalog_path: Path, model_a: str, model_b: str, *, api_key: str | None = None
+) -> dict:
     """Prove an active profile's scheduler policy cannot change under its engine."""
-    catalog_path.write_text(native_catalog_text(model_a, model_b, model_a_priority=1), encoding="utf-8")
+    catalog_path.write_text(
+        native_catalog_text(model_a, model_b, model_a_priority=1, api_key=api_key),
+        encoding="utf-8",
+    )
     try:
         request_json(base + "/router/reload", {}, timeout=30)
     except urllib.error.HTTPError as exc:
@@ -533,13 +649,14 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
 
 
 def persistent_capacity_canary(
-    base: str, catalog_path: Path, model_a: str, model_b: str
+    base: str, catalog_path: Path, model_a: str, model_b: str, *, api_key: str | None = None
 ) -> tuple[bytes, dict]:
     """Prove a singleton persistent group reserves the sole resident slot."""
     if request_json(base + "/router/unload", {}, timeout=45)[1].get("unloaded") is not True:
         raise RuntimeError("could not unload before persistent capacity qualification")
     catalog_path.write_text(
-        native_catalog_text(model_a, model_b, persistent_a=True), encoding="utf-8"
+        native_catalog_text(model_a, model_b, persistent_a=True, api_key=api_key),
+        encoding="utf-8",
     )
     if request_json(base + "/router/reload", {}, timeout=30)[1].get("reloaded") is not True:
         raise RuntimeError("persistent catalog reload was not acknowledged")
@@ -587,7 +704,8 @@ def persistent_capacity_canary(
 
 
 def ttl_eviction_canary(
-    base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45
+    base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45,
+    api_key: str | None = None,
 ) -> dict:
     """Exercise idle-TTL ownership cleanup against the temporary catalog only."""
     _, before = request_json(base + "/router/status")
@@ -597,7 +715,9 @@ def ttl_eviction_canary(
     _, unloaded = request_json(base + "/router/unload", {}, timeout=45)
     if unloaded.get("unloaded") is not True:
         raise RuntimeError("could not unload the prior resident before TTL qualification")
-    catalog_path.write_text(native_catalog_text(model_a, model_b, ttl_s=2), encoding="utf-8")
+    catalog_path.write_text(
+        native_catalog_text(model_a, model_b, ttl_s=2, api_key=api_key), encoding="utf-8"
+    )
     _, reloaded = request_json(base + "/router/reload", {}, timeout=30)
     if reloaded.get("reloaded") is not True:
         raise RuntimeError("temporary TTL catalog reload was not acknowledged")
@@ -628,6 +748,7 @@ def ttl_eviction_canary(
 def native_catalog_text(
     model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0,
     invalid_model: str | None = None, persistent_a: bool = False,
+    api_key: str | None = None,
 ) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
@@ -637,6 +758,8 @@ def native_catalog_text(
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
     ]
     catalog = ["[router]", "upstream_timeout_s = 660", ""]
+    if api_key is not None:
+        catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]
     if persistent_a:
         catalog.extend((
             "[router.groups.resident]", 'members = ["model-a"]', "swap = false",
@@ -698,8 +821,12 @@ def main() -> int:
     env["MAX_JOBS"] = "2"
     catalog_path = artifacts / "models.toml"
     invalid_model = str(artifacts / "intentionally-missing-model.gguf")
+    native_api_key = secrets.token_urlsafe(32)
     catalog_path.write_text(
-        native_catalog_text(args.model_a, args.model_b, invalid_model=invalid_model), encoding="utf-8"
+        native_catalog_text(
+            args.model_a, args.model_b, invalid_model=invalid_model, api_key=native_api_key
+        ),
+        encoding="utf-8",
     )
     with (artifacts / "kernel-preflight.log").open("wb") as log:
         subprocess.run(
@@ -712,6 +839,7 @@ def main() -> int:
     maintenance = False
     final_engine_port: int | None = None
     base = f"http://127.0.0.1:{args.daemon_port}"
+    configure_native_auth(base, native_api_key)
 
     def launch_daemon(log, *, stop_serve_on_exit: bool) -> subprocess.Popen[bytes]:
         command = [
@@ -740,6 +868,7 @@ def main() -> int:
             activation_count = validate_routed_trial(
                 loaded["router"], alias="model-a", prior_activations=0, expected_delta=1
             )
+            result["controlPlane"] = control_plane_canary(base, artifacts)
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
             (artifacts / "direct-a.load.json").write_bytes(loaded_raw)
@@ -820,13 +949,17 @@ def main() -> int:
             (artifacts / "conflict-waiting-b.sse").write_bytes(conflict_b_raw)
             (artifacts / "conflict-restored-a.sse").write_bytes(conflict_restored_raw)
             result["conflictingRequest"] = conflict
-            result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
+            result["reloadConflict"] = reload_conflict_canary(
+                base, catalog_path, args.model_a, args.model_b, api_key=native_api_key
+            )
             persistent_raw, persistent = persistent_capacity_canary(
-                base, catalog_path, args.model_a, args.model_b
+                base, catalog_path, args.model_a, args.model_b, api_key=native_api_key
             )
             (artifacts / "persistent-capacity-rejection.json").write_bytes(persistent_raw)
             result["persistentCapacity"] = persistent
-            result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
+            result["ttl"] = ttl_eviction_canary(
+                base, catalog_path, args.model_a, args.model_b, api_key=native_api_key
+            )
             final_engine_port = result["ttl"]["port"]
             save()
             result["passed"] = (
@@ -840,6 +973,7 @@ def main() -> int:
                 and result.get("reAdoption", {}).get("passed") is True
                 and result.get("persistentCapacity", {}).get("passed") is True
                 and result.get("conflictingRequest", {}).get("passed") is True
+                and result.get("controlPlane", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

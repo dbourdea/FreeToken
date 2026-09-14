@@ -52,13 +52,20 @@ model alias, elapsed time, first-byte time, final duration, usage-derived comple
 | TTL | Allow a nonpersistent idle profile to reach its TTL | Engine stops through accounting path, listener closes, eviction increments |
 | Bad replacement | Select an intentionally invalid disposable fixture | HTTP failure is visible, previous engine recovery is attempted only when applicable, failed receipt is degraded rather than fabricated |
 | Reload | Replace catalog with a valid idle change, then an invalid or active-profile redefinition | Valid change applies atomically; invalid and active redefinitions are refused without altering live ownership |
+| Authentication and control plane | Probe inference and management without credentials, then inspect aliases, profiles, metrics, and router-log SSE with the temporary bearer key | Unauthenticated inference and management return 401; authenticated inventory is consistent with resident A; metrics and a bounded `management_loaded` event are available |
 
 ## Separate performance evidence
 
 `benchmarks/swap/qualify_native_router.py` is the opt-in Linux harness for
 collecting the four required comparisons in one approved maintenance window.
 It starts a private native daemon with a private state directory and extension
-cache and a validated dynamic-port TOML catalog, then records private raw artifacts for: a direct request to the
+cache and a validated dynamic-port TOML catalog. It generates a fresh private
+router bearer key for the run and scopes that credential to the exact temporary
+daemon origin; the protected service and direct engine comparison never receive
+it. Before performance trials, it requires unauthenticated `/router/status` and
+`/v1/models` requests to return 401, then authenticates alias, model, profile,
+Prometheus, and bounded router-log SSE checks. Their raw responses and the key-bearing
+catalog remain private. The harness then records private raw artifacts for: a direct request to the
 router-owned engine port, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It requires streamed OpenAI usage,
 then records first-byte time, final duration, completion tokens, and usage-derived
