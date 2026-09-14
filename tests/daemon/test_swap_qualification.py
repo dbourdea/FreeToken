@@ -182,6 +182,8 @@ def test_native_router_benchmark_captures_private_hardware_observation(
     [
         {"engine": {"running": False, "pid": 7, "port": 1234}, "memory": {"ramBytes": 3, "vramBytes": 4}},
         {"engine": {"running": True, "pid": None, "port": 1234}, "memory": {"ramBytes": 3, "vramBytes": 4}},
+        {"engine": {"running": True, "pid": 0, "port": 1234}, "memory": {"ramBytes": 3, "vramBytes": 4}},
+        {"engine": {"running": True, "pid": 7, "port": 0}, "memory": {"ramBytes": 3, "vramBytes": 4}},
         {"engine": {"running": True, "pid": 7, "port": 1234}, "memory": {"ramBytes": None, "vramBytes": 4}},
     ],
 )

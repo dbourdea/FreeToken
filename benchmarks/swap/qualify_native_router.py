@@ -126,7 +126,13 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     memory = hardware.get("memory")
     if not isinstance(engine, dict) or not isinstance(memory, dict):
         raise RuntimeError("router hardware observation has an invalid shape")
-    if not engine.get("running") or not isinstance(engine.get("pid"), int) or not isinstance(engine.get("port"), int):
+    if (
+        not engine.get("running")
+        or not isinstance(engine.get("pid"), int)
+        or engine["pid"] <= 0
+        or not isinstance(engine.get("port"), int)
+        or not 1 <= engine["port"] <= 65535
+    ):
         raise RuntimeError("router hardware observation does not identify a running engine")
     if not all(isinstance(memory.get(key), int) for key in ("ramBytes", "vramBytes")):
         raise RuntimeError("router hardware observation lacks byte measurements")
