@@ -95,6 +95,8 @@ class RoutingCoordinator:
         self._reservations = 0
         self._profile_reservations: dict[str, int] = {}
         self._active_name: str | None = None
+        self._activating_name: str | None = None
+        self._activating_port: int | None = None
         self._switching = False
         self._manual_lifecycle_owner: object | None = None
         self._manual_lifecycle_tokens: set[object] = set()
@@ -118,9 +120,10 @@ class RoutingCoordinator:
     def _adopt_exact_catalog_resident(self) -> None:
         """Bind one unambiguous catalog profile to a manager-re-adopted engine.
 
-        Dynamic-port profiles match the concrete persisted port. If multiple
-        aliases describe the same process identity, fail closed rather than
-        inventing which alias owns residency.
+        Omitted ports match the configured default and dynamic-port profiles
+        match the concrete persisted port. If multiple profiles describe the
+        same process identity, fail closed rather than inventing which one owns
+        residency.
         """
         state = self._manager.status()
         port = state.get("port")
@@ -130,7 +133,11 @@ class RoutingCoordinator:
         matches = [
             profile for profile in self._catalog.profiles()
             if profile.model == state.get("model")
-            and (profile.port == port or profile.port == 0)
+            and (
+                profile.port == port
+                or profile.port == 0
+                or (profile.port is None and port == self._default_port)
+            )
             and list(profile.args) == args
         ]
         if len(matches) != 1:
@@ -208,6 +215,8 @@ class RoutingCoordinator:
                     self._cond.notify_all()
                     raise RoutingError("capacity_unavailable", block, status_code=409)
                 self._switching = True
+                self._activating_name = profile.name
+                self._activating_port = port
                 self._pending.remove(ticket)
                 break
 
@@ -217,6 +226,8 @@ class RoutingCoordinator:
         except Exception as exc:
             with self._cond:
                 self._switching = False
+                self._activating_name = None
+                self._activating_port = None
                 self._activation_failures += 1
                 self._drop_concurrency_reservation_locked(profile)
                 self._cond.notify_all()
@@ -229,6 +240,8 @@ class RoutingCoordinator:
             raise RoutingError("activation_failed", str(exc)) from exc
         with self._cond:
             self._active_name = profile.name
+            self._activating_name = None
+            self._activating_port = None
             self._switching = False
             self._cancel_idle_timer()
             self._leases += 1
@@ -298,6 +311,7 @@ class RoutingCoordinator:
             active_identity_matches = self._active_matches_engine_locked()
             return {
                 "activeProfile": self._active_name,
+                "activatingProfile": self._activating_name,
                 "activeGroup": group.name if group else None,
                 "residentProfiles": [self._active_name] if active_identity_matches else [],
                 "activeIdentityMatchesEngine": active_identity_matches,
@@ -330,6 +344,18 @@ class RoutingCoordinator:
     def catalog(self) -> ModelCatalog:
         with self._cond:
             return self._catalog
+
+    def model_listing_snapshot(self) -> tuple[ModelCatalog, frozenset[str]]:
+        """Return one atomic public-catalog and loaded/starting identity snapshot."""
+        with self._cond:
+            loaded: set[str] = set()
+            if self._active_name is not None and self._active_matches_engine_locked():
+                loaded.add(self._active_name)
+            if self._activating_name is not None and self._activating_port is not None:
+                profile = self._catalog.get(self._activating_name)
+                if self._engine_matches(profile, self._activating_port):
+                    loaded.add(self._activating_name)
+            return self._catalog, frozenset(loaded)
 
     def active_matches_engine(self) -> bool:
         """Whether the manager still owns the exact resident routed profile.
@@ -658,10 +684,12 @@ class RoutingCoordinator:
             self._profile_reservations[profile.name] = count - 1
 
     def _matches_active(self, profile: ModelProfile, port: int) -> bool:
+        return self._active_name == profile.name and self._engine_matches(profile, port)
+
+    def _engine_matches(self, profile: ModelProfile, port: int) -> bool:
         state = self._manager.status()
         return bool(
-            self._active_name == profile.name
-            and state.get("running")
+            state.get("running")
             and state.get("model") == profile.model
             and state.get("port") == port
             and self._manager.serve_args() == list(profile.args)

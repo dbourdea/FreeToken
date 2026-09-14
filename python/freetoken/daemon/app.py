@@ -680,13 +680,27 @@ def build_app(
 
     @app.get("/v1/models", dependencies=[Depends(require_router_key)])
     async def openai_model_list(request: Request):
-        """OpenAI-compatible alias listing without exposing local model paths."""
+        """OpenAI-compatible public metadata without exposing local model paths."""
+        catalog_snapshot, loaded_profiles = router.model_listing_snapshot()
+        created = int(time.time())
+        data = []
+        for model_id in catalog_snapshot.listed_model_ids():
+            profile = catalog_snapshot.get(model_id)
+            record = {
+                "id": model_id,
+                "object": "model",
+                "created": created,
+                "owned_by": "freetoken",
+                "status": {
+                    "value": "loaded" if profile.name in loaded_profiles else "unloaded"
+                },
+            }
+            if profile.description:
+                record["description"] = profile.description
+            data.append(record)
         response = JSONResponse(content={
             "object": "list",
-            "data": [
-                {"id": model_id, "object": "model", "created": 0, "owned_by": "freetoken"}
-                for model_id in router.catalog.listed_model_ids()
-            ],
+            "data": data,
         })
         if origin := request.headers.get("origin"):
             response.headers["Access-Control-Allow-Origin"] = origin

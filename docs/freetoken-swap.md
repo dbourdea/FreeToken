@@ -110,7 +110,10 @@ appear in `/router/logs`.
 The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions`,
 `/v1/completions`, `/v1/responses`, `/v1/messages`, and
 `/v1/messages/count_tokens`. Canonical and alternate IDs share one canonical
-residency while preserving the client's request body. Unknown IDs return a stable 404; unsupported
+residency and one loaded/unloaded listing status while preserving the client's
+request body. Readiness-gated activation is reported as loaded, and stale child
+identity is reported as unloaded. The public listing includes descriptions but
+never model paths or launch arguments. Unknown IDs return a stable 404; unsupported
 FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 `/router/profiles`, `/router/requests`, and `/metrics` expose configured and
 resident state, capacity, queues, lifecycle timing, response bytes and proxy

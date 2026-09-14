@@ -120,7 +120,7 @@ def test_dynamic_profile_port_is_stable_while_resident_and_fresh_after_a_swap():
     ]
 
 
-@pytest.mark.parametrize("configured_port", [1919, 0])
+@pytest.mark.parametrize("configured_port", [1919, 0, None])
 def test_router_binds_unambiguous_exact_manager_re_adoption(configured_port):
     manager = Manager()
     manager.model = "adopted.gguf"
@@ -480,6 +480,9 @@ def test_failed_readiness_restores_previous_engine_before_reporting_error():
         router.acquire("high")
     assert exc.value.code == "engine_not_ready"
     assert exc.value.recovery["launched"] is True
+    assert router.status()["activatingProfile"] is None
+    _, loaded_profiles = router.model_listing_snapshot()
+    assert loaded_profiles == frozenset({"low"})
     assert manager.model == "low.gguf"
 
 
@@ -727,6 +730,7 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
             "/v1/chat/completions", content=b'{"model":"compat-id","max_tokens":1}',
             headers={"Content-Type": "application/json"},
         )
+        loaded = client.get("/v1/models")
         canonical_response = client.post(
             "/v1/chat/completions", json={"model": "canonical", "max_tokens": 1}
         )
@@ -735,7 +739,13 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
         )
         unloaded = client.post("/router/unload", json={"name": "private-id"})
 
-    assert [item["id"] for item in listed.json()["data"]] == ["canonical", "compat-id"]
+    listed_data = listed.json()["data"]
+    assert [item["id"] for item in listed_data] == ["canonical", "compat-id"]
+    assert {item["status"]["value"] for item in listed_data} == {"unloaded"}
+    loaded_data = loaded.json()["data"]
+    assert {item["id"]: item["status"]["value"] for item in loaded_data} == {
+        "canonical": "loaded", "compat-id": "loaded",
+    }
     assert alias_response.status_code == canonical_response.status_code == 200
     assert hidden_response.status_code == 200
     assert unloaded.json()["unloaded"] is True
@@ -746,6 +756,79 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
     ]
     assert calls[0]["body"] == b'{"model":"compat-id","max_tokens":1}'
     assert router.status()["activeProfile"] is None
+
+
+def test_openai_model_list_reports_canonical_and_alias_loaded_while_activating():
+    manager = Manager()
+    activation_started = threading.Event()
+    finish_activation = threading.Event()
+    catalog_doc = ModelCatalog(
+        {"canonical": ModelProfile(
+            "canonical", "shared.gguf", (), aliases=("compat-id",)
+        )},
+        settings=RouterSettings(include_aliases_in_list=True),
+    )
+
+    def blocking_ready(manager, probe, *, pid, port, timeout_s):
+        activation_started.set()
+        assert finish_activation.wait(2)
+        return {"ready": True, "health": {"status": "ok"}}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=blocking_ready)
+    with (
+        ThreadPoolExecutor(1) as activation,
+        ThreadPoolExecutor(1) as lifecycle,
+        ThreadPoolExecutor(1) as proxy,
+    ):
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        future = activation.submit(router.acquire, "compat-id")
+        assert activation_started.wait(2)
+        try:
+            status = client.get("/router/status").json()
+            listed = client.get("/v1/models").json()["data"]
+        finally:
+            finish_activation.set()
+        lease = future.result(timeout=2)
+        lease.release()
+
+    assert status["activeProfile"] is None
+    assert status["activatingProfile"] == "canonical"
+    assert {item["id"]: item["status"]["value"] for item in listed} == {
+        "canonical": "loaded", "compat-id": "loaded",
+    }
+    assert router.status()["activatingProfile"] is None
+
+
+def test_model_listing_does_not_claim_loaded_before_manager_owns_starting_child():
+    start_entered = threading.Event()
+    finish_start = threading.Event()
+
+    class BlockingStartManager(Manager):
+        def start(self, model, port, args):
+            start_entered.set()
+            assert finish_start.wait(2)
+            return super().start(model, port, args)
+
+    manager = BlockingStartManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as activation:
+        future = activation.submit(router.acquire, "low")
+        assert start_entered.wait(2)
+        try:
+            _, loaded_profiles = router.model_listing_snapshot()
+            status = router.status()
+        finally:
+            finish_start.set()
+        lease = future.result(timeout=2)
+        lease.release()
+
+    assert loaded_profiles == frozenset()
+    assert status["activatingProfile"] == "low"
+    assert router.model_listing_snapshot()[1] == frozenset({"low"})
 
 
 def test_browser_cors_preflight_is_side_effect_free_and_sanitizes_headers():
@@ -1519,7 +1602,9 @@ def test_router_management_unloads_one_or_all_under_single_resident_policy():
 def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
     manager = Manager()
     catalog_doc = ModelCatalog(
-        {"low": ModelProfile("low", "/private/models/low.gguf", ())},
+        {"low": ModelProfile(
+            "low", "/private/models/low.gguf", (), description="Public description"
+        )},
         settings=RouterSettings(api_keys=("router-test-key",)),
     )
     router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
@@ -1542,6 +1627,10 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         assert client.get("/ready").status_code == 200
         manager.model = "unexpected.gguf"
         assert client.get("/ready").status_code == 503
+        stale_listing = client.get(
+            "/v1/models", headers={"Authorization": "Bearer router-test-key"}
+        )
+        assert stale_listing.json()["data"][0]["status"] == {"value": "unloaded"}
         stale_status = client.get("/router/status", headers={"Authorization": "Bearer router-test-key"})
         assert stale_status.json()["residentProfiles"] == []
         assert stale_status.json()["activeIdentityMatchesEngine"] is False
@@ -1557,10 +1646,17 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         manager.port = 1999
         assert client.get("/ready").status_code == 503
     assert listed.status_code == 200
-    assert listed.json() == {
-        "object": "list",
-        "data": [{"id": "low", "object": "model", "created": 0, "owned_by": "freetoken"}],
-    }
+    listed_doc = listed.json()
+    assert listed_doc["object"] == "list"
+    assert len(listed_doc["data"]) == 1
+    public_model = listed_doc["data"][0]
+    assert public_model["id"] == "low"
+    assert public_model["object"] == "model"
+    assert public_model["owned_by"] == "freetoken"
+    assert public_model["description"] == "Public description"
+    assert public_model["status"] == {"value": "unloaded"}
+    assert isinstance(public_model["created"], int) and public_model["created"] > 0
+    assert "/private/models" not in json.dumps(listed_doc)
 
 
 def test_ready_probe_linearizes_before_a_conflicting_swap():

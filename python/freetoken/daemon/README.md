@@ -67,6 +67,7 @@ vectors for `ft serve`, never shell commands.
 | Method / path | Notes |
 | --- | --- |
 | `GET /health` | Daemon self-health; always answers, never gated by `--token`. |
+| `GET /v1/models` | Public canonical/optional alternate IDs with atomic loaded/unloaded status and no model paths or launch arguments. |
 | `POST /engine/start` `{model,port,args[]}` | Idempotent on the full `(model,port,args)`; a differing config on the same port → `409`. |
 | `POST /engine/stop` `{force?:false}` | Close admission, drain/abort, durably enqueue the final-accounting receipt, then `SIGTERM`→grace→`SIGKILL`. A prepare/outbox failure preserves the engine. |
 | `POST /engine/switch` `{model,port,args[],force?:false}` | One serialized stop-accounting-start transaction. |
