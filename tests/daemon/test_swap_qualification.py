@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -190,6 +191,16 @@ def test_native_router_benchmark_rejects_incomplete_hardware_observation(
     monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (b"{}", hardware))
     with pytest.raises(RuntimeError):
         native_router_qualifier.capture_hardware("http://test", tmp_path, "bad")
+
+
+def test_native_router_benchmark_requires_final_engine_listener_to_close(native_router_qualifier):
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        with pytest.raises(RuntimeError, match="listener"):
+            native_router_qualifier.require_listener_closed(listener.getsockname()[1])
+        port = listener.getsockname()[1]
+    native_router_qualifier.require_listener_closed(port)
 
 
 def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_router_qualifier, tmp_path):

@@ -77,6 +77,8 @@ always attempts daemon cleanup and protected-workload restoration. Do not run
 it on Windows or substitute a direct engine URL for the routed cases. Publish
 only sanitized aggregate timings and explicit pass/fail results; raw responses,
 paths, daemon logs, catalog, and host data remain private.
+The harness also requires the final temporary engine listener to be closed
+before it can report success.
 
 ## Restoration and acceptance
 

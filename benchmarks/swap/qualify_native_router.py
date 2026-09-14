@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -133,6 +134,14 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     return hardware
 
 
+def require_listener_closed(port: int) -> None:
+    """Fail the qualification if a temporary engine listener survived cleanup."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        connection.settimeout(1)
+        if connection.connect_ex(("127.0.0.1", port)) == 0:
+            raise RuntimeError("temporary engine listener remains reachable after cleanup")
+
+
 def native_catalog_text(model_a: str, model_b: str) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
@@ -194,6 +203,7 @@ def main() -> int:
 
     daemon: subprocess.Popen[bytes] | None = None
     maintenance = False
+    final_engine_port: int | None = None
     base = f"http://127.0.0.1:{args.daemon_port}"
     try:
         with (artifacts / "daemon.log").open("wb") as log:
@@ -219,6 +229,7 @@ def main() -> int:
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
             direct_row["hardware"] = capture_hardware(base, artifacts, "direct-a")
+            final_engine_port = direct_row["hardware"]["engine"]["port"]
             result["trials"].append(direct_row)
 
             for label, alias, expected_delta in (
@@ -237,6 +248,7 @@ def main() -> int:
                 (artifacts / f"{label}.sse").write_bytes(raw)
                 (artifacts / f"{label}.metrics").write_bytes(request_bytes(base + "/metrics"))
                 row["hardware"] = capture_hardware(base, artifacts, label)
+                final_engine_port = row["hardware"]["engine"]["port"]
                 result["trials"].append(row)
                 save()
             result["passed"] = len(result["trials"]) == 4 and all(x["passed"] for x in result["trials"])
@@ -250,7 +262,13 @@ def main() -> int:
                 pass
             try:
                 stop_process_group(daemon)
+                if daemon.poll() is None:
+                    raise RuntimeError("temporary daemon process did not exit")
+                if final_engine_port is not None:
+                    require_listener_closed(final_engine_port)
             except (OSError, subprocess.TimeoutExpired) as exc:
+                result["cleanupError"] = repr(exc)
+            except RuntimeError as exc:
                 result["cleanupError"] = repr(exc)
         if maintenance:
             try:
