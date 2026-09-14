@@ -12,7 +12,12 @@ from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
 from freetoken.daemon.app import build_app
-from freetoken.daemon.inference_proxy import UpstreamResponse, filter_request_body, forward_headers
+from freetoken.daemon.inference_proxy import (
+    UpstreamResponse,
+    filter_request_body,
+    forward_headers,
+    response_headers,
+)
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.router import RoutingCoordinator, RoutingError
 
@@ -373,6 +378,19 @@ def test_router_terminates_local_authentication_before_proxying(monkeypatch):
     assert observed["x-correlation-id"] == "client-safe-id"
     assert "authorization" not in observed
     assert "x-ft-token" not in observed
+
+
+def test_proxy_response_headers_do_not_apply_inbound_credential_filtering():
+    assert response_headers(
+        {
+            "Authorization": "Engine challenge metadata",
+            "X-FT-Token": "engine-defined-response-value",
+            "Connection": "close",
+        }
+    ) == {
+        "Authorization": "Engine challenge metadata",
+        "X-FT-Token": "engine-defined-response-value",
+    }
 
 
 def test_router_reload_atomically_replaces_a_valid_catalog(tmp_path):

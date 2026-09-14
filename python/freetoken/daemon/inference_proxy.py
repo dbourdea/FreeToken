@@ -65,6 +65,16 @@ def forward_headers(headers: Mapping[str, str]) -> dict[str, str]:
     return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
 
+def response_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Remove only hop-by-hop fields from an engine response.
+
+    Local router credentials are an inbound-only concern.  A response may
+    legitimately contain an application authentication challenge or similarly
+    named metadata, which must retain normal upstream-header semantics.
+    """
+    return {key: value for key, value in headers.items() if key.lower() not in _HOP_BY_HOP}
+
+
 @dataclass
 class UpstreamResponse:
     status: int
@@ -101,6 +111,6 @@ def open_upstream(*, port: int, path_and_query: str, headers: Mapping[str, str],
         raw = exc
     return UpstreamResponse(
         status=raw.getcode(),
-        headers=forward_headers(dict(raw.headers.items())),
+        headers=response_headers(dict(raw.headers.items())),
         raw=raw,
     )
