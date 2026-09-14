@@ -215,6 +215,22 @@ class RoutingCoordinator:
         with self._cond:
             return self._catalog
 
+    def active_matches_engine(self) -> bool:
+        """Whether the manager still owns the exact resident routed profile.
+
+        A listening child alone is not a readiness signal: an out-of-band or
+        stale child must not make the stable router URL appear healthy for the
+        alias recorded by the coordinator.
+        """
+        with self._cond:
+            if self._active_name is None:
+                return False
+            try:
+                profile = self._catalog.get(self._active_name)
+            except CatalogError:
+                return False
+            return self._matches_active(profile, self._port_for(profile))
+
     @property
     def upstream_timeout_s(self) -> float:
         with self._cond:

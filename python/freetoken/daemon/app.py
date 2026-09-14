@@ -297,7 +297,8 @@ def build_app(
         route_state = router.status()
         engine = manager.status()
         if (route_state["activeProfile"] is None or route_state["switching"]
-                or not engine.get("running") or not isinstance(engine.get("port"), int)):
+                or not engine.get("running") or not isinstance(engine.get("port"), int)
+                or not router.active_matches_engine()):
             return JSONResponse(status_code=503, content={"ready": False})
         health_doc = await run(proxy_pool, probe.fresh_health, engine["port"])
         accepting = bool(

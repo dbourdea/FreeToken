@@ -92,7 +92,8 @@ otherwise preserved.
 
 `GET /ready` is an unauthenticated, side-effect-free readiness probe for the
 stable router URL. It returns 200 only while a resident routed engine reports
-FreeToken's `status=ok` and `maintenance=serving`; it never cold-loads a
+FreeToken's `status=ok` and `maintenance=serving` **and** still exactly matches
+the resident alias's model, port, and argument vector; it never cold-loads a
 profile. The stateless backend's `GET /v1/responses/{id}` and response-specific
 cancel endpoints always return its documented 404 and are therefore not routing
 or lifecycle operations.
