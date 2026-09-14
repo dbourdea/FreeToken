@@ -54,6 +54,26 @@ engine metrics, accounting receipt IDs, and cleanup result.
 | Bad replacement | Select an intentionally invalid disposable fixture | HTTP failure is visible, previous engine recovery is attempted only when applicable, failed receipt is degraded rather than fabricated |
 | Reload | Replace catalog with a valid idle change, then an invalid or active-profile redefinition | Valid change applies atomically; invalid and active redefinitions are refused without altering live ownership |
 
+## Separate performance evidence
+
+`benchmarks/swap/qualify_native_router.py` is the opt-in Linux harness for
+collecting the four required comparisons in one approved maintenance window.
+It starts a private native daemon with a private state directory and extension
+cache, then records private raw artifacts for: a direct request to the
+router-owned engine port, a warm routed request, a cold routed swap to the
+other model, and an alternating routed swap back. It reads first-byte and final
+duration at the client, and stores the corresponding `/router/status` snapshot
+for each routed request.
+
+The harness requires `--allow-maintenance`, a new empty `--artifacts`
+directory, two known-good model paths, and the protected service's private
+restore endpoint. It first verifies the protected baseline, prebuilds kernels,
+stops the protected service only after the native daemon is reachable, and
+always attempts daemon cleanup and protected-workload restoration. Do not run
+it on Windows or substitute a direct engine URL for the routed cases. Publish
+only sanitized aggregate timings and explicit pass/fail results; raw responses,
+paths, daemon logs, catalog, and host data remain private.
+
 ## Restoration and acceptance
 
 After testing:
