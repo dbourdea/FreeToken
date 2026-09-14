@@ -56,6 +56,16 @@ jobs:
                   continue
               test_id = f"{case.get('classname', '')}.{case.get('name', '')}".strip(".")
               message = (node.get("message") or "test failed").splitlines()[0][:500]
+              detail = next(
+                  (
+                      line.lstrip()[1:].strip()
+                      for line in (node.text or "").splitlines()
+                      if line.lstrip().startswith(">")
+                  ),
+                  "",
+              )
+              if detail:
+                  message = f"{message}; {detail}"[:500]
               for old, new in (("%", "%25"), ("\r", "%0D"), ("\n", "%0A")):
                   message = message.replace(old, new)
               failures.append((test_id, message))
