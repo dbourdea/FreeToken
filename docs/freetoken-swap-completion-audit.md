@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 203 daemon
+- Local deterministic verification on the current Windows checkout: 222 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for Linux real-child or real-model
   evidence.
@@ -58,14 +58,17 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, historical restore/completion checks, no interruption during combined-tree checks | Maintained; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
-| FreeToken-only publication | Anonymous GitHub API recheck on 2026-09-14: draft PR 1 is open from `feat/freetoken-swap` to `main` and reports `mergeable_state=clean`; draft PR 2 remains open on its separate AMD branch and also reports clean | Submitted, draft, not merged |
+| FreeToken-only publication | Public GitHub recheck on 2026-09-14: draft PR 1 targets `main` from `feat/freetoken-swap`, and its public PR ref matched the branch head at recheck; draft PR 2 targets `amd-rocm-gfx1151` from `fix/qwen36-swap-compat` | Submitted, draft, not merged |
 
 The PRs target different base branches: PR 1 targets `main`; PR 2 targets
-`amd-rocm-gfx1151`. Their current open/draft/clean state was rechecked through
-anonymous public metadata; no authenticated mutation was attempted. The clean combined tree is compatibility evidence, not an
-instruction to merge either PR or change the repository's release strategy.
-GitHub reported no status checks for either PR at this audit. The test results
-above are independently executed evidence, not claims of passing hosted CI.
+`amd-rocm-gfx1151`. Their current draft state and branch relationships were
+rechecked on their public GitHub pages; current mergeability was not reverified,
+and no authenticated mutation was attempted. The clean combined tree is
+compatibility evidence, not an instruction to merge either PR or change the
+repository's release strategy. The public Checks pages showed no hosted checks
+for either PR at this audit. The test results above are independently executed
+evidence, not claims of passing hosted CI. PR 1's public description remains
+historical and is not the authoritative record of current-branch qualification.
 
 ## Historical maintenance-window evidence
 
