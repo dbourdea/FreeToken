@@ -678,6 +678,7 @@ def build_app(
     async def inference_proxy(request: Request):
         return await route_inference(request)
 
+    @app.get("/models", dependencies=[Depends(require_router_key)])
     @app.get("/v1/models", dependencies=[Depends(require_router_key)])
     async def openai_model_list(request: Request):
         """OpenAI-compatible public metadata without exposing local model paths."""
@@ -878,11 +879,6 @@ def build_app(
             "code": "switch_launch_failed", "error": str(exc),
             "rollback": exc.rollback, "accounting": exc.accounting,
         })
-
-    @app.get("/models", dependencies=auth)
-    async def models():
-        """A small llama-swap-style model listing, backed only by local profiles."""
-        return {"data": router.catalog.public()}
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):

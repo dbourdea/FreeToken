@@ -389,7 +389,7 @@ def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, e
 def control_plane_canary(base: str, artifacts: Path) -> dict:
     """Qualify authenticated management, metrics, and bounded router-log access."""
     unauthorized: dict[str, int] = {}
-    for path in ("/router/status", "/v1/models"):
+    for path in ("/router/status", "/v1/models", "/models"):
         request = urllib.request.Request(base + path)
         try:
             with urllib.request.urlopen(request, timeout=10):
@@ -419,17 +419,27 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         alternate_auth_raw[name] = raw
 
     models_raw, models = request_json(base + "/v1/models", timeout=10)
+    _, models_alias = request_json(base + "/models", timeout=10)
     routed_raw, routed = request_json(base + "/router/models", timeout=10)
     profiles_raw, profiles = request_json(base + "/router/profiles", timeout=10)
     metrics_raw = request_bytes(base + "/metrics", timeout=10)
     model_rows = models.get("data")
+    alias_rows = models_alias.get("data")
     routed_rows = routed.get("data")
     profile_rows = profiles.get("data")
     if not all(
         isinstance(rows, list) and all(isinstance(item, dict) for item in rows)
-        for rows in (model_rows, routed_rows, profile_rows)
+        for rows in (model_rows, alias_rows, routed_rows, profile_rows)
     ):
         raise RuntimeError("authenticated native control-plane responses have invalid shapes")
+    # The pinned alias invokes the same handler independently, so request-time
+    # `created` values may differ by one second. Everything else must match.
+    normalized_models = [{k: v for k, v in item.items() if k != "created"} for item in model_rows]
+    normalized_alias = [{k: v for k, v in item.items() if k != "created"} for item in alias_rows]
+    model_envelope = {k: v for k, v in models.items() if k != "data"}
+    alias_envelope = {k: v for k, v in models_alias.items() if k != "data"}
+    if model_envelope != alias_envelope or normalized_models != normalized_alias:
+        raise RuntimeError("/models is not equivalent to the /v1/models compatibility listing")
     aliases = sorted(item["id"] for item in model_rows if isinstance(item.get("id"), str))
     routed_names = sorted(
         item["name"] for item in routed_rows if isinstance(item.get("name"), str)
@@ -478,6 +488,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "aliasCount": len(aliases),
         "profileCount": len(profile_names),
         "residentProfile": "model-a",
+        "modelListAliasVerified": True,
         "apiKeyFormsVerified": ["bearer", "basic", "x-api-key"],
         "metricsAvailable": True,
         "routerLogSseAvailable": True,

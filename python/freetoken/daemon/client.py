@@ -137,7 +137,10 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     sub.add_parser("health", parents=[common], help="Proxied serve health (GET /engine/health)")
     sub.add_parser("metrics", parents=[common], help="Engine footprint (GET /engine/metrics)")
     sub.add_parser("stats", parents=[common], help="Proxied serve stats (GET /engine/stats)")
-    sub.add_parser("models", parents=[common], help="List named freetoken-swap model profiles (GET /models)")
+    sub.add_parser(
+        "models", parents=[common],
+        help="List named freetoken-swap model profiles (GET /router/profiles)",
+    )
     stop = sub.add_parser("stop", parents=[common], help="Stop the serve (POST /engine/stop)")
     stop.add_argument(
         "--force",
@@ -186,7 +189,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             "health": ("GET", "/engine/health", None),
             "metrics": ("GET", "/engine/metrics", None),
             "stats": ("GET", "/engine/stats", None),
-            "models": ("GET", "/models", None),
+            "models": ("GET", "/router/profiles", None),
             "stop": (
                 "POST",
                 "/engine/stop",

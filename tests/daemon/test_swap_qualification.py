@@ -525,8 +525,14 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
             authorized_paths.append(self.path)
             if self.path == "/router/status":
                 body = {"activeProfile": "model-a"}
-            elif self.path == "/v1/models":
-                body = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
+            elif self.path in ("/v1/models", "/models"):
+                body = {
+                    "object": "list",
+                    "data": [
+                        {"id": "model-a", "created": 10 if self.path == "/v1/models" else 11},
+                        {"id": "model-b", "created": 10 if self.path == "/v1/models" else 11},
+                    ],
+                }
             elif self.path == "/router/models":
                 body = {"data": [
                     {"name": "model-a", "resident": True},
@@ -571,10 +577,11 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["unauthenticatedControlRejected"] is True
     assert observation["unauthenticatedInferenceRejected"] is True
     assert observation["residentProfile"] == "model-a"
+    assert observation["modelListAliasVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
         "/router/status", "/router/status",
-        "/v1/models", "/router/models", "/router/profiles", "/metrics",
+        "/v1/models", "/models", "/router/models", "/router/profiles", "/metrics",
         "/router/logs?since=0",
     ]
     assert b"management_loaded" in (tmp_path / "control-router-log.sse").read_bytes()

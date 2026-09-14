@@ -61,7 +61,7 @@ ft daemon switch-profile qwen-chat
 ft daemon health
 ```
 
-`GET /models`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
+`GET /router/profiles`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. `GET /models` is instead the pinned public-model-list alias of `GET /v1/models` and uses catalog API-key authentication. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
 
 Profiles accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
 `unlisted`, readiness, TTL/unload, priority, group, and safe top-level

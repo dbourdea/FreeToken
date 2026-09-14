@@ -184,10 +184,14 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=ModelCatalog.load(str(path)), token="secret",
         )
         client = TestClient(app)
-        assert client.get("/models").status_code == 401
-        listing = client.get("/models", headers={"X-FT-Token": "secret"})
+        assert client.get("/router/profiles").status_code == 401
+        listing = client.get("/router/profiles", headers={"X-FT-Token": "secret"})
         assert listing.status_code == 200
         assert listing.json()["data"][0]["name"] == "coding"
+        public_listing = client.get("/models")
+        assert public_listing.status_code == 200
+        assert public_listing.json()["data"][0]["id"] == "coding"
+        assert "/models/coding.gguf" not in public_listing.text
         started = client.post("/engine/start-profile", json={"name": "coding"}, headers={"X-FT-Token": "secret"})
         assert started.status_code == 200
         assert started.json()["profile"] == "coding"
@@ -214,6 +218,24 @@ def test_client_shutdown_uses_the_daemon_shutdown_transaction(monkeypatch, capsy
         "body": {"force": True}, "token": None, "timeout": daemon_client.DEFAULT_LIFECYCLE_TIMEOUT,
     }
     assert '"stopping": true' in capsys.readouterr().out
+
+
+def test_client_models_uses_authenticated_profile_control_route(monkeypatch, capsys):
+    seen = {}
+
+    def request(method, url, path, **kwargs):
+        seen.update(method=method, url=url, path=path, **kwargs)
+        return {"data": [{"name": "coding"}]}
+
+    monkeypatch.setattr(daemon_client, "_request_json", request)
+    assert daemon_client.main([
+        "models", "--url", "http://daemon:1900", "--token", "control-secret"
+    ]) == 0
+    assert seen == {
+        "method": "GET", "url": "http://daemon:1900", "path": "/router/profiles",
+        "body": None, "token": "control-secret", "timeout": daemon_client.DEFAULT_TIMEOUT,
+    }
+    assert '"name": "coding"' in capsys.readouterr().out
 
 
 def test_router_policy_is_strict_and_public_model_fields_are_safe(tmp_path):

@@ -858,7 +858,8 @@ def test_browser_cors_preflight_is_side_effect_free_and_sanitizes_headers():
     assert manager.calls == []
 
 
-def test_openai_model_list_reflects_browser_origin_without_weakening_authentication():
+def test_models_alias_matches_public_listing_and_keeps_control_auth_separate(monkeypatch):
+    monkeypatch.setattr("freetoken.daemon.app.time.time", lambda: 1234567890)
     manager = Manager()
     catalog_doc = ModelCatalog(
         {"visible": ModelProfile("visible", "private.gguf", ())},
@@ -868,6 +869,7 @@ def test_openai_model_list_reflects_browser_origin_without_weakening_authenticat
         app = build_app(
             manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc,
+            token="control-secret",
         )
         client = TestClient(app)
         denied = client.get("/v1/models", headers={"Origin": "https://client.example"})
@@ -875,11 +877,29 @@ def test_openai_model_list_reflects_browser_origin_without_weakening_authenticat
             "/v1/models",
             headers={"Origin": "https://client.example", "Authorization": "Bearer router-key"},
         )
+        alias_denied = client.get("/models", headers={"X-FT-Token": "control-secret"})
+        alias = client.get(
+            "/models",
+            headers={"Origin": "https://client.example", "Authorization": "Bearer router-key"},
+        )
+        profiles = client.get(
+            "/router/profiles", headers={"X-FT-Token": "control-secret"}
+        )
+        profiles_denied = client.get(
+            "/router/profiles", headers={"Authorization": "Bearer router-key"}
+        )
 
     assert denied.status_code == 401
     assert listed.status_code == 200
     assert listed.headers["access-control-allow-origin"] == "https://client.example"
     assert [item["id"] for item in listed.json()["data"]] == ["visible"]
+    assert alias_denied.status_code == 401
+    assert alias.status_code == 200
+    assert alias.json() == listed.json()
+    assert alias.headers["access-control-allow-origin"] == "https://client.example"
+    assert profiles.status_code == 200
+    assert profiles.json()["data"][0]["model"] == "private.gguf"
+    assert profiles_denied.status_code == 401
 
 
 def test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease(monkeypatch):
@@ -1109,7 +1129,7 @@ def test_router_reload_atomically_replaces_a_valid_catalog(tmp_path):
         path.write_text("[models.bad]\nmodel = ''\n", encoding="utf-8")
         rejected = client.post("/router/reload")
         assert rejected.status_code == 400
-        assert [item["name"] for item in client.get("/models").json()["data"]] == ["two"]
+        assert [item["name"] for item in client.get("/router/profiles").json()["data"]] == ["two"]
 
 
 def test_router_catalog_reload_rotates_bearer_keys_atomically(tmp_path):

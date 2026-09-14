@@ -67,11 +67,11 @@ vectors for `ft serve`, never shell commands.
 | Method / path | Notes |
 | --- | --- |
 | `GET /health` | Daemon self-health; always answers, never gated by `--token`. |
-| `GET /v1/models` | Public canonical/optional alternate IDs with atomic loaded/unloaded status and no model paths or launch arguments. |
+| `GET /v1/models`, `GET /models` | Identical catalog-key-protected public canonical/optional alternate IDs with atomic loaded/unloaded status and no model paths or launch arguments. |
 | `POST /engine/start` `{model,port,args[]}` | Idempotent on the full `(model,port,args)`; a differing config on the same port → `409`. |
 | `POST /engine/stop` `{force?:false}` | Close admission, drain/abort, durably enqueue the final-accounting receipt, then `SIGTERM`→grace→`SIGKILL`. A prepare/outbox failure preserves the engine. |
 | `POST /engine/switch` `{model,port,args[],force?:false}` | One serialized stop-accounting-start transaction. |
-| `GET /models` | Lists local freetoken-swap named profiles. |
+| `GET /router/profiles` | Lists local freetoken-swap named lifecycle profiles for authenticated control clients. |
 | `POST /engine/start-profile\|switch-profile` `{name,force?:false}` | Starts or atomically replaces the engine using a validated local profile. |
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
