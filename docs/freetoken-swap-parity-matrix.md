@@ -62,7 +62,10 @@ llama-swap code.
 `tests/daemon/test_real_process_recovery.py` now includes a Linux-only native
 router test that starts a disposable HTTP child through `ServeManager`, waits
 for real `/health` readiness, routes an SSE request through the daemon, then
-stops the child and verifies pidfile cleanup. It compiles and is skipped on
+stops the child and verifies pidfile cleanup. A second Linux-only test persists
+a live disposable child as prior-daemon state, re-adopts it into a new manager,
+binds the exact catalog profile in a new routing coordinator, routes SSE without
+calling the spawn function, and verifies cleanup by the new owner. It compiles and is skipped on
 Windows. It has not yet been executed on a Linux host, so it is a pending gate,
 not evidence of Linux completion.
 

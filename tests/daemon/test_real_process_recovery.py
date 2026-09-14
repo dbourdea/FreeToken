@@ -19,11 +19,11 @@ from fastapi.testclient import TestClient
 from freetoken.daemon.app import build_app
 from freetoken.daemon.catalog import ModelCatalog, ModelProfile
 from freetoken.daemon.logring import LogRing
-from freetoken.daemon.pidfile import ServeStateStore
+from freetoken.daemon.pidfile import ServeState, ServeStateStore
 from freetoken.daemon.proxy import ServeProbe
 from freetoken.daemon.readiness import wait_for_ready
 from freetoken.daemon.router import RoutingCoordinator
-from freetoken.daemon.serve_manager import PopenChild, ServeManager
+from freetoken.daemon.serve_manager import AdoptedChild, PopenChild, ServeManager
 
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux process-group integration")
@@ -187,6 +187,71 @@ def test_native_router_supervises_a_real_child_and_relays_sse(tmp_path):
                 pass
             if child.proc.poll() is None:
                 child.proc.wait(timeout=3)
+
+
+def test_native_router_binds_and_routes_a_real_readopted_child(tmp_path):
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-c", SERVER, "good", str(port), "no"],
+        start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    store = ServeStateStore(str(tmp_path / "serve.json"))
+    store.save(ServeState(model="good", port=port, pid=proc.pid, args=["--adopted"]))
+    probe = ServeProbe()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            if json_get(port, "/health")["status"] == "ok":
+                break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        raise AssertionError("test child did not become ready")
+
+    adopted = AdoptedChild(
+        proc.pid, port, None, None, alive_check=lambda: running(proc.pid),
+        sleep=time.sleep, poll_interval=0.05,
+    )
+    manager = ServeManager(
+        LogRing(), store,
+        spawn_fn=lambda *args: (_ for _ in ()).throw(AssertionError("unexpected second spawn")),
+        adopt_fn=lambda state: adopted,
+        apply_oom=False, grace_s=0.2, reap_wait_s=3,
+        read_stats=lambda p: json_get(p, "/v1/stats"),
+    )
+    catalog = ModelCatalog({
+        "good": ModelProfile("good", "good", ("--adopted",), port=port),
+    })
+    try:
+        assert manager.readopt() is True
+        router = RoutingCoordinator(manager, catalog, probe)
+        assert router.status()["activeProfile"] == "good"
+        assert router.status()["activeIdentityMatchesEngine"] is True
+        with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(2) as proxy:
+            app = build_app(
+                manager=manager, ring=LogRing(), probe=probe, footprint_fn=lambda pid: {},
+                lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog, router=router,
+            )
+            response = TestClient(app).post(
+                "/v1/chat/completions", json={"model": "good", "stream": True},
+            )
+        assert response.status_code == 200
+        assert response.content.endswith(b"data: [DONE]\n\n")
+        assert manager.status()["pid"] == proc.pid and manager.status()["adopted"] is True
+        assert router.status()["activations"] == 0
+        manager.stop()
+        proc.wait(timeout=3)
+        assert store.load() is None
+    finally:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, 9)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=3)
 
 
 def test_native_router_uses_fresh_dynamic_ports_for_real_child_reactivation(tmp_path):
