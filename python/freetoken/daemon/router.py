@@ -90,6 +90,8 @@ class RoutingCoordinator:
         self._leases = 0
         self._active_name: str | None = None
         self._switching = False
+        self._manual_lifecycle_owner: object | None = None
+        self._manual_lifecycle_tokens: set[object] = set()
         self._idle_timer: object | None = None
         self._evictions = 0
         self._admissions = 0
@@ -210,6 +212,37 @@ class RoutingCoordinator:
         with self._cond:
             cancellation.set()
             self._cond.notify_all()
+
+    def begin_manual_lifecycle(self, *, preempt_manual: bool = False) -> object:
+        """Reserve the lifecycle barrier for one legacy engine operation."""
+        with self._cond:
+            manual_owned = self._manual_lifecycle_owner is not None
+            routed_owned = bool(
+                self._active_name is not None or self._leases
+                or (self._pending and not manual_owned)
+            )
+            if (routed_owned or (self._switching and not (preempt_manual and manual_owned))):
+                raise RoutingError(
+                    "router_owned",
+                    "router owns or is admitting an engine; use router controls or wait",
+                    status_code=409,
+                )
+            owner = object()
+            self._manual_lifecycle_tokens.add(owner)
+            self._manual_lifecycle_owner = owner
+            self._switching = True
+            return owner
+
+    def end_manual_lifecycle(self, owner: object) -> None:
+        """Release a matching legacy lifecycle reservation."""
+        with self._cond:
+            if owner not in self._manual_lifecycle_tokens:
+                raise ValueError("manual lifecycle reservation is not owned by caller")
+            self._manual_lifecycle_tokens.remove(owner)
+            if self._manual_lifecycle_owner is owner:
+                self._manual_lifecycle_owner = None
+                self._switching = False
+                self._cond.notify_all()
 
     def release(self, lease: RouteLease) -> None:
         with self._cond:

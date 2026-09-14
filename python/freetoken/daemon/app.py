@@ -292,21 +292,12 @@ def build_app(
         st = manager.status()
         return st.get("port") or default_serve_port
 
-    def require_unowned_manual_lifecycle() -> None:
-        """Keep legacy engine controls from racing a routed lease or swap.
-
-        The endpoints remain useful for a daemon with no routed owner yet, but
-        once a profile has been admitted only the router may replace or stop
-        its child. Otherwise an operator request could kill a live SSE stream
-        behind the coordinator's back and leave its residency state false.
-        """
-        state = router.status()
-        if (state["activeProfile"] is not None or state["activeRequests"]
-                or state["switching"] or state["queuedRequests"]):
-            raise HTTPException(
-                status_code=409,
-                detail="router owns or is admitting an engine; use router unload or wait for leases",
-            )
+    def begin_manual_lifecycle(*, preempt_manual: bool = False) -> object:
+        """Atomically keep legacy engine controls outside routed ownership."""
+        try:
+            return router.begin_manual_lifecycle(preempt_manual=preempt_manual)
+        except RoutingError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     def accounting_error(exc: Exception) -> JSONResponse:
         code = (
@@ -779,9 +770,9 @@ def build_app(
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):
-        require_unowned_manual_lifecycle()
-        port = resolve_port(body.port)
+        owner = begin_manual_lifecycle()
         try:
+            port = resolve_port(body.port)
             return await run(lifecycle_pool, manager.start, body.model, port, list(body.args))
         except Conflict as exc:
             st = manager.status()
@@ -796,14 +787,18 @@ def build_app(
             )
         except Exception as exc:  # noqa: BLE001 — never propagate a 500-as-crash
             raise HTTPException(status_code=500, detail=f"start failed: {exc}")
+        finally:
+            router.end_manual_lifecycle(owner)
 
     @app.post("/engine/stop", dependencies=auth)
     async def engine_stop(body: StopBody | None = None):
-        require_unowned_manual_lifecycle()
+        owner = begin_manual_lifecycle(preempt_manual=True)
         try:
             return await run(lifecycle_pool, manager.stop, None, bool(body and body.force))
         except (AccountingPrepareError, AccountingOutboxError) as exc:
             return accounting_error(exc)
+        finally:
+            router.end_manual_lifecycle(owner)
 
     @app.post("/shutdown", dependencies=auth)
     async def shutdown_daemon(request: Request, body: StopBody | None = None):
@@ -825,9 +820,9 @@ def build_app(
 
     @app.post("/engine/switch", dependencies=auth)
     async def engine_switch(body: SwitchBody):
-        require_unowned_manual_lifecycle()
-        port = resolve_port(body.port)
+        owner = begin_manual_lifecycle()
         try:
+            port = resolve_port(body.port)
             return await run(
                 lifecycle_pool,
                 manager.switch,
@@ -842,10 +837,12 @@ def build_app(
             if isinstance(exc, SwitchLaunchError):
                 raise
             raise HTTPException(status_code=500, detail=f"switch failed: {exc}")
+        finally:
+            router.end_manual_lifecycle(owner)
 
     @app.post("/engine/start-profile", dependencies=auth)
     async def engine_start_profile(body: ProfileBody):
-        require_unowned_manual_lifecycle()
+        owner = begin_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
             result = await run(lifecycle_pool, manager.start, model, port, args)
@@ -865,10 +862,12 @@ def build_app(
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"profile start failed: {exc}")
+        finally:
+            router.end_manual_lifecycle(owner)
 
     @app.post("/engine/switch-profile", dependencies=auth)
     async def engine_switch_profile(body: ProfileBody):
-        require_unowned_manual_lifecycle()
+        owner = begin_manual_lifecycle()
         try:
             model, port, args = profile_request(body.name)
             result, ticket = await run(
@@ -895,6 +894,8 @@ def build_app(
             if isinstance(exc, SwitchLaunchError):
                 raise
             raise HTTPException(status_code=500, detail=f"profile switch failed: {exc}")
+        finally:
+            router.end_manual_lifecycle(owner)
 
     # ---- durable accounting outbox ----
 

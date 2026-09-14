@@ -1244,6 +1244,83 @@ def test_ready_probe_linearizes_before_a_conflicting_swap():
     assert manager.calls == [("start", "low.gguf"), ("switch", "high.gguf")]
 
 
+def test_manual_engine_start_holds_router_lifecycle_barrier():
+    entered = threading.Event()
+    finish_manual = threading.Event()
+
+    class BlockingManager(Manager):
+        def start(self, model, port, args):
+            self.calls.append(("manual-start", model))
+            entered.set()
+            assert finish_manual.wait(2)
+            self.model, self.port, self.args = model, port, list(args)
+            self.pid += 1
+            return {"pid": self.pid}
+
+    manager = BlockingManager()
+    catalog_doc = catalog()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    manual_response = []
+    routed_lease = []
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        manual_thread = threading.Thread(target=lambda: manual_response.append(client.post(
+            "/engine/start", json={"model": "manual.gguf", "port": 1930}
+        )))
+        manual_thread.start()
+        assert entered.wait(1)
+
+        def acquire_routed():
+            lease = router.acquire("low")
+            routed_lease.append(lease)
+
+        routed_thread = threading.Thread(target=acquire_routed)
+        routed_thread.start()
+        for _ in range(100):
+            if router.status()["queuedRequests"] == 1:
+                break
+            threading.Event().wait(0.01)
+        assert router.status()["queuedRequests"] == 1
+        assert manager.calls == [("manual-start", "manual.gguf")]
+        finish_manual.set()
+        manual_thread.join(2)
+        routed_thread.join(2)
+        assert not manual_thread.is_alive() and not routed_thread.is_alive()
+
+    assert manual_response[0].status_code == 200
+    assert manager.calls == [("manual-start", "manual.gguf"), ("switch", "low.gguf")]
+    routed_lease.pop().release()
+    assert router.status()["activeRequests"] == 0
+
+
+def test_manual_lifecycle_claim_rejects_router_ownership_and_requires_matching_token():
+    router = RoutingCoordinator(Manager(), catalog(), object(), ready_fn=ready)
+    lease = router.acquire("low")
+    with pytest.raises(RoutingError) as conflict:
+        router.begin_manual_lifecycle()
+    assert conflict.value.code == "router_owned"
+    assert conflict.value.status_code == 409
+    lease.release()
+    with pytest.raises(RoutingError, match="router owns"):
+        router.begin_manual_lifecycle()
+
+    router = RoutingCoordinator(Manager(), catalog(), object(), ready_fn=ready)
+    owner = router.begin_manual_lifecycle()
+    with pytest.raises(ValueError, match="not owned"):
+        router.end_manual_lifecycle(object())
+    assert router.status()["switching"] is True
+    newer_owner = router.begin_manual_lifecycle(preempt_manual=True)
+    router.end_manual_lifecycle(owner)
+    assert router.status()["switching"] is True
+    router.end_manual_lifecycle(newer_owner)
+    assert router.status()["switching"] is False
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(

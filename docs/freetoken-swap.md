@@ -10,6 +10,13 @@ stream in flight. The same owner performs accounting, graceful drain/abort,
 process-identity checks, cleanup, rollback, and re-adoption; **do not** put
 llama-swap or another supervisor in front of the same FreeToken child.
 
+Legacy `/engine/start`, `/engine/stop`, `/engine/switch`, and profile variants
+remain available only when the router does not own or admit work. They reserve
+the same lifecycle barrier for their complete transaction, so a routed request
+waits rather than racing a manual process operation. A manual stop may supersede
+a manual operation blocked in readiness; its newer manager intent invalidates
+stale rollback, and the older token cannot clear the stop's barrier.
+
 The read-only, pinned llama-swap source remains a compatibility reference and
 an optional separate deployment mode, not a runtime dependency. That direct
 mode cannot gain this daemon's accounting guarantees. See the
