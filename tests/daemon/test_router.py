@@ -376,30 +376,56 @@ def test_router_reload_rejects_redefining_active_profile():
 def test_router_reload_refuses_active_scheduling_or_effective_lifecycle_changes():
     manager = Manager()
     current = ModelCatalog(
-        {"low": ModelProfile("low", "low.gguf", ())},
-        settings=RouterSettings(default_ttl_s=4, unload_timeout_s=12),
+        {"low": ModelProfile("low", "low.gguf", (), group="g")},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
     )
     router = RoutingCoordinator(manager, current, object(), ready_fn=ready)
     lease = router.acquire("low")
 
     changed_priority = ModelCatalog(
-        {"low": ModelProfile("low", "low.gguf", (), priority=1)},
-        settings=RouterSettings(default_ttl_s=4, unload_timeout_s=12),
+        {"low": ModelProfile("low", "low.gguf", (), priority=1, group="g")},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
     )
     changed_default_ttl = ModelCatalog(
-        {"low": ModelProfile("low", "low.gguf", ())},
-        settings=RouterSettings(default_ttl_s=5, unload_timeout_s=12),
+        {"low": ModelProfile("low", "low.gguf", (), group="g")},
+        settings=RouterSettings(
+            default_ttl_s=5,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
     )
     changed_default_unload = ModelCatalog(
-        {"low": ModelProfile("low", "low.gguf", ())},
-        settings=RouterSettings(default_ttl_s=4, unload_timeout_s=13),
+        {"low": ModelProfile("low", "low.gguf", (), group="g")},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=13,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
     )
-    for replacement in (changed_priority, changed_default_ttl, changed_default_unload):
+    changed_group_policy = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", (), group="g")},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=False, persistent=True),),
+        ),
+    )
+    for replacement in (changed_priority, changed_default_ttl, changed_default_unload, changed_group_policy):
         with pytest.raises(RoutingError, match="cannot redefine") as exc:
             router.replace_catalog(replacement)
         assert exc.value.status_code == 409
     assert router.catalog is current
     lease.release()
+
+
 def test_persistent_group_protects_the_single_resident_slot_until_unloaded():
     manager = Manager()
     catalog_doc = ModelCatalog(
