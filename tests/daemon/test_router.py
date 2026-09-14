@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import threading
 import json
 import time
@@ -755,7 +756,17 @@ def test_disconnect_while_upstream_connects_closes_orphaned_result(monkeypatch):
     assert router.status()["terminalStreams"] == 0
 
 
-def test_router_inference_requires_configured_bearer_key():
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer key"},
+        {"Authorization": "bearer key"},
+        {"Authorization": "Basic " + base64.b64encode(b"operator:key").decode()},
+        {"X-Api-Key": "key"},
+        {"Authorization": "Basic !!!not-base64", "X-Api-Key": "key"},
+    ],
+)
+def test_router_inference_and_management_accept_pinned_api_key_forms(headers):
     manager = Manager()
     catalog_doc = ModelCatalog(
         {"low": ModelProfile("low", "low.gguf", ())},
@@ -770,10 +781,39 @@ def test_router_inference_requires_configured_bearer_key():
         client = TestClient(app)
         denied = client.post("/v1/chat/completions", json={"model": "low"})
         assert denied.status_code == 401
+        assert denied.headers["www-authenticate"] == 'Basic realm="freetoken-swap"'
         assert client.get("/router/status").status_code == 401
-        allowed = client.get("/router/status", headers={"Authorization": "Bearer key"})
+        allowed = client.get("/router/status", headers=headers)
         assert allowed.status_code == 200
         assert manager.calls == []
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Bearer wrong",
+        "Basic " + base64.b64encode(b"operator:wrong").decode(),
+        "Basic " + base64.b64encode(b"operator:\xff").decode(),
+    ],
+)
+def test_explicit_authorization_key_takes_precedence_over_x_api_key(authorization):
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(api_keys=("key",)),
+    )
+    manager = Manager()
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc,
+        )
+        response = TestClient(app).get(
+            "/router/status",
+            headers={"Authorization": authorization, "X-Api-Key": "key"},
+        )
+
+    assert response.status_code == 401
+    assert manager.calls == []
 
 
 def test_router_terminates_local_authentication_before_proxying(monkeypatch):
@@ -797,11 +837,12 @@ def test_router_terminates_local_authentication_before_proxying(monkeypatch):
             token="daemon-control-secret",
         )
         response = TestClient(app).post(
-            "/v1/chat/completions",
+            "/v1/messages",
             content=b'{"model":"low","messages":[]}',
             headers={
                 "Content-Type": "application/json",
-                "Authorization": "Bearer router-test-key",
+                "Authorization": "Basic !!!not-base64",
+                "X-Api-Key": "router-test-key",
                 "X-FT-Token": "daemon-control-secret",
                 "X-Correlation-ID": "client-safe-id",
             },
@@ -809,6 +850,7 @@ def test_router_terminates_local_authentication_before_proxying(monkeypatch):
     assert response.status_code == 200
     assert observed["x-correlation-id"] == "client-safe-id"
     assert "authorization" not in observed
+    assert "x-api-key" not in observed
     assert "x-ft-token" not in observed
 
 

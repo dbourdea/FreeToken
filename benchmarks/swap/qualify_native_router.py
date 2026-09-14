@@ -9,6 +9,7 @@ maintenance stop.  This is evidence collection, not a production launcher.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -401,6 +402,22 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     if set(unauthorized.values()) != {401}:
         raise RuntimeError("native router did not reject unauthenticated control and inference")
 
+    if _NATIVE_AUTH_BASE != base.rstrip("/") or _NATIVE_API_KEY is None:
+        raise RuntimeError("native router credentials are not scoped to the qualification origin")
+    basic = base64.b64encode(f"operator:{_NATIVE_API_KEY}".encode()).decode()
+    alternate_auth_raw: dict[str, bytes] = {}
+    for name, headers in (
+        ("basic", {"Authorization": f"Basic {basic}"}),
+        ("x-api-key", {"X-Api-Key": _NATIVE_API_KEY}),
+    ):
+        request = urllib.request.Request(base + "/router/status", headers=headers)
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read()
+        status = json.loads(raw)
+        if status.get("activeProfile") != "model-a":
+            raise RuntimeError(f"{name} authentication did not expose exact model-a residency")
+        alternate_auth_raw[name] = raw
+
     models_raw, models = request_json(base + "/v1/models", timeout=10)
     routed_raw, routed = request_json(base + "/router/models", timeout=10)
     profiles_raw, profiles = request_json(base + "/router/profiles", timeout=10)
@@ -453,12 +470,15 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     (artifacts / "control-router-profiles.json").write_bytes(profiles_raw)
     (artifacts / "control-metrics.prom").write_bytes(metrics_raw)
     (artifacts / "control-router-log.sse").write_bytes(log_frame)
+    for name, raw in alternate_auth_raw.items():
+        (artifacts / f"control-auth-{name}.json").write_bytes(raw)
     return {
         "unauthenticatedControlRejected": True,
         "unauthenticatedInferenceRejected": True,
         "aliasCount": len(aliases),
         "profileCount": len(profile_names),
         "residentProfile": "model-a",
+        "apiKeyFormsVerified": ["bearer", "basic", "x-api-key"],
         "metricsAvailable": True,
         "routerLogSseAvailable": True,
         "passed": True,

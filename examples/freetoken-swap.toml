@@ -6,7 +6,8 @@
 # `port = 0` for a kernel-selected loopback port per native activation.
 
 [router]
-# Inference routes require `Authorization: Bearer <key>` when this is nonempty.
+# Inference routes accept Bearer, a Basic-auth password, or `X-Api-Key` when
+# this is nonempty. Router credentials are never forwarded to the engine.
 api_keys = ["replace-with-a-secret"]
 default_ttl_s = 300
 unload_timeout_s = 30

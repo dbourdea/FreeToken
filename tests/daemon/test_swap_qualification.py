@@ -1,6 +1,7 @@
 """CPU tests of cancellation evidence gates, not real-model qualification."""
 
 import importlib.util
+import base64
 import io
 import json
 import socket
@@ -509,13 +510,22 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.headers.get("Authorization") != "Bearer private-key":
+            accepted = {
+                "Bearer private-key",
+                "Basic " + base64.b64encode(b"operator:private-key").decode(),
+            }
+            if (
+                self.headers.get("Authorization") not in accepted
+                and self.headers.get("X-Api-Key") != "private-key"
+            ):
                 self.send_response(401)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
             authorized_paths.append(self.path)
-            if self.path == "/v1/models":
+            if self.path == "/router/status":
+                body = {"activeProfile": "model-a"}
+            elif self.path == "/v1/models":
                 body = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
             elif self.path == "/router/models":
                 body = {"data": [
@@ -561,7 +571,9 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["unauthenticatedControlRejected"] is True
     assert observation["unauthenticatedInferenceRejected"] is True
     assert observation["residentProfile"] == "model-a"
+    assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
+        "/router/status", "/router/status",
         "/v1/models", "/router/models", "/router/profiles", "/metrics",
         "/router/logs?since=0",
     ]
@@ -569,6 +581,8 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert (tmp_path / "control-metrics.prom").read_bytes().startswith(
         b"freetoken_swap_admissions_total"
     )
+    assert (tmp_path / "control-auth-basic.json").is_file()
+    assert (tmp_path / "control-auth-x-api-key.json").is_file()
 
 
 def test_native_router_benchmark_validates_warm_and_swap_activation_labels(native_router_qualifier):

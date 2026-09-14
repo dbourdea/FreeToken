@@ -124,9 +124,9 @@ the same native lifecycle transaction without fabricating an inference request.
 it records only event type, alias, registered route template, status,
 cancellation state, and response byte count—never prompts, request bodies,
 headers, concrete URL paths, query strings, model paths, or API keys.
-Router bearer keys and the daemon `X-FT-Token` are terminated at the router and
-never forwarded to the engine; ordinary non-hop-by-hop application headers are
-otherwise preserved.
+Router Bearer, Basic-password, and `X-Api-Key` credentials plus the daemon
+`X-FT-Token` are terminated at the router and never forwarded to the engine;
+ordinary non-hop-by-hop application headers are otherwise preserved.
 
 FreeToken's legacy `POST /generate` body has no model identifier, so exposing it
 at the stable router URL would require an implicit default and violate explicit
@@ -152,9 +152,12 @@ The UI presents configured/resident models, load/unload/reload controls, router
 status, and the privacy-preserving `GET /router/hardware` memory view. Captures,
 MCP, and Tailcat remain outside FreeToken's current product scope.
 
-When `router.api_keys` is configured, bearer authentication protects inference
-and all router management endpoints. An explicit daemon `X-FT-Token` remains
-the dedicated control-plane override. The guarded
+When `router.api_keys` is configured, authentication accepts an
+`Authorization: Bearer` value, an HTTP Basic password, or `X-Api-Key` for
+inference and, absent a daemon token, router management. Explicit Authorization
+credentials take precedence over `X-Api-Key`; malformed Basic may fall back to
+it. Invalid requests include a `WWW-Authenticate` challenge. An explicit daemon
+`X-FT-Token` remains the dedicated control-plane override. The guarded
 `/upstream/{profile}/...` passthrough uses the same lease but refuses a direct
 engine `prepare-stop`, which only the lifecycle owner may invoke.
 
@@ -171,9 +174,10 @@ FreeToken's `/health` remains a backwards-compatible diagnostic endpoint and can
 Use `ft serve` or `python -m freetoken.cli serve` in a process command. The legacy `python -m freetoken` entrypoint does not accept the `serve` subcommand. Use a revision-specific `TORCH_EXTENSIONS_DIR` and prebuild native GGUF kernels before a maintenance window so an abandoned shared build lock cannot stall model initialization. For SSE token metrics, clients should request `stream_options: {"include_usage": true}`.
 
 The opt-in native maintenance harness `benchmarks/swap/qualify_native_router.py`
-generates a private bearer key scoped only to its temporary daemon origin. Its
+generates a private API key scoped only to its temporary daemon origin. Its
 acceptance result requires 401 responses without that key and authenticated
-model/profile inventory, Prometheus metrics, and bounded router-log SSE evidence;
+Bearer, Basic-password, `X-Api-Key`, model/profile inventory, Prometheus metrics,
+and bounded router-log SSE evidence;
 the key, catalog, headers, and raw captures are never publication artifacts.
 
 ## Cancellation qualification

@@ -9,6 +9,8 @@ starve an operator's stop."""
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import collections
 import functools
 import json
@@ -53,6 +55,27 @@ def _cors_request_headers(value: str | None) -> str:
         part for raw in value.split(",")
         if (part := raw.strip()) and _HTTP_TOKEN.fullmatch(part)
     )
+
+
+def _extract_api_key(authorization: str | None, x_api_key: str | None) -> str | None:
+    """Apply the pinned Basic-password, Bearer, then x-api-key contract."""
+    bearer_key = None
+    basic_key = None
+    if authorization:
+        scheme, separator, credentials = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer":
+            bearer_key = credentials or None
+        elif separator and scheme.lower() == "basic":
+            try:
+                decoded = base64.b64decode(credentials, validate=True).decode(
+                    "utf-8", errors="surrogateescape"
+                )
+            except (binascii.Error, ValueError):
+                pass
+            else:
+                if ":" in decoded:
+                    basic_key = decoded.split(":", 1)[1] or None
+    return basic_key or bearer_key or x_api_key
 
 
 class StartBody(BaseModel):
@@ -256,6 +279,7 @@ def build_app(
     def require_token(
         x_ft_token: str | None = Header(default=None),
         authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None),
     ) -> None:
         if token is not None:
             if x_ft_token != token:
@@ -263,19 +287,30 @@ def build_app(
             return
         keys = router.catalog.settings.api_keys
         if keys:
-            supplied = authorization.removeprefix("Bearer ") if authorization else None
+            supplied = _extract_api_key(authorization, x_api_key)
             if supplied not in keys:
-                raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+                raise HTTPException(
+                    status_code=401,
+                    detail="invalid or missing API key",
+                    headers={"WWW-Authenticate": 'Basic realm="freetoken-swap"'},
+                )
 
     auth = [Depends(require_token)]
 
-    def require_router_key(authorization: str | None = Header(default=None)) -> None:
+    def require_router_key(
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None),
+    ) -> None:
         keys = router.catalog.settings.api_keys
         if not keys:
             return
-        supplied = authorization.removeprefix("Bearer ") if authorization else None
+        supplied = _extract_api_key(authorization, x_api_key)
         if supplied not in keys:
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+            raise HTTPException(
+                status_code=401,
+                detail="invalid or missing API key",
+                headers={"WWW-Authenticate": 'Basic realm="freetoken-swap"'},
+            )
 
     async def run(pool: ThreadPoolExecutor, fn, *args, **kwargs):
         loop = asyncio.get_running_loop()
