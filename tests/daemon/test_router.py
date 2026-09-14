@@ -1629,6 +1629,73 @@ def test_daemon_shutdown_latches_before_single_lifecycle_worker_is_available():
     assert exits == ["requested"]
 
 
+def test_coordinated_daemon_exit_drains_then_detaches_once_for_readoption():
+    class DetachingManager(Manager):
+        def detach(self):
+            self.calls.append(("detach", self.model))
+
+    manager = DetachingManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    active = router.acquire("low")
+    result = {}
+    exiting = threading.Thread(
+        target=lambda: result.setdefault(
+            "value", router.coordinated_exit(stop_child=False)
+        )
+    )
+    exiting.start()
+    for _ in range(100):
+        if router.status()["shuttingDown"]:
+            break
+        time.sleep(0.01)
+    assert router.status()["shuttingDown"] is True
+    assert exiting.is_alive()
+    assert manager.calls == [("start", "low.gguf")]
+
+    active.release()
+    exiting.join(2)
+    assert not exiting.is_alive()
+    assert result["value"] is None
+    assert manager.calls == [("start", "low.gguf"), ("detach", "low.gguf")]
+    assert manager.model == "low.gguf"
+    assert router.status()["activeProfile"] is None
+
+    # Uvicorn lifespan can run after POST /shutdown already completed. The
+    # repeated exit hook must not detach or stop the child a second time.
+    assert router.coordinated_exit(stop_child=False) is None
+    assert manager.calls == [("start", "low.gguf"), ("detach", "low.gguf")]
+
+
+def test_coordinated_exit_waits_for_preempted_manual_transaction_token():
+    class DetachingManager(Manager):
+        def detach(self):
+            self.calls.append(("detach", self.model))
+
+    manager = DetachingManager()
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    older = router.begin_manual_lifecycle()
+    newer = router.begin_manual_lifecycle(preempt_manual=True)
+    router.end_manual_lifecycle(newer)
+    assert router.status()["switching"] is False
+
+    exiting = threading.Thread(
+        target=lambda: router.coordinated_exit(stop_child=False)
+    )
+    exiting.start()
+    for _ in range(100):
+        if router.status()["shuttingDown"]:
+            break
+        time.sleep(0.01)
+    assert router.status()["shuttingDown"] is True
+    assert exiting.is_alive()
+    assert manager.calls == []
+
+    router.end_manual_lifecycle(older)
+    exiting.join(2)
+    assert not exiting.is_alive()
+    assert manager.calls == [("detach", None)]
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(

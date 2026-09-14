@@ -120,6 +120,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     from .metrics import FootprintCache
     from .pidfile import AlreadyRunning, ServeStateStore, SingleInstance
     from .proxy import ServeProbe
+    from .router import RoutingCoordinator
     from .serve_manager import ServeManager
     from .tailer import LogTailer
 
@@ -179,6 +180,10 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     except Exception as exc:  # noqa: BLE001
         logger.warning("re-adoption skipped: %s", exc)
 
+    router = RoutingCoordinator(
+        manager, catalog, probe, default_port=args.default_serve_port
+    )
+
     stop_reaper = threading.Event()
     if not args.no_oom:
         _start_oom_reaper(manager, args.poll_interval, stop_reaper)
@@ -190,11 +195,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         stop_reaper.set()
         if args.stop_serve_on_exit:
             logger.info("stopping serve on daemon exit (--stop-serve-on-exit)")
-            manager.stop()
+            router.coordinated_exit(stop_child=True)
         else:
             # Default: the engine outlives the daemon. Leave it running and
             # persisted so the next daemon re-adopts it; just stop following its log.
-            manager.detach()
+            router.coordinated_exit(stop_child=False)
 
     from .app import build_app
 
@@ -211,6 +216,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         started_wall=time.time(),
         shutdown_hook=shutdown_hook,
         catalog=catalog,
+        router=router,
         catalog_path=args.catalog,
         catalog_watch_interval_s=args.catalog_watch_interval if args.catalog else 0,
     )

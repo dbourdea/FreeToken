@@ -22,6 +22,9 @@ Daemon shutdown uses the same coordinator: it closes admission, wakes queued
 requests with a stable shutdown error, drains active leases and lifecycle work,
 then permanently stops the manager-owned child. A failed stop reopens admission;
 a successful stop requests daemon exit even if the initiating client disconnects.
+OS- and lifespan-triggered exit also quiesces this coordinator. The default
+detach policy drains ownership and leaves the exact persisted child available
+for re-adoption; `--stop-serve-on-exit` drains and permanently stops it instead.
 
 The read-only, pinned llama-swap source remains a compatibility reference and
 an optional separate deployment mode, not a runtime dependency. That direct

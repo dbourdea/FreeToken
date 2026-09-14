@@ -258,7 +258,7 @@ class RoutingCoordinator:
             if self._manual_lifecycle_owner is owner:
                 self._manual_lifecycle_owner = None
                 self._switching = False
-                self._cond.notify_all()
+            self._cond.notify_all()
 
     def release(self, lease: RouteLease) -> None:
         with self._cond:
@@ -501,14 +501,21 @@ class RoutingCoordinator:
         self, owner: object, timeout: float | None = None, force: bool = False
     ) -> dict:
         """Drain existing ownership and permanently stop the sole managed child."""
+        return self._finish_exit(owner, lambda: self._manager.shutdown(timeout, force))
+
+    def finish_detach(self, owner: object) -> None:
+        """Drain existing ownership, then leave the child persisted for re-adoption."""
+        self._finish_exit(owner, self._manager.detach)
+
+    def _finish_exit(self, owner: object, action: Callable[[], object]):
         with self._cond:
             if self._shutdown_owner is not owner:
                 raise ValueError("shutdown reservation is not owned by caller")
-            while self._leases or self._switching:
+            while self._leases or self._switching or self._manual_lifecycle_tokens:
                 self._cond.wait()
             self._switching = True
         try:
-            result = self._manager.shutdown(timeout, force)
+            result = action()
         except Exception:
             with self._cond:
                 self._shutdown_requested = False
@@ -527,6 +534,22 @@ class RoutingCoordinator:
     def shutdown(self, timeout: float | None = None, force: bool = False) -> dict:
         """Synchronous convenience wrapper for a complete shutdown transaction."""
         return self.finish_shutdown(self.begin_shutdown(), timeout, force)
+
+    def coordinated_exit(self, *, stop_child: bool) -> object | None:
+        """Idempotently quiesce for an OS/lifespan exit using the configured child policy."""
+        while True:
+            try:
+                owner = self.begin_shutdown()
+                break
+            except RoutingError:
+                with self._cond:
+                    while self._shutdown_owner is not None:
+                        self._cond.wait()
+                    if self._shutdown_requested:
+                        return None
+        if stop_child:
+            return self.finish_shutdown(owner)
+        return self.finish_detach(owner)
 
     @staticmethod
     def _new_timer(delay: float, callback: Callable[[], None]):
