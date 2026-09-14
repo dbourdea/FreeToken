@@ -231,7 +231,7 @@ def test_ttl_evicts_only_after_final_lease_and_uses_profile_timeout():
     assert router.status()["evictions"] == 1
 
 
-def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkeypatch):
+def test_all_supported_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({
         "low": ModelProfile("low", "low.gguf", ()),
@@ -254,7 +254,13 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
         )
         client = TestClient(app)
-        for path in ("/v1/chat/completions", "/v1/messages"):
+        for path in (
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/v1/responses",
+            "/v1/messages",
+            "/v1/messages/count_tokens",
+        ):
             response = client.post(path, json={"model": "low", "stream": True})
             assert response.status_code == 200
             assert response.content == b"data: first\\n\\ndata: [DONE]\\n\\n"
@@ -268,14 +274,15 @@ def test_openai_and_anthropic_requests_use_native_router_and_preserve_sse(monkey
         assert client.get("/router/profiles").json()["activeProfile"] == "low"
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
-        assert "freetoken_swap_admissions_total 2" in metrics.text
+        assert "freetoken_swap_admissions_total 5" in metrics.text
         passthrough = client.get("/upstream/low/v1/models?limit=3")
         assert passthrough.status_code == 200
         blocked = client.post("/upstream/low/v1/admin/prepare-stop")
         assert blocked.status_code == 403
     assert manager.calls == [("start", "low.gguf")]
     assert [item["path_and_query"] for item in calls] == [
-        "/v1/chat/completions", "/v1/messages", "/v1/models?limit=3",
+        "/v1/chat/completions", "/v1/completions", "/v1/responses",
+        "/v1/messages", "/v1/messages/count_tokens", "/v1/models?limit=3",
     ]
     assert calls[-1]["method"] == "GET"
     assert calls[-1]["timeout_s"] == 900.0
