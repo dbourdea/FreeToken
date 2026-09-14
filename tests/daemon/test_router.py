@@ -653,6 +653,43 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
     assert router.status()["activeRequests"] == 0
 
 
+def test_stateless_response_resource_routes_preserve_engine_error_without_activation(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("stateless response lookup reached upstream"),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        assert client.get("/v1/responses/resp_abc").status_code == 401
+        assert client.post("/v1/responses/resp_abc/cancel").status_code == 401
+        headers = {"Authorization": "Bearer router-test-key"}
+        lookup = client.get("/v1/responses/resp_abc", headers=headers)
+        cancel = client.post("/v1/responses/resp_abc/cancel", headers=headers)
+
+    expected = {
+        "error": {
+            "message": "response 'resp_abc' not found (stateless server)",
+            "type": "invalid_request_error",
+            "code": None,
+        }
+    }
+    assert lookup.status_code == cancel.status_code == 404
+    assert lookup.json() == cancel.json() == expected
+    assert manager.calls == []
+    assert router.status()["admissions"] == 0
+    assert router.status()["reservedRequests"] == 0
+
+
 def test_namespaced_upstream_uses_longest_model_prefix_and_preserves_escaped_suffix(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({

@@ -997,6 +997,27 @@ def build_app(
     async def inference_proxy(request: Request):
         return await route_inference(request)
 
+    # FreeToken's Responses implementation is deliberately stateless. Keep its
+    # registered resource routes available at the stable daemon URL, but do not
+    # activate an arbitrary model for a request that carries no model identity.
+    # The envelope matches the engine contract and remains behind inference auth.
+    @app.get("/v1/responses/{response_id}", dependencies=[Depends(require_router_key)])
+    @app.post(
+        "/v1/responses/{response_id}/cancel",
+        dependencies=[Depends(require_router_key)],
+    )
+    async def stateless_response_not_found(response_id: str):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "message": f"response {response_id!r} not found (stateless server)",
+                    "type": "invalid_request_error",
+                    "code": None,
+                }
+            },
+        )
+
     @app.get("/models", dependencies=[Depends(require_router_key)])
     @app.get("/v1/models", dependencies=[Depends(require_router_key)])
     async def openai_model_list(request: Request):

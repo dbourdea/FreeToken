@@ -173,9 +173,11 @@ FreeToken's `status=ok` and `maintenance=serving` **and** still exactly matches
 the resident alias's model, port, and argument vector. Identity and fresh
 health are checked behind the admission barrier, so a conflicting swap cannot
 begin between the identity snapshot and a successful response; the probe never
-cold-loads a profile. The stateless backend's `GET /v1/responses/{id}` and response-specific
-cancel endpoints always return its documented 404 and are therefore not routing
-or lifecycle operations.
+cold-loads a profile. The stateless backend's `GET /v1/responses/{id}` and
+response-specific cancel endpoints are authenticated at the stable daemon URL
+and return the backend's documented `invalid_request_error` 404 without loading
+a model. They are therefore compatibility endpoints, not routing or lifecycle
+operations.
 
 `GET /ui/` serves a dependency-free local management shell. It embeds no
 catalog values, paths, keys, or machine data; the operator enters a bearer key
