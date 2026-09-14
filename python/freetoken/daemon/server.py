@@ -51,6 +51,8 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--token", default=os.environ.get("FREETOKEN_DAEMON_TOKEN"), help="Optional X-FT-Token shared secret")
     p.add_argument("--default-serve-port", type=int, default=DEFAULT_SERVE_PORT, help="Port used when /engine/start omits one")
     p.add_argument("--catalog", default=os.environ.get("FREETOKEN_SWAP_CATALOG"), help="TOML named-model catalog (or $FREETOKEN_SWAP_CATALOG)")
+    p.add_argument("--catalog-watch-interval", type=float, default=1.0,
+                   help="Seconds between safe catalog change checks; 0 disables watching (default 1)")
     p.add_argument("--serve-python", default=sys.executable, help="Interpreter used to launch ft serve")
     p.add_argument("--grace", type=float, default=10.0, help="SIGTERM→SIGKILL grace seconds on stop")
     p.add_argument("--poll-interval", type=float, default=1.0, help="Adopted-serve liveness / OOM reapply interval")
@@ -104,6 +106,9 @@ def _start_oom_reaper(manager, interval: float, stop: threading.Event) -> thread
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     args = _build_parser(prog).parse_args(list(argv) if argv is not None else None)
+    if args.catalog_watch_interval < 0:
+        print("ft daemon: --catalog-watch-interval must be non-negative", file=sys.stderr)
+        return 2
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s [ft-daemon] %(levelname)s %(message)s",
@@ -207,6 +212,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         shutdown_hook=shutdown_hook,
         catalog=catalog,
         catalog_path=args.catalog,
+        catalog_watch_interval_s=args.catalog_watch_interval if args.catalog else 0,
     )
 
     import uvicorn

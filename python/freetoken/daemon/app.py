@@ -172,6 +172,7 @@ def build_app(
     router: RoutingCoordinator | None = None,
     catalog_path: str | None = None,
     router_ring: LogRing | None = None,
+    catalog_watch_interval_s: float = 0.0,
 ) -> FastAPI:
     import time as _time
 
@@ -190,6 +191,14 @@ def build_app(
     app.state.router_ring = router_ring
     inflight_lock = threading.Lock()
     inflight: dict[str, dict] = {}
+    watch_stop = threading.Event()
+    watch_lock = threading.Lock()
+    watch_state = {
+        "enabled": bool(catalog_path and catalog_watch_interval_s > 0),
+        "intervalS": catalog_watch_interval_s if catalog_watch_interval_s > 0 else None,
+        "lastResult": None,
+    }
+    app.state.catalog_watch_stop = watch_stop
 
     if shutdown_hook is not None:
 
@@ -309,6 +318,68 @@ def build_app(
             kind="event",
             ts=wall_now(),
         )
+
+    def record_watch(result: str) -> None:
+        with watch_lock:
+            watch_state["lastResult"] = result
+            watch_state["lastChangedAt"] = wall_now()
+
+    def catalog_watch_snapshot() -> dict:
+        with watch_lock:
+            return dict(watch_state)
+
+    def catalog_stamp() -> tuple[int, int] | None:
+        if not catalog_path:
+            return None
+        try:
+            stat = os.stat(catalog_path)
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size
+
+    def start_catalog_watcher() -> None:
+        """Poll a local catalog safely; only a fully validated tree is installed.
+
+        Polling keeps the daemon stdlib-only and cross-platform. A changed
+        malformed file is remembered until it changes again, avoiding a log
+        storm while an editor writes it. Active-profile redefinition is still
+        refused by the coordinator, so a watcher cannot steal a live child.
+        """
+        if not watch_state["enabled"]:
+            return
+        interval = float(catalog_watch_interval_s)
+
+        def watch() -> None:
+            previous = catalog_stamp()
+            while not watch_stop.wait(interval):
+                changed = catalog_stamp()
+                if changed == previous:
+                    continue
+                previous = changed
+                try:
+                    replacement = ModelCatalog.load(catalog_path)
+                    router.replace_catalog(replacement)
+                except CatalogError:
+                    record_watch("invalid_catalog")
+                    router_event("catalog_watch_rejected", code="invalid_catalog")
+                except RoutingError as exc:
+                    record_watch(exc.code)
+                    router_event("catalog_watch_rejected", code=exc.code)
+                else:
+                    record_watch("reloaded")
+                    router_event("catalog_watch_reloaded")
+
+        thread = threading.Thread(target=watch, name="ft-daemon-catalog-watch", daemon=True)
+        app.state.catalog_watch_thread = thread
+        thread.start()
+
+    start_catalog_watcher()
+
+    if watch_state["enabled"]:
+
+        @app.on_event("shutdown")
+        async def _stop_catalog_watcher() -> None:
+            watch_stop.set()
 
     async def forward_routed(request: Request, model: str, *, path_and_query: str, body: bytes):
         """Select a configured model, then stream the engine response unchanged.
@@ -456,7 +527,7 @@ def build_app(
 
     @app.get("/router/status", dependencies=auth)
     async def router_status():
-        return router.status()
+        return {**router.status(), "catalogWatch": catalog_watch_snapshot()}
 
     @app.get("/router/models", dependencies=auth)
     async def router_models():
@@ -565,6 +636,7 @@ def build_app(
                 status_code=exc.status_code,
                 content={"error": {"message": str(exc), "type": exc.code}},
             )
+        record_watch("reloaded")
         return {"reloaded": True, "models": router.catalog.public()}
 
     # ---- engine lifecycle ----

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import json
+import time
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -617,3 +618,34 @@ def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_g
         "engine": {"running": False, "pid": 100, "port": None},
         "memory": {"ramBytes": 123, "vramBytes": 456},
     }
+
+
+def test_catalog_watcher_applies_only_valid_idle_replacements(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text("[models.a]\nmodel = 'a.gguf'\n", encoding="utf-8")
+    manager = Manager()
+    catalog_doc = ModelCatalog.load(str(path))
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    def wait_for(client, result):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if client.get("/router/status").json()["catalogWatch"].get("lastResult") == result:
+                return
+            time.sleep(0.02)
+        raise AssertionError(f"catalog watcher did not report {result}")
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            catalog_path=str(path), catalog_watch_interval_s=0.01,
+        )
+        with TestClient(app) as client:
+            path.write_text("[models.b]\nmodel = 'b.gguf'\n", encoding="utf-8")
+            wait_for(client, "reloaded")
+            assert [model["name"] for model in client.get("/router/models").json()["data"]] == ["b"]
+            path.write_text("[models.b]\nmodel = [\n", encoding="utf-8")
+            wait_for(client, "invalid_catalog")
+            assert [model["name"] for model in client.get("/router/models").json()["data"]] == ["b"]
+    assert app.state.catalog_watch_stop.is_set()

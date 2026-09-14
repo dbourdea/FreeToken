@@ -61,6 +61,13 @@ protected slot must be a one-member group with `swap = false, exclusive = true`.
 Catalog reload rejects llama-swap coexistence configurations instead of silently
 pretending that multiple FreeToken engines are resident.
 
+When started with `--catalog`, the daemon polls it once per second by default.
+`--catalog-watch-interval 0` disables that watcher. A changed catalog is parsed
+and fully validated before atomic installation; malformed files and active
+profile redefinitions are rejected without disturbing the running child. The
+watcher's last result appears in `GET /router/status` and its sanitized events
+appear in `/router/logs`.
+
 ## Native router API
 
 The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions`,
