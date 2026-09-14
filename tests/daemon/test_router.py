@@ -785,6 +785,9 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         assert client.get("/ready").status_code == 200
         manager.model = "unexpected.gguf"
         assert client.get("/ready").status_code == 503
+        stale_status = client.get("/router/status", headers={"Authorization": "Bearer router-test-key"})
+        assert stale_status.json()["residentProfiles"] == []
+        assert stale_status.json()["activeIdentityMatchesEngine"] is False
         stale_models = client.get("/router/models", headers={"Authorization": "Bearer router-test-key"})
         assert stale_models.json()["data"][0]["resident"] is False
         assert stale_models.json()["capacity"] == {"maxResidentModels": 1, "availableResidentSlots": 0}

@@ -189,9 +189,9 @@ class RoutingCoordinator:
             return {
                 "activeProfile": self._active_name,
                 "activeGroup": group.name if group else None,
-                "residentProfiles": [self._active_name] if self._active_name else [],
+                "residentProfiles": [self._active_name] if active_identity_matches else [],
                 "activeIdentityMatchesEngine": active_identity_matches,
-                "persistent": bool(group and group.persistent),
+                "persistent": bool(active_identity_matches and group and group.persistent),
                 "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
                 "activeRequests": self._leases,
                 "switching": self._switching,
