@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 151 daemon
+- Local deterministic verification on the current Windows checkout: 152 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for Linux real-child or real-model
   evidence.
@@ -52,7 +52,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions | CPU/HTTP tested; current native real-engine evidence required |
 | Concurrency and unloading | Same-model and conflicting-model admission plus idle eviction are deterministically tested | Current native real-engine verification required |
 | Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and Linux real-child tests are implemented; historical invalid-GGUF evidence is retained separately | Current Linux/current-branch recovery execution required |
-| Client cancellation | Native opaque router request IDs, active-request list, explicit cancel endpoint, upstream socket close, lease release, and cancellation metrics | Deterministic HTTP tested; current native same-instance GPU verification required |
+| Client cancellation | Native opaque router request IDs, atomic duplicate-ID rejection before admission/upstream work, active-request list, explicit cancel endpoint, upstream socket close, lease release, and cancellation metrics. Failed admission or upstream connection releases the ID for a safe retry. | Deterministic HTTP tested; current native same-instance GPU verification required |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, historical restore/completion checks, no interruption during combined-tree checks | Maintained; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |

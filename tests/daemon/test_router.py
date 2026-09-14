@@ -363,11 +363,19 @@ def test_all_routed_text_endpoints_share_stable_unknown_model_error(path, monkey
             manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
         )
-        response = TestClient(app).post(path, json={"model": "missing"})
+        client = TestClient(app)
+        response = client.post(
+            path, json={"model": "missing"}, headers={"X-FT-Request-ID": "reusable-failure"}
+        )
+        repeated = client.post(
+            path, json={"model": "missing"}, headers={"X-FT-Request-ID": "reusable-failure"}
+        )
 
     assert response.status_code == 404
     assert response.json()["error"]["type"] == "unknown_model"
     assert "missing" in response.json()["error"]["message"]
+    assert repeated.status_code == 404
+    assert repeated.json()["error"]["type"] == "unknown_model"
     assert manager.calls == []
 
 
@@ -398,6 +406,34 @@ def test_router_preserves_upstream_error_status_headers_and_body(monkeypatch):
     assert "content-length" not in response.headers
     assert router.status()["activeRequests"] == 0
     assert router.status()["terminalStreams"] == 1
+
+
+def test_failed_upstream_connect_releases_lease_and_request_id_reservation(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("fixture unavailable")),
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        responses = [
+            client.post(
+                "/v1/chat/completions", json={"model": "low"},
+                headers={"X-FT-Request-ID": "retry-after-connect-failure"},
+            )
+            for _ in range(2)
+        ]
+
+    assert [response.status_code for response in responses] == [502, 502]
+    assert all(response.json()["error"]["type"] == "upstream_unavailable" for response in responses)
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["admissions"] == 2
 
 
 def test_router_inference_requires_configured_bearer_key():
@@ -627,8 +663,10 @@ def test_explicit_router_cancel_closes_an_inflight_upstream(monkeypatch):
     manager = Manager()
     catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
     router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    upstream_calls = []
 
     def upstream(**kwargs):
+        upstream_calls.append(kwargs)
         return UpstreamResponse(200, {"Content-Type": "text/event-stream"}, raw)
 
     monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
@@ -646,6 +684,14 @@ def test_explicit_router_cancel_closes_an_inflight_upstream(monkeypatch):
         assert raw.read_started.wait(1)
         active = client.get("/router/requests").json()["data"]
         assert active == [{"id": "cancel-me", "profile": "low"}]
+        duplicate = client.post(
+            "/v1/chat/completions", json={"model": "low"},
+            headers={"X-FT-Request-ID": "cancel-me"},
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json()["error"]["type"] == "request_conflict"
+        assert len(upstream_calls) == 1
+        assert router.status()["admissions"] == 1
         cancelled = client.post("/router/requests/cancel-me/cancel")
         assert cancelled.json() == {"cancelled": True, "id": "cancel-me"}
         thread.join(2)

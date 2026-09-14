@@ -197,6 +197,7 @@ def build_app(
     app.state.router_ring = router_ring
     inflight_lock = threading.Lock()
     inflight: dict[str, dict] = {}
+    reserved_request_ids: set[str] = set()
     watch_stop = threading.Event()
     watch_lock = threading.Lock()
     watch_state = {
@@ -403,9 +404,21 @@ def build_app(
         # query. An upstream passthrough tail can itself contain a signed URL,
         # opaque bearer-like value, or tenant identifier.
         safe_route = getattr(request.scope.get("route"), "path", request.method)
+        with inflight_lock:
+            if request_id in reserved_request_ids:
+                router_event("request_conflict", profile=model, route=safe_route)
+                return JSONResponse(
+                    status_code=409,
+                    content={"error": {
+                        "message": "request id is already active", "type": "request_conflict",
+                    }},
+                )
+            reserved_request_ids.add(request_id)
         try:
             lease = await run(lifecycle_pool, router.acquire, model)
         except RoutingError as exc:
+            with inflight_lock:
+                reserved_request_ids.discard(request_id)
             router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
             content = {"error": {"message": str(exc), "type": exc.code}}
             if exc.recovery is not None:
@@ -424,14 +437,16 @@ def build_app(
             )
         except Exception as exc:  # the lease must not strand a pending swap on connect failure
             lease.release()
+            with inflight_lock:
+                reserved_request_ids.discard(request_id)
             router_event("upstream_connect_failed", profile=model, route=safe_route)
             return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "upstream_unavailable"}})
+        except BaseException:
+            lease.release()
+            with inflight_lock:
+                reserved_request_ids.discard(request_id)
+            raise
         with inflight_lock:
-            if request_id in inflight:
-                upstream.close()
-                lease.release()
-                router_event("request_conflict", profile=model, route=safe_route)
-                return JSONResponse(status_code=409, content={"error": {"message": "request id is already active", "type": "request_conflict"}})
             inflight[request_id] = {
                 "profile": lease.profile.name,
                 "upstream": upstream,
@@ -455,6 +470,7 @@ def build_app(
                     cancelled = bool(item.get("cancelled"))
                     if item.get("upstream") is upstream:
                         inflight.pop(request_id, None)
+                    reserved_request_ids.discard(request_id)
                 router.record_stream(
                     ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
                     duration_s=ended - started,
