@@ -65,6 +65,8 @@ other model, and an alternating routed swap back. It reads first-byte and final
 duration at the client, stores the corresponding `/router/status` snapshot and
 Prometheus `/metrics` response for each routed request, and fails if the
 activation counters do not prove the advertised warm/cold/alternating state.
+The direct comparison retains its router-owned load receipt and activation
+snapshot privately as well.
 It also saves the authenticated-local `/router/hardware` process and memory
 snapshot for every comparison privately; the published result must remain a
 sanitized aggregate.

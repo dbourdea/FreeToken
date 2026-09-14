@@ -220,7 +220,7 @@ def main() -> int:
             subprocess.run(service + ["stop", args.protected_service], check=True, timeout=90)
 
             # Direct is intentionally measured against the native engine port after a router-owned load.
-            _, loaded = request_json(base + "/router/load", {"name": "model-a"}, timeout=660)
+            loaded_raw, loaded = request_json(base + "/router/load", {"name": "model-a"}, timeout=660)
             if loaded.get("profile") != "model-a" or not isinstance(loaded.get("port"), int):
                 raise RuntimeError("native management load did not return a concrete model-a target")
             activation_count = validate_routed_trial(
@@ -228,6 +228,9 @@ def main() -> int:
             )
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
+            (artifacts / "direct-a.load.json").write_bytes(loaded_raw)
+            direct_row["router"] = loaded["router"]
+            direct_row["expectedActivationDelta"] = 1
             direct_row["hardware"] = capture_hardware(base, artifacts, "direct-a")
             final_engine_port = direct_row["hardware"]["engine"]["port"]
             result["trials"].append(direct_row)
