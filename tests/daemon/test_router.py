@@ -289,6 +289,35 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
     assert router.status()["activeRequests"] == 0
 
 
+def test_router_preserves_upstream_error_status_headers_and_body(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    def upstream(**kwargs):
+        assert kwargs["path_and_query"] == "/v1/responses"
+        return UpstreamResponse(
+            status=429,
+            headers={"Content-Type": "application/json", "Retry-After": "2", "Content-Length": "999"},
+            raw=BytesIO(b'{"error":{"message":"busy"}}'),
+        )
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post("/v1/responses", json={"model": "low", "input": "private"})
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "2"
+    assert response.content == b'{"error":{"message":"busy"}}'
+    assert "content-length" not in response.headers
+    assert router.status()["activeRequests"] == 0
+    assert router.status()["terminalStreams"] == 1
+
+
 def test_router_inference_requires_configured_bearer_key():
     manager = Manager()
     catalog_doc = ModelCatalog(
