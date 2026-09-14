@@ -338,18 +338,7 @@ def build_app(
     @app.get("/ready")
     async def ready():
         """Stable router readiness; it never starts a model as a probe side effect."""
-        route_state = router.status()
-        engine = manager.status()
-        if (route_state["activeProfile"] is None or route_state["switching"]
-                or not engine.get("running") or not isinstance(engine.get("port"), int)
-                or not router.active_matches_engine()):
-            return JSONResponse(status_code=503, content={"ready": False})
-        health_doc = await run(proxy_pool, probe.fresh_health, engine["port"])
-        accepting = bool(
-            health_doc.get("reachable")
-            and health_doc.get("status") == "ok"
-            and health_doc.get("maintenance", "serving") == "serving"
-        )
+        accepting = await run(proxy_pool, router.is_ready, probe)
         return JSONResponse(status_code=200 if accepting else 503, content={"ready": accepting})
 
     @app.get("/ui/")

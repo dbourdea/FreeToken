@@ -267,6 +267,29 @@ class RoutingCoordinator:
         with self._cond:
             return self._active_matches_engine_locked()
 
+    def is_ready(self, probe=None) -> bool:
+        """Atomically verify resident identity and fresh engine readiness.
+
+        Holding the admission condition across the bounded loopback probe keeps
+        a conflicting swap from committing between an identity snapshot and a
+        stale successful health response.
+        """
+        with self._cond:
+            if self._switching or not self._active_matches_engine_locked():
+                return False
+            state = self._manager.status()
+            port = state.get("port")
+            if not isinstance(port, int) or port <= 0:
+                return False
+            health = (probe or self._probe).fresh_health(port)
+            if self._switching or not self._active_matches_engine_locked():
+                return False
+            return bool(
+                health.get("reachable")
+                and health.get("status") == "ok"
+                and health.get("maintenance", "serving") == "serving"
+            )
+
     @property
     def upstream_timeout_s(self) -> float:
         with self._cond:

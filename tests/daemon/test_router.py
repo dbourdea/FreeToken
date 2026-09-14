@@ -1195,6 +1195,55 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
     }
 
 
+def test_ready_probe_linearizes_before_a_conflicting_swap():
+    manager = Manager()
+    probe_started = threading.Event()
+    finish_probe = threading.Event()
+
+    class Probe:
+        def fresh_health(self, port):
+            probe_started.set()
+            assert finish_probe.wait(2)
+            return {"reachable": True, "status": "ok", "maintenance": "serving"}
+
+    probe = Probe()
+    router = RoutingCoordinator(manager, catalog(), probe, ready_fn=ready)
+    router.acquire("low").release()
+    ready_response = []
+    switched = []
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=probe, footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog(), router=router,
+        )
+        client = TestClient(app)
+        ready_thread = threading.Thread(
+            target=lambda: ready_response.append(client.get("/ready"))
+        )
+        ready_thread.start()
+        assert probe_started.wait(1)
+
+        def switch():
+            lease = router.acquire("high")
+            switched.append(lease.profile.name)
+            lease.release()
+
+        switch_thread = threading.Thread(target=switch)
+        switch_thread.start()
+        switch_thread.join(0.05)
+        assert switch_thread.is_alive()
+        assert manager.calls == [("start", "low.gguf")]
+        finish_probe.set()
+        ready_thread.join(2)
+        switch_thread.join(2)
+        assert not ready_thread.is_alive() and not switch_thread.is_alive()
+
+    assert ready_response[0].status_code == 200
+    assert switched == ["high"]
+    assert manager.calls == [("start", "low.gguf"), ("switch", "high.gguf")]
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(
