@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
 from freetoken.daemon.app import build_app
-from freetoken.daemon.inference_proxy import UpstreamResponse, filter_request_body
+from freetoken.daemon.inference_proxy import UpstreamResponse, filter_request_body, forward_headers
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.router import RoutingCoordinator, RoutingError
 
@@ -337,6 +337,42 @@ def test_router_inference_requires_configured_bearer_key():
         allowed = client.get("/router/status", headers={"Authorization": "Bearer key"})
         assert allowed.status_code == 200
         assert manager.calls == []
+
+
+def test_router_terminates_local_authentication_before_proxying(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    observed = {}
+
+    def upstream(**kwargs):
+        observed.update({key.lower(): value for key, value in forward_headers(kwargs["headers"]).items()})
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{"ok":true}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            token="daemon-control-secret",
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions",
+            content=b'{"model":"low","messages":[]}',
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer router-test-key",
+                "X-FT-Token": "daemon-control-secret",
+                "X-Correlation-ID": "client-safe-id",
+            },
+        )
+    assert response.status_code == 200
+    assert observed["x-correlation-id"] == "client-safe-id"
+    assert "authorization" not in observed
+    assert "x-ft-token" not in observed
 
 
 def test_router_reload_atomically_replaces_a_valid_catalog(tmp_path):

@@ -86,6 +86,9 @@ the same native lifecycle transaction without fabricating an inference request.
 it records only event type, alias, registered route template, status,
 cancellation state, and response byte count—never prompts, request bodies,
 headers, concrete URL paths, query strings, model paths, or API keys.
+Router bearer keys and the daemon `X-FT-Token` are terminated at the router and
+never forwarded to the engine; ordinary non-hop-by-hop application headers are
+otherwise preserved.
 
 `GET /ready` is an unauthenticated, side-effect-free readiness probe for the
 stable router URL. It returns 200 only while a resident routed engine reports

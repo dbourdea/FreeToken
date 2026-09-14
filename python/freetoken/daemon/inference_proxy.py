@@ -20,6 +20,7 @@ class RequestModelError(ValueError):
 
 _HOP_BY_HOP = {"connection", "content-length", "host", "keep-alive", "proxy-authenticate",
                "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
+_LOCAL_AUTH_HEADERS = {"authorization", "x-ft-token"}
 
 
 def request_model(body: bytes) -> str:
@@ -54,8 +55,14 @@ def filter_request_body(body: bytes, drop_fields: tuple[str, ...]) -> bytes:
 
 
 def forward_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """Preserve application headers while removing client and proxy connection state."""
-    return {key: value for key, value in headers.items() if key.lower() not in _HOP_BY_HOP}
+    """Preserve application headers without forwarding daemon authentication.
+
+    The router terminates its bearer key and optional ``X-FT-Token`` locally.
+    Neither credential is an engine credential, so forwarding either would
+    disclose a control-plane secret to the child process and its logs.
+    """
+    excluded = _HOP_BY_HOP | _LOCAL_AUTH_HEADERS
+    return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
 
 @dataclass
