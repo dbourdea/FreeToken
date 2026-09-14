@@ -146,3 +146,31 @@ def test_native_router_benchmark_keeps_prometheus_capture_private_bytes(native_r
 
     assert native_router_qualifier.request_bytes("http://test/metrics") == b"freetoken_swap_admissions_total 3\n"
     assert stream.closed
+
+
+def test_native_router_benchmark_validates_warm_and_swap_activation_labels(native_router_qualifier):
+    status_a = {"activeProfile": "model-a", "activeRequests": 0, "activations": 1}
+    status_b = {"activeProfile": "model-b", "activeRequests": 0, "activations": 2}
+    assert native_router_qualifier.validate_routed_trial(
+        status_a, alias="model-a", prior_activations=1, expected_delta=0
+    ) == 1
+    assert native_router_qualifier.validate_routed_trial(
+        status_b, alias="model-b", prior_activations=1, expected_delta=1
+    ) == 2
+
+
+@pytest.mark.parametrize(
+    "status,alias,prior,delta",
+    [
+        ({"activeProfile": "model-a", "activeRequests": 1, "activations": 1}, "model-a", 1, 0),
+        ({"activeProfile": "model-b", "activeRequests": 0, "activations": 1}, "model-a", 1, 0),
+        ({"activeProfile": "model-a", "activeRequests": 0, "activations": 2}, "model-a", 1, 0),
+    ],
+)
+def test_native_router_benchmark_rejects_mislabeled_routed_trials(
+    native_router_qualifier, status, alias, prior, delta
+):
+    with pytest.raises(RuntimeError):
+        native_router_qualifier.validate_routed_trial(
+            status, alias=alias, prior_activations=prior, expected_delta=delta
+        )

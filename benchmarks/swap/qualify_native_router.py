@@ -103,6 +103,21 @@ def stop_process_group(proc: subprocess.Popen[bytes]) -> None:
         proc.wait(timeout=10)
 
 
+def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, expected_delta: int) -> int:
+    """Prove that a labeled routed benchmark actually used its intended state.
+
+    Timings alone cannot distinguish a warm request from an accidental reload.
+    The bounded router state makes each performance label auditable without
+    retaining a prompt or model path in the public summary.
+    """
+    activations = router.get("activations")
+    if router.get("activeProfile") != alias or router.get("activeRequests") != 0:
+        raise RuntimeError("routed trial did not settle on the expected idle profile")
+    if not isinstance(activations, int) or activations != prior_activations + expected_delta:
+        raise RuntimeError("routed trial activation count did not match its scenario")
+    return activations
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in (
@@ -176,14 +191,28 @@ def main() -> int:
 
             # Direct is intentionally measured against the native engine port after a router-owned load.
             _, loaded = request_json(base + "/router/load", {"name": "model-a"}, timeout=660)
+            if loaded.get("profile") != "model-a" or not isinstance(loaded.get("port"), int):
+                raise RuntimeError("native management load did not return a concrete model-a target")
+            activation_count = validate_routed_trial(
+                loaded["router"], alias="model-a", prior_activations=0, expected_delta=1
+            )
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
             result["trials"].append(direct_row)
 
-            for label, alias in (("warm-a", "model-a"), ("cold-b", "model-b"), ("alternating-a", "model-a")):
+            for label, alias, expected_delta in (
+                ("warm-a", "model-a", 0),
+                ("cold-b", "model-b", 1),
+                ("alternating-a", "model-a", 1),
+            ):
                 raw, row = canary(base, alias, direct=False)
                 row["scenario"] = label
                 row["router"] = request_json(base + "/router/status")[1]
+                activation_count = validate_routed_trial(
+                    row["router"], alias=alias, prior_activations=activation_count,
+                    expected_delta=expected_delta,
+                )
+                row["expectedActivationDelta"] = expected_delta
                 (artifacts / f"{label}.sse").write_bytes(raw)
                 (artifacts / f"{label}.metrics").write_bytes(request_bytes(base + "/metrics"))
                 result["trials"].append(row)

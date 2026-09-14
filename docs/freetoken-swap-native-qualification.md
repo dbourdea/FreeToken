@@ -62,8 +62,9 @@ It starts a private native daemon with a private state directory and extension
 cache, then records private raw artifacts for: a direct request to the
 router-owned engine port, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It reads first-byte and final
-duration at the client, and stores the corresponding `/router/status` snapshot
-and Prometheus `/metrics` response for each routed request.
+duration at the client, stores the corresponding `/router/status` snapshot and
+Prometheus `/metrics` response for each routed request, and fails if the
+activation counters do not prove the advertised warm/cold/alternating state.
 
 The harness requires `--allow-maintenance`, a new empty `--artifacts`
 directory, two known-good model paths, and the protected service's private
