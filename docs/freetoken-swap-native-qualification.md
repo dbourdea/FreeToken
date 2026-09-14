@@ -37,8 +37,7 @@ capacity is lower than the documented gate.
 
 Run each test through the daemon's stable URL, never by calling the engine port
 directly. Keep request and response content private. Record status codes,
-model alias, elapsed time, first-byte time, final duration, router metrics,
-engine metrics, accounting receipt IDs, and cleanup result.
+model alias, elapsed time, first-byte time, final duration, usage-derived completion tokens/second, router metrics, engine metrics, accounting receipt IDs, and cleanup result.
 
 | Test | Required observation | Pass condition |
 | --- | --- | --- |
@@ -61,8 +60,9 @@ collecting the four required comparisons in one approved maintenance window.
 It starts a private native daemon with a private state directory and extension
 cache and a validated dynamic-port TOML catalog, then records private raw artifacts for: a direct request to the
 router-owned engine port, a warm routed request, a cold routed swap to the
-other model, and an alternating routed swap back. It reads first-byte and final
-duration at the client, stores the corresponding `/router/status` snapshot and
+other model, and an alternating routed swap back. It requires streamed OpenAI usage,
+then records first-byte time, final duration, completion tokens, and usage-derived
+decode tokens/second at the client. It stores the corresponding `/router/status` snapshot and
 Prometheus `/metrics` response for each routed request, and fails if the
 activation counters do not prove the advertised warm/cold/alternating state.
 The direct comparison retains its router-owned load receipt and activation

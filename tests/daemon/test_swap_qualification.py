@@ -118,9 +118,12 @@ def test_cancellation_closes_real_local_http_stream(qualifier):
 def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(native_router_qualifier, monkeypatch):
     stream = io.BytesIO(
         b'data: {"choices":[{"delta":{"content":"4"}}]}\n\n'
+        b'data: {"choices":[],"usage":{"completion_tokens":1}}\n\n'
         b"data: [DONE]\n\n"
     )
     monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+    clock = iter([10.0, 10.25, 11.25])
+    monkeypatch.setattr(native_router_qualifier.time, "monotonic", lambda: next(clock))
 
     raw, observation = native_router_qualifier.canary("http://test", "model-a", direct=False)
 
@@ -130,6 +133,8 @@ def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(nat
     assert observation["passed"] is True
     assert observation["firstByteSeconds"] is not None
     assert observation["durationSeconds"] >= observation["firstByteSeconds"]
+    assert observation["completionTokens"] == 1
+    assert observation["completionTokensPerSecond"] == 1.0
     assert observation["responseBytes"] == len(raw)
     assert stream.closed
 
@@ -139,6 +144,18 @@ def test_native_router_benchmark_rejects_nonterminal_or_wrong_answer_streams(nat
     monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
 
     with pytest.raises(RuntimeError):
+        native_router_qualifier.canary("http://test", "model-a", direct=True)
+    assert stream.closed
+
+
+def test_native_router_benchmark_rejects_completed_stream_without_usage(native_router_qualifier, monkeypatch):
+    stream = io.BytesIO(
+        b'data: {"choices":[{"delta":{"content":"4"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+
+    with pytest.raises(RuntimeError, match="usage missing"):
         native_router_qualifier.canary("http://test", "model-a", direct=True)
     assert stream.closed
 

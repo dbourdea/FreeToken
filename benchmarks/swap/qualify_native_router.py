@@ -66,6 +66,7 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     content: list[str] = []
     started = time.monotonic()
     first_byte_s: float | None = None
+    completion_tokens: int | None = None
     with urllib.request.urlopen(request, timeout=660) as response:
         for chunk in response:
             if first_byte_s is None:
@@ -75,6 +76,9 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
                 raise RuntimeError("canary response exceeded private capture bound")
             if chunk.startswith(b"data: ") and chunk.strip() != b"data: [DONE]":
                 event = json.loads(chunk[6:])
+                usage = event.get("usage")
+                if isinstance(usage, dict) and isinstance(usage.get("completion_tokens"), int):
+                    completion_tokens = usage["completion_tokens"]
                 for choice in event.get("choices", []):
                     content.append(choice.get("delta", {}).get("content") or "")
     duration_s = time.monotonic() - started
@@ -83,11 +87,18 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         raise RuntimeError("SSE completion marker missing")
     if answer != "4":
         raise RuntimeError("deterministic quality gate failed")
+    if not isinstance(completion_tokens, int) or completion_tokens <= 0:
+        raise RuntimeError("streamed completion usage missing")
+    if first_byte_s is None or duration_s <= first_byte_s:
+        raise RuntimeError("stream timing did not permit token-throughput measurement")
+    completion_tokens_per_second = completion_tokens / (duration_s - first_byte_s)
     return bytes(raw), {
         "route": "direct" if direct else "native_router",
         "model": model,
         "firstByteSeconds": first_byte_s,
         "durationSeconds": duration_s,
+        "completionTokens": completion_tokens,
+        "completionTokensPerSecond": completion_tokens_per_second,
         "responseBytes": len(raw),
         "passed": True,
     }
