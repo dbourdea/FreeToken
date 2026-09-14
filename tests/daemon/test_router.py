@@ -785,6 +785,12 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         assert client.get("/ready").status_code == 200
         manager.model = "unexpected.gguf"
         assert client.get("/ready").status_code == 503
+        manager.model = "/private/models/low.gguf"
+        manager.args = ["--unexpected"]
+        assert client.get("/ready").status_code == 503
+        manager.args = []
+        manager.port = 1999
+        assert client.get("/ready").status_code == 503
     assert listed.status_code == 200
     assert listed.json() == {
         "object": "list",
