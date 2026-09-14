@@ -515,3 +515,34 @@ def test_router_management_load_uses_native_admission_and_authentication():
     assert missing.status_code == 404
     assert missing.json()["error"]["type"] == "unknown_model"
     assert manager.calls == [("start", "low.gguf")]
+
+
+def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "/private/models/low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    class Probe:
+        def fresh_health(self, port):
+            return {"reachable": True, "status": "ok", "maintenance": "serving"}
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=Probe(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        assert client.get("/ready").status_code == 503
+        assert manager.calls == []
+        assert client.get("/v1/models").status_code == 401
+        listed = client.get("/v1/models", headers={"Authorization": "Bearer router-test-key"})
+        router.acquire("low").release()
+        assert client.get("/ready").status_code == 200
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "object": "list",
+        "data": [{"id": "low", "object": "model", "created": 0, "owned_by": "freetoken"}],
+    }

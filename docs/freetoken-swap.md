@@ -57,7 +57,7 @@ an already resident dynamic profile keeps its port until it is unloaded.
 
 ## Native router API
 
-The routed inference surface is `POST /v1/chat/completions`,
+The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions`,
 `/v1/completions`, `/v1/responses`, `/v1/messages`, and
 `/v1/messages/count_tokens`. Unknown aliases return a stable 404; unsupported
 FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
@@ -71,6 +71,13 @@ the same native lifecycle transaction without fabricating an inference request.
 it records only event type, alias, route path, status, cancellation state, and
 response byte count—never prompts, request bodies, headers, query strings,
 model paths, or API keys.
+
+`GET /ready` is an unauthenticated, side-effect-free readiness probe for the
+stable router URL. It returns 200 only while a resident routed engine reports
+FreeToken's `status=ok` and `maintenance=serving`; it never cold-loads a
+profile. The stateless backend's `GET /v1/responses/{id}` and response-specific
+cancel endpoints always return its documented 404 and are therefore not routing
+or lifecycle operations.
 
 When `router.api_keys` is configured, bearer authentication protects inference
 and all router management endpoints. An explicit daemon `X-FT-Token` remains

@@ -262,6 +262,22 @@ def build_app(
             "engineRunning": bool(st.get("running")),
         }
 
+    @app.get("/ready")
+    async def ready():
+        """Stable router readiness; it never starts a model as a probe side effect."""
+        route_state = router.status()
+        engine = manager.status()
+        if (route_state["activeProfile"] is None or route_state["switching"]
+                or not engine.get("running") or not isinstance(engine.get("port"), int)):
+            return JSONResponse(status_code=503, content={"ready": False})
+        health_doc = await run(proxy_pool, probe.fresh_health, engine["port"])
+        accepting = bool(
+            health_doc.get("reachable")
+            and health_doc.get("status") == "ok"
+            and health_doc.get("maintenance", "serving") == "serving"
+        )
+        return JSONResponse(status_code=200 if accepting else 503, content={"ready": accepting})
+
     def router_event(event: str, **fields: Any) -> None:
         router_ring.append(
             json.dumps({"event": event, **fields}, separators=(",", ":"), sort_keys=True),
@@ -383,6 +399,17 @@ def build_app(
     @app.post("/v1/messages/count_tokens", dependencies=[Depends(require_router_key)])
     async def inference_proxy(request: Request):
         return await route_inference(request)
+
+    @app.get("/v1/models", dependencies=[Depends(require_router_key)])
+    async def openai_model_list():
+        """OpenAI-compatible alias listing without exposing local model paths."""
+        return {
+            "object": "list",
+            "data": [
+                {"id": profile["name"], "object": "model", "created": 0, "owned_by": "freetoken"}
+                for profile in router.catalog.public()
+            ],
+        }
 
     @app.api_route(
         "/upstream/{model}/{upstream_path:path}",
