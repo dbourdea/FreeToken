@@ -247,16 +247,16 @@ def build_app(
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
-    async def run_owned(pool: ThreadPoolExecutor, fn, *args, **kwargs):
-        """Do not release a lifecycle owner while its executor call still runs."""
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
+    async def run_manual_transaction(operation, *, preempt_manual: bool = False):
+        """Keep manual ownership until the complete transaction reaches a terminal state."""
+        owner = begin_manual_lifecycle(preempt_manual=preempt_manual)
+        task = asyncio.create_task(operation())
         try:
-            return await asyncio.shield(future)
+            return await asyncio.shield(task)
         except asyncio.CancelledError:
             while True:
                 try:
-                    await asyncio.shield(future)
+                    await asyncio.shield(task)
                 except asyncio.CancelledError:
                     continue
                 except BaseException:
@@ -264,6 +264,8 @@ def build_app(
                 else:
                     break
             raise
+        finally:
+            router.end_manual_lifecycle(owner)
 
     async def acquire_route(name: str, cancellation: threading.Event | None = None):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
@@ -788,35 +790,35 @@ def build_app(
 
     @app.post("/engine/start", dependencies=auth)
     async def engine_start(body: StartBody):
-        owner = begin_manual_lifecycle()
-        try:
-            port = resolve_port(body.port)
-            return await run_owned(lifecycle_pool, manager.start, body.model, port, list(body.args))
-        except Conflict as exc:
-            st = manager.status()
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": str(exc),
-                    "code": "serve_conflict",
-                    "currentModel": st.get("model"),
-                    "currentPort": st.get("port"),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — never propagate a 500-as-crash
-            raise HTTPException(status_code=500, detail=f"start failed: {exc}")
-        finally:
-            router.end_manual_lifecycle(owner)
+        async def operation():
+            try:
+                port = resolve_port(body.port)
+                return await run(lifecycle_pool, manager.start, body.model, port, list(body.args))
+            except Conflict as exc:
+                st = manager.status()
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": str(exc),
+                        "code": "serve_conflict",
+                        "currentModel": st.get("model"),
+                        "currentPort": st.get("port"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 — never propagate a 500-as-crash
+                raise HTTPException(status_code=500, detail=f"start failed: {exc}")
+
+        return await run_manual_transaction(operation)
 
     @app.post("/engine/stop", dependencies=auth)
     async def engine_stop(body: StopBody | None = None):
-        owner = begin_manual_lifecycle(preempt_manual=True)
-        try:
-            return await run_owned(lifecycle_pool, manager.stop, None, bool(body and body.force))
-        except (AccountingPrepareError, AccountingOutboxError) as exc:
-            return accounting_error(exc)
-        finally:
-            router.end_manual_lifecycle(owner)
+        async def operation():
+            try:
+                return await run(lifecycle_pool, manager.stop, None, bool(body and body.force))
+            except (AccountingPrepareError, AccountingOutboxError) as exc:
+                return accounting_error(exc)
+
+        return await run_manual_transaction(operation, preempt_manual=True)
 
     @app.post("/shutdown", dependencies=auth)
     async def shutdown_daemon(request: Request, body: StopBody | None = None):
@@ -838,82 +840,82 @@ def build_app(
 
     @app.post("/engine/switch", dependencies=auth)
     async def engine_switch(body: SwitchBody):
-        owner = begin_manual_lifecycle()
-        try:
-            port = resolve_port(body.port)
-            return await run_owned(
-                lifecycle_pool,
-                manager.switch,
-                body.model,
-                port,
-                list(body.args),
-                body.force,
-            )
-        except (AccountingPrepareError, AccountingOutboxError) as exc:
-            return accounting_error(exc)
-        except Exception as exc:  # noqa: BLE001
-            if isinstance(exc, SwitchLaunchError):
-                raise
-            raise HTTPException(status_code=500, detail=f"switch failed: {exc}")
-        finally:
-            router.end_manual_lifecycle(owner)
+        async def operation():
+            try:
+                port = resolve_port(body.port)
+                return await run(
+                    lifecycle_pool,
+                    manager.switch,
+                    body.model,
+                    port,
+                    list(body.args),
+                    body.force,
+                )
+            except (AccountingPrepareError, AccountingOutboxError) as exc:
+                return accounting_error(exc)
+            except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, SwitchLaunchError):
+                    raise
+                raise HTTPException(status_code=500, detail=f"switch failed: {exc}")
+
+        return await run_manual_transaction(operation)
 
     @app.post("/engine/start-profile", dependencies=auth)
     async def engine_start_profile(body: ProfileBody):
-        owner = begin_manual_lifecycle()
-        try:
-            model, port, args = profile_request(body.name)
-            result = await run_owned(lifecycle_pool, manager.start, model, port, args)
-            return await run_owned(proxy_pool, profile_result, body.name, result, port)
-        except CatalogError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Conflict as exc:
-            st = manager.status()
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": str(exc),
-                    "code": "serve_conflict",
-                    "currentModel": st.get("model"),
-                    "currentPort": st.get("port"),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"profile start failed: {exc}")
-        finally:
-            router.end_manual_lifecycle(owner)
+        async def operation():
+            try:
+                model, port, args = profile_request(body.name)
+                result = await run(lifecycle_pool, manager.start, model, port, args)
+                return await run(proxy_pool, profile_result, body.name, result, port)
+            except CatalogError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+            except Conflict as exc:
+                st = manager.status()
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": str(exc),
+                        "code": "serve_conflict",
+                        "currentModel": st.get("model"),
+                        "currentPort": st.get("port"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=500, detail=f"profile start failed: {exc}")
+
+        return await run_manual_transaction(operation)
 
     @app.post("/engine/switch-profile", dependencies=auth)
     async def engine_switch_profile(body: ProfileBody):
-        owner = begin_manual_lifecycle()
-        try:
-            model, port, args = profile_request(body.name)
-            result, ticket = await run_owned(
-                lifecycle_pool, manager.switch_for_readiness, model, port, args, body.force
-            )
-            response = await run_owned(proxy_pool, profile_result, body.name, result, port)
-            if not isinstance(response, JSONResponse):
-                return response
-            content = json.loads(response.body)
-            rollback = await run_owned(lifecycle_pool, manager.recover_switch, ticket, body.force)
-            if rollback.get("launched"):
-                profile = router.catalog.get(body.name)
-                rollback["readiness"] = await run_owned(proxy_pool, functools.partial(
-                    wait_for_ready, manager, probe, pid=rollback["pid"],
-                    port=rollback["port"], timeout_s=profile.ready_timeout_s,
-                ))
-            content["rollback"] = rollback
-            return JSONResponse(status_code=503, content=content)
-        except CatalogError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except (AccountingPrepareError, AccountingOutboxError) as exc:
-            return accounting_error(exc)
-        except Exception as exc:  # noqa: BLE001
-            if isinstance(exc, SwitchLaunchError):
-                raise
-            raise HTTPException(status_code=500, detail=f"profile switch failed: {exc}")
-        finally:
-            router.end_manual_lifecycle(owner)
+        async def operation():
+            try:
+                model, port, args = profile_request(body.name)
+                result, ticket = await run(
+                    lifecycle_pool, manager.switch_for_readiness, model, port, args, body.force
+                )
+                response = await run(proxy_pool, profile_result, body.name, result, port)
+                if not isinstance(response, JSONResponse):
+                    return response
+                content = json.loads(response.body)
+                rollback = await run(lifecycle_pool, manager.recover_switch, ticket, body.force)
+                if rollback.get("launched"):
+                    profile = router.catalog.get(body.name)
+                    rollback["readiness"] = await run(proxy_pool, functools.partial(
+                        wait_for_ready, manager, probe, pid=rollback["pid"],
+                        port=rollback["port"], timeout_s=profile.ready_timeout_s,
+                    ))
+                content["rollback"] = rollback
+                return JSONResponse(status_code=503, content=content)
+            except CatalogError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+            except (AccountingPrepareError, AccountingOutboxError) as exc:
+                return accounting_error(exc)
+            except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, SwitchLaunchError):
+                    raise
+                raise HTTPException(status_code=500, detail=f"profile switch failed: {exc}")
+
+        return await run_manual_transaction(operation)
 
     # ---- durable accounting outbox ----
 

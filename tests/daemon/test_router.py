@@ -1385,6 +1385,72 @@ def test_cancelled_manual_start_keeps_barrier_until_executor_finishes():
     assert router.status()["activeRequests"] == 0
 
 
+def test_cancelled_manual_profile_switch_completes_failed_readiness_rollback():
+    readiness_entered = threading.Event()
+    finish_readiness = threading.Event()
+
+    class RecoveringManager(Manager):
+        def switch_for_readiness(self, model, port, args, force=False):
+            self.calls.append(("switch", model))
+            previous = self.model, self.port, list(self.args)
+            self.model, self.port, self.args = model, port, list(args)
+            self.pid += 1
+            return {"pid": self.pid}, previous
+
+        def recover_switch(self, ticket, force=False):
+            self.calls.append(("recover", ticket[0]))
+            self.model, self.port, self.args = ticket
+            self.pid += 1
+            return {"launched": True, "pid": self.pid, "port": self.port}
+
+    class Probe:
+        def fresh_health(self, port):
+            if port == 1923:
+                readiness_entered.set()
+                assert finish_readiness.wait(2)
+                return {"reachable": True, "status": "error", "maintenance": "serving"}
+            return {"reachable": True, "status": "ok", "maintenance": "serving"}
+
+    manager = RecoveringManager()
+    manager.model, manager.port, manager.args = "legacy.gguf", 1922, []
+    catalog_doc = ModelCatalog({
+        "high": ModelProfile("high", "high.gguf", (), port=1923, ready_timeout_s=1),
+    })
+    probe = Probe()
+    router = RoutingCoordinator(manager, catalog_doc, probe, ready_fn=ready)
+
+    async def scenario(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            request = asyncio.create_task(client.post(
+                "/engine/switch-profile", json={"name": "high"}
+            ))
+            for _ in range(100):
+                if readiness_entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            if request.done():
+                response = request.result()
+                pytest.fail(f"switch-profile exited early: {response.status_code} {response.text}")
+            assert readiness_entered.is_set()
+            request.cancel()
+            assert router.status()["switching"] is True
+            finish_readiness.set()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=probe, footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        asyncio.run(scenario(app))
+
+    assert manager.calls == [("switch", "high.gguf"), ("recover", "legacy.gguf")]
+    assert manager.model == "legacy.gguf"
+    assert router.status()["switching"] is False
+
+
 def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
     manager = Manager()
     catalog_doc = ModelCatalog(

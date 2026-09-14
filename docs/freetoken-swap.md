@@ -16,8 +16,8 @@ the same lifecycle barrier for their complete transaction, so a routed request
 waits rather than racing a manual process operation. A manual stop may supersede
 a manual operation blocked in readiness; its newer manager intent invalidates
 stale rollback, and the older token cannot clear the stop's barrier. If the
-manual HTTP client disconnects, the barrier remains held until the current
-executor-side lifecycle operation actually terminates.
+manual HTTP client disconnects, the barrier remains held until the complete
+executor-backed lifecycle transaction, including required rollback, terminates.
 
 The read-only, pinned llama-swap source remains a compatibility reference and
 an optional separate deployment mode, not a runtime dependency. That direct
