@@ -85,6 +85,13 @@ profile. The stateless backend's `GET /v1/responses/{id}` and response-specific
 cancel endpoints always return its documented 404 and are therefore not routing
 or lifecycle operations.
 
+`GET /ui/` serves a dependency-free local management shell. It embeds no
+catalog values, paths, keys, or machine data; the operator enters a bearer key
+for the current browser session and it calls the authenticated router APIs.
+The UI presents configured/resident models, load/unload/reload controls, router
+status, and the privacy-preserving `GET /router/hardware` memory view. Captures,
+MCP, and Tailcat remain outside FreeToken's current product scope.
+
 When `router.api_keys` is configured, bearer authentication protects inference
 and all router management endpoints. An explicit daemon `X-FT-Token` remains
 the dedicated control-plane override. The guarded

@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
@@ -77,6 +77,26 @@ class CancelBody(BaseModel):
 class BenchBody(BaseModel):
     # Raw `ft bench bw` args (e.g. ["--dtype", "nvfp4", "--threshold", "2.5"]); empty = all dtypes.
     args: list[str] = []
+
+
+# Deliberately dependency-free management view. It never embeds catalog data,
+# local paths, tokens, or machine identifiers in the initial HTML response;
+# authenticated JSON API calls populate the view only after the operator enters
+# a bearer token for this browser session.
+_ROUTER_UI = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FreeToken swap</title><style>
+body{font:15px system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#18212b}button,input{font:inherit;padding:.4rem;margin:.2rem}pre{background:#f3f5f7;padding:1rem;overflow:auto}.row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+</style></head><body><h1>FreeToken swap</h1><p>Enter a router bearer key to inspect or control this local daemon. The key is kept only in this page's memory.</p>
+<div class="row"><label>Bearer key <input id="key" type="password" autocomplete="off"></label><button id="refresh">Refresh</button><button id="reload">Reload catalog</button><button id="unload">Unload resident</button></div>
+<h2>Status</h2><pre id="status">Not loaded.</pre><h2>Models</h2><div id="models"></div><h2>Hardware</h2><pre id="hardware">Not loaded.</pre>
+<script>
+const $=id=>document.getElementById(id), headers=()=>({Authorization:'Bearer '+$('key').value});
+async function api(path,opt={}){let r=await fetch(path,{...opt,headers:{...headers(),...(opt.headers||{})}});let d=await r.json();if(!r.ok)throw new Error(d.detail||d.error?.message||r.status);return d}
+function show(id,value){$(id).textContent=JSON.stringify(value,null,2)}
+async function refresh(){try{let [s,m,h]=await Promise.all([api('/router/status'),api('/router/models'),api('/router/hardware')]);show('status',s);show('hardware',h);let box=$('models');box.replaceChildren();for(const p of m.data){let b=document.createElement('button');b.textContent='Load '+p.name;b.onclick=async()=>{await api('/router/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name})});refresh()};box.append(b)}}catch(e){show('status',{error:e.message})}}
+$('refresh').onclick=refresh;$('reload').onclick=async()=>{await api('/router/reload',{method:'POST'});refresh()};$('unload').onclick=async()=>{await api('/router/unload',{method:'POST'});refresh()};
+</script></body></html>"""
 
 
 def _bench_profile_path(gpu_uuid: str | None) -> str | None:
@@ -278,6 +298,11 @@ def build_app(
         )
         return JSONResponse(status_code=200 if accepting else 503, content={"ready": accepting})
 
+    @app.get("/ui/")
+    async def router_ui():
+        """A static shell; authenticated APIs supply all operational data."""
+        return HTMLResponse(_ROUTER_UI)
+
     def router_event(event: str, **fields: Any) -> None:
         router_ring.append(
             json.dumps({"event": event, **fields}, separators=(",", ":"), sort_keys=True),
@@ -451,6 +476,20 @@ def build_app(
     @app.get("/router/profiles", dependencies=auth)
     async def router_profiles():
         return {"data": router.catalog.public(), "activeProfile": router.status()["activeProfile"]}
+
+    @app.get("/router/hardware", dependencies=auth)
+    async def router_hardware():
+        """Small, privacy-preserving local memory view for the management UI."""
+        engine = manager.status()
+        footprint = await run(proxy_pool, footprint_fn, engine.get("pid"))
+        return {
+            "engine": {
+                "running": bool(engine.get("running")),
+                "pid": engine.get("pid"),
+                "port": engine.get("port"),
+            },
+            "memory": footprint,
+        }
 
     @app.get("/router/requests", dependencies=auth)
     async def router_requests():

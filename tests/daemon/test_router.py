@@ -589,3 +589,31 @@ def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
         "object": "list",
         "data": [{"id": "low", "object": "model", "created": 0, "owned_by": "freetoken"}],
     }
+
+
+def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_gated():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "/private/models/low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(),
+            footprint_fn=lambda pid: {"ramBytes": 123, "vramBytes": 456},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        page = client.get("/ui/")
+        assert client.get("/router/hardware").status_code == 401
+        hardware = client.get("/router/hardware", headers={"Authorization": "Bearer router-test-key"})
+    assert page.status_code == 200
+    assert "/router/load" in page.text
+    assert "/router/hardware" in page.text
+    assert "/private/models/low.gguf" not in page.text
+    assert "router-test-key" not in page.text
+    assert hardware.json() == {
+        "engine": {"running": False, "pid": 100, "port": None},
+        "memory": {"ramBytes": 123, "vramBytes": 456},
+    }
