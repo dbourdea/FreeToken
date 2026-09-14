@@ -47,6 +47,7 @@ class RouterSettings:
     scheduler: str = "fifo"
     groups: tuple[RoutingGroup, ...] = ()
     include_aliases_in_list: bool = False
+    global_concurrency_limit: int = 0
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class ModelProfile:
     drop_fields: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     unlisted: bool = False
+    concurrency_limit: int = 0
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -93,6 +95,8 @@ class ModelProfile:
             doc["aliases"] = list(self.aliases)
         if self.unlisted:
             doc["unlisted"] = True
+        if self.concurrency_limit:
+            doc["concurrencyLimit"] = self.concurrency_limit
         return doc
 
 
@@ -183,7 +187,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         raise CatalogError("router must be a table")
     allowed = {
         "api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s",
-        "scheduler", "groups", "include_aliases_in_list",
+        "scheduler", "groups", "include_aliases_in_list", "global_concurrency_limit",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -200,6 +204,13 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     include_aliases_in_list = value.get("include_aliases_in_list", False)
     if not isinstance(include_aliases_in_list, bool):
         raise CatalogError("router.include_aliases_in_list must be a boolean")
+    global_concurrency_limit = value.get("global_concurrency_limit", 0)
+    if (
+        not isinstance(global_concurrency_limit, int)
+        or isinstance(global_concurrency_limit, bool)
+        or not 0 <= global_concurrency_limit <= 1_000_000
+    ):
+        raise CatalogError("router.global_concurrency_limit must be an integer from 0 through 1000000")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -255,6 +266,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         scheduler=scheduler,
         groups=tuple(groups),
         include_aliases_in_list=include_aliases_in_list,
+        global_concurrency_limit=global_concurrency_limit,
     )
 
 
@@ -270,6 +282,7 @@ def _profile(name: str, value: object) -> ModelProfile:
     allowed = {
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
+        "concurrency_limit",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -330,7 +343,17 @@ def _profile(name: str, value: object) -> ModelProfile:
     unlisted = value.get("unlisted", False)
     if not isinstance(unlisted, bool):
         raise CatalogError(f"models.{name}.unlisted must be a boolean")
+    concurrency_limit = value.get("concurrency_limit", 0)
+    if (
+        not isinstance(concurrency_limit, int)
+        or isinstance(concurrency_limit, bool)
+        or not 0 <= concurrency_limit <= 1_000_000
+    ):
+        raise CatalogError(
+            f"models.{name}.concurrency_limit must be an integer from 0 through 1000000"
+        )
     return ModelProfile(
         name, model, tuple(raw_args), port, description, ready_timeout_s,
         ttl_s, unload_timeout_s, priority, group, tuple(drop_fields), tuple(aliases), unlisted,
+        concurrency_limit,
     )

@@ -539,7 +539,11 @@ def build_app(
             content = {"error": {"message": str(exc), "type": exc.code}}
             if exc.recovery is not None:
                 content["recovery"] = exc.recovery
-            return JSONResponse(status_code=exc.status_code, content=content)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=content,
+                headers={"Retry-After": "1"} if exc.status_code == 429 else None,
+            )
         except BaseException:
             with inflight_lock:
                 request_reservations.pop(request_id, None)
@@ -811,6 +815,7 @@ def build_app(
             return JSONResponse(
                 status_code=exc.status_code,
                 content=content,
+                headers={"Retry-After": "1"} if exc.status_code == 429 else None,
             )
         try:
             result = {"profile": lease.profile.name, "port": lease.port, "pid": lease.pid}

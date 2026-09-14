@@ -13,6 +13,8 @@ default_ttl_s = 300
 unload_timeout_s = 30
 upstream_timeout_s = 900
 scheduler = "fifo"
+# Zero disables the global cap. Every profile still has a default cap of 10.
+global_concurrency_limit = 32
 # Include alternate IDs in /v1/models. They remain routable when this is false.
 include_aliases_in_list = true
 
@@ -30,6 +32,7 @@ args = ["--served-model-name", "coding", "--max-seq-len-override", "32768"]
 ready_timeout_s = 300
 ttl_s = 0
 priority = 10
+concurrency_limit = 2
 group = "interactive"
 # Optional narrow compatibility filter. It removes only named top-level JSON
 # fields from requests for this profile. `model` can never be removed.
@@ -44,4 +47,5 @@ port = 1919
 args = ["--served-model-name", "chat", "--max-seq-len-override", "16384"]
 ready_timeout_s = 300
 priority = 0
+concurrency_limit = 4
 group = "interactive"

@@ -45,6 +45,7 @@ port = 1922
 args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
 description = "GMKtek EVO-X2 candidate coding profile"
 aliases = ["qwen-coder-compatible"]
+concurrency_limit = 2
 ready_timeout_s = 300
 
 [models.qwen-chat]
@@ -80,6 +81,16 @@ Set `port = 0` to request a kernel-selected loopback port on every cold native
 activation. The daemon records the concrete assigned port and uses that same
 target for child identity, readiness, proxying, accounting, and re-adoption;
 an already resident dynamic profile keeps its port until it is unloaded.
+Dynamic binding occurs only when a request reaches the head of admission, so
+simultaneous cold requests for one profile share the single committed target.
+
+Each profile admits at most 10 reserved requests by default across its canonical
+and alternate IDs. Set `models.<name>.concurrency_limit` to a positive override.
+`router.global_concurrency_limit = 0` leaves the global cap disabled; a positive
+value caps all active, queued, and activating routed requests. Capacity is
+reserved before loading, so excess work is rejected immediately with HTTP 429,
+`Retry-After: 1`, and `error.type=concurrency_limit` rather than consuming a
+queue slot or launching an engine. Status and Prometheus expose reserved work.
 
 The native capacity policy is deliberately one resident child. Therefore a
 nonpersistent group must use `swap = true, exclusive = true`; a persistent
@@ -103,7 +114,7 @@ residency while preserving the client's request body. Unknown IDs return a stabl
 FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 `/router/profiles`, `/router/requests`, and `/metrics` expose configured and
 resident state, capacity, queues, lifecycle timing, response bytes and proxy
-byte rate, cancellation, and eviction signals. These transport measurements do
+byte rate, concurrency reservations, cancellation, and eviction signals. These transport measurements do
 not substitute for live engine token-throughput qualification.
 Browser clients receive the pinned compatibility contract: any `OPTIONS`
 preflight is answered without lifecycle side effects, requested header names

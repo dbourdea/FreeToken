@@ -11,12 +11,15 @@ from __future__ import annotations
 import threading
 import socket
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .catalog import CatalogError, ModelCatalog, ModelProfile
 from .readiness import wait_for_ready
 from .serve_manager import Conflict, SwitchLaunchError
+
+
+DEFAULT_PROFILE_CONCURRENCY_LIMIT = 10
 
 
 def allocate_loopback_port() -> int:
@@ -44,7 +47,7 @@ class RoutingError(RuntimeError):
         self.recovery = recovery
 
 
-@dataclass(frozen=True)
+@dataclass
 class RouteLease:
     """One admitted request. Call :meth:`release` exactly once when it ends."""
 
@@ -52,6 +55,7 @@ class RouteLease:
     profile: ModelProfile
     port: int
     pid: int | None
+    _released: bool = field(default=False, init=False, repr=False)
 
     def release(self) -> None:
         self.router.release(self)
@@ -88,6 +92,8 @@ class RoutingCoordinator:
         self._next_sequence = 0
         self._pending: list[tuple[int, int, str]] = []
         self._leases = 0
+        self._reservations = 0
+        self._profile_reservations: dict[str, int] = {}
         self._active_name: str | None = None
         self._switching = False
         self._manual_lifecycle_owner: object | None = None
@@ -144,23 +150,25 @@ class RoutingCoordinator:
                 profile = self._catalog.get(name)
             except CatalogError as exc:
                 raise RoutingError("unknown_model", str(exc), status_code=404) from exc
-            port = self._port_for(profile)
             if cancellation is not None and cancellation.is_set():
                 raise RoutingError(
                     "request_cancelled", "request cancelled before admission", status_code=409
                 )
-            ticket = (-profile.priority, self._next_sequence, name)
+            self._reserve_concurrency_locked(profile)
+            ticket = (-profile.priority, self._next_sequence, profile.name)
             self._next_sequence += 1
             self._pending.append(ticket)
             while True:
                 if self._shutdown_requested:
                     self._pending.remove(ticket)
+                    self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
                         "router_shutting_down", "router shutdown is in progress", status_code=503
                     )
                 if cancellation is not None and cancellation.is_set():
                     self._pending.remove(ticket)
+                    self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
                         "request_cancelled", "request cancelled before admission", status_code=409
@@ -172,6 +180,15 @@ class RoutingCoordinator:
                 if self._switching:
                     self._cond.wait()
                     continue
+                try:
+                    # Dynamic binding happens only for the head ticket. Other
+                    # cold requests then reuse the committed resident target.
+                    port = self._port_for(profile)
+                except BaseException:
+                    self._pending.remove(ticket)
+                    self._drop_concurrency_reservation_locked(profile)
+                    self._cond.notify_all()
+                    raise
                 if self._matches_active(profile, port):
                     self._cancel_idle_timer()
                     self._pending.remove(ticket)
@@ -187,6 +204,7 @@ class RoutingCoordinator:
                 block = self._capacity_block(profile)
                 if block is not None:
                     self._pending.remove(ticket)
+                    self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError("capacity_unavailable", block, status_code=409)
                 self._switching = True
@@ -200,6 +218,7 @@ class RoutingCoordinator:
             with self._cond:
                 self._switching = False
                 self._activation_failures += 1
+                self._drop_concurrency_reservation_locked(profile)
                 self._cond.notify_all()
             if isinstance(exc, RoutingError):
                 raise
@@ -264,9 +283,11 @@ class RoutingCoordinator:
         with self._cond:
             if lease.router is not self:
                 raise ValueError("lease belongs to a different routing coordinator")
-            if self._leases <= 0:
+            if lease._released or self._leases <= 0:
                 raise ValueError("routing lease was already released")
+            lease._released = True
             self._leases -= 1
+            self._drop_concurrency_reservation_locked(lease.profile)
             if self._leases == 0:
                 self._schedule_idle_eviction()
             self._cond.notify_all()
@@ -283,6 +304,7 @@ class RoutingCoordinator:
                 "persistent": bool(active_identity_matches and group and group.persistent),
                 "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
                 "activeRequests": self._leases,
+                "reservedRequests": self._reservations,
                 "shuttingDown": self._shutdown_requested,
                 "switching": self._switching,
                 "queuedRequests": len(self._pending),
@@ -300,6 +322,8 @@ class RoutingCoordinator:
                 "lastResponseBytes": self._last_response_bytes,
                 "lastProxyBytesPerSecond": self._last_proxy_bytes_per_second,
                 "scheduler": self._catalog.settings.scheduler,
+                "globalConcurrencyLimit": self._catalog.settings.global_concurrency_limit,
+                "defaultProfileConcurrencyLimit": DEFAULT_PROFILE_CONCURRENCY_LIMIT,
             }
 
     @property
@@ -411,6 +435,7 @@ class RoutingCoordinator:
         status = self.status()
         values = {
             "active_requests": status["activeRequests"],
+            "reserved_requests": status["reservedRequests"],
             "queued_requests": status["queuedRequests"],
             "shutting_down": int(status["shuttingDown"]),
             "active_identity_matches_engine": int(status["activeIdentityMatchesEngine"]),
@@ -607,6 +632,30 @@ class RoutingCoordinator:
                 "current profile before selecting it"
             )
         return None
+
+    def _reserve_concurrency_locked(self, profile: ModelProfile) -> None:
+        """Reserve active/queued capacity or reject immediately like the pinned scheduler."""
+        global_limit = self._catalog.settings.global_concurrency_limit
+        profile_limit = profile.concurrency_limit or DEFAULT_PROFILE_CONCURRENCY_LIMIT
+        profile_reserved = self._profile_reservations.get(profile.name, 0)
+        if (global_limit and self._reservations >= global_limit) or profile_reserved >= profile_limit:
+            raise RoutingError(
+                "concurrency_limit",
+                f"concurrency limit reached for profile {profile.name!r}",
+                status_code=429,
+            )
+        self._reservations += 1
+        self._profile_reservations[profile.name] = profile_reserved + 1
+
+    def _drop_concurrency_reservation_locked(self, profile: ModelProfile) -> None:
+        count = self._profile_reservations.get(profile.name, 0)
+        if self._reservations <= 0 or count <= 0:
+            raise RuntimeError("routing concurrency reservation underflow")
+        self._reservations -= 1
+        if count == 1:
+            self._profile_reservations.pop(profile.name)
+        else:
+            self._profile_reservations[profile.name] = count - 1
 
     def _matches_active(self, profile: ModelProfile, port: int) -> bool:
         state = self._manager.status()

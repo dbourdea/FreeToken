@@ -233,6 +233,145 @@ def test_cancelled_queued_http_request_cannot_trigger_a_later_swap(monkeypatch):
     assert router.status()["activeRequests"] == 0
 
 
+def test_default_profile_concurrency_limit_is_shared_by_alternate_ids():
+    manager = Manager()
+    profile = ModelProfile("low", "low.gguf", (), aliases=("alternate",))
+    router = RoutingCoordinator(
+        manager, ModelCatalog({"low": profile}), object(), ready_fn=ready
+    )
+    leases = [router.acquire("low") for _ in range(10)]
+
+    with pytest.raises(RoutingError, match="concurrency limit") as exc:
+        router.acquire("alternate")
+    assert exc.value.status_code == 429
+    assert exc.value.code == "concurrency_limit"
+    assert router.status()["reservedRequests"] == 10
+    assert router.status()["queuedRequests"] == 0
+
+    leases[0].release()
+    replacement = router.acquire("alternate")
+    with pytest.raises(ValueError, match="already released"):
+        leases[0].release()
+    assert router.status()["reservedRequests"] == 10
+    replacement.release()
+    for lease in leases[1:]:
+        lease.release()
+    assert router.status()["reservedRequests"] == 0
+    assert manager.calls == [("start", "low.gguf")]
+
+
+def test_global_concurrency_limit_rejects_conflicting_model_before_it_queues():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "low": ModelProfile("low", "low.gguf", ()),
+            "high": ModelProfile("high", "high.gguf", ()),
+        },
+        settings=RouterSettings(global_concurrency_limit=1),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    lease = router.acquire("low")
+
+    with pytest.raises(RoutingError) as exc:
+        router.acquire("high")
+    assert (exc.value.code, exc.value.status_code) == ("concurrency_limit", 429)
+    assert router.status()["queuedRequests"] == 0
+    assert router.status()["reservedRequests"] == 1
+    lease.release()
+
+
+def test_http_concurrency_rejection_returns_retry_after_and_releases_request_id(monkeypatch):
+    manager = Manager()
+    profile = ModelProfile("low", "low.gguf", (), concurrency_limit=1)
+    catalog_doc = ModelCatalog({"low": profile})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    lease = router.acquire("low")
+    monkeypatch.setattr(
+        "freetoken.daemon.app.open_upstream",
+        lambda **kwargs: pytest.fail("over-limit request reached upstream"),
+    )
+
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        rejected = client.post(
+            "/v1/messages",
+            json={"model": "low", "messages": []},
+            headers={"X-FT-Request-ID": "over-limit"},
+        )
+        assert client.get("/router/requests").json()["data"] == []
+
+    assert rejected.status_code == 429
+    assert rejected.headers["retry-after"] == "1"
+    assert rejected.json()["error"]["type"] == "concurrency_limit"
+    assert router.status()["reservedRequests"] == 1
+    lease.release()
+
+
+def test_dynamic_port_failure_releases_concurrency_reservation():
+    router = RoutingCoordinator(
+        Manager(),
+        ModelCatalog({"dynamic": ModelProfile("dynamic", "dynamic.gguf", (), port=0)}),
+        object(),
+        ready_fn=ready,
+        port_allocator=lambda: (_ for _ in ()).throw(OSError("no port")),
+    )
+
+    with pytest.raises(OSError, match="no port"):
+        router.acquire("dynamic")
+    assert router.status()["reservedRequests"] == 0
+    assert router.status()["queuedRequests"] == 0
+
+
+def test_concurrent_cold_dynamic_requests_share_one_head_ticket_port():
+    manager = Manager()
+    activation_started = threading.Event()
+    finish_activation = threading.Event()
+    allocated = []
+
+    def allocate():
+        port = 21000 + len(allocated)
+        allocated.append(port)
+        return port
+
+    def blocking_ready(manager, probe, *, pid, port, timeout_s):
+        activation_started.set()
+        assert finish_activation.wait(2)
+        return {"ready": True}
+
+    router = RoutingCoordinator(
+        manager,
+        ModelCatalog({"dynamic": ModelProfile("dynamic", "dynamic.gguf", (), port=0)}),
+        object(),
+        ready_fn=blocking_ready,
+        port_allocator=allocate,
+    )
+    leases = []
+    first = threading.Thread(target=lambda: leases.append(router.acquire("dynamic")))
+    second = threading.Thread(target=lambda: leases.append(router.acquire("dynamic")))
+    first.start()
+    assert activation_started.wait(1)
+    second.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        time.sleep(0.01)
+    assert router.status()["queuedRequests"] == 1
+    finish_activation.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert allocated == [21000]
+    assert [lease.port for lease in leases] == [21000, 21000]
+    assert manager.calls == [("start", "dynamic.gguf")]
+    for lease in leases:
+        lease.release()
+
+
 def test_explicit_cancel_removes_a_queued_request_before_it_can_swap(monkeypatch):
     manager = Manager()
     router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
