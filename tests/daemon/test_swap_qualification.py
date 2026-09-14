@@ -20,6 +20,15 @@ def qualifier():
     return module
 
 
+@pytest.fixture
+def native_router_qualifier():
+    path = Path(__file__).parents[2] / "benchmarks/swap/qualify_native_router.py"
+    spec = importlib.util.spec_from_file_location("native_router_qualifier", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def stats(active, *, instance="same", completed=3):
     return {"instance_id": instance, "requests": {"active": active, "completed": completed}}
 
@@ -101,3 +110,31 @@ def test_cancellation_closes_real_local_http_stream(qualifier):
         server.shutdown()
         server.server_close()
         worker.join(3)
+
+
+def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(native_router_qualifier, monkeypatch):
+    stream = io.BytesIO(
+        b'data: {"choices":[{"delta":{"content":"4"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+
+    raw, observation = native_router_qualifier.canary("http://test", "model-a", direct=False)
+
+    assert raw.endswith(b"data: [DONE]\n\n")
+    assert observation["route"] == "native_router"
+    assert observation["model"] == "model-a"
+    assert observation["passed"] is True
+    assert observation["firstByteSeconds"] is not None
+    assert observation["durationSeconds"] >= observation["firstByteSeconds"]
+    assert observation["responseBytes"] == len(raw)
+    assert stream.closed
+
+
+def test_native_router_benchmark_rejects_nonterminal_or_wrong_answer_streams(native_router_qualifier, monkeypatch):
+    stream = io.BytesIO(b'data: {"choices":[{"delta":{"content":"5"}}]}\n\n')
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+
+    with pytest.raises(RuntimeError):
+        native_router_qualifier.canary("http://test", "model-a", direct=True)
+    assert stream.closed
