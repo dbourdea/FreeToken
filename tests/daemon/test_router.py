@@ -761,6 +761,30 @@ def test_router_management_load_uses_native_admission_and_authentication():
     assert manager.calls == [("start", "low.gguf")]
 
 
+def test_router_management_load_preserves_failed_switch_recovery_evidence():
+    manager = Manager()
+    catalog_doc = catalog()
+
+    def selective_ready(manager, probe, *, pid, port, timeout_s):
+        return {"ready": manager.model == "low.gguf", "reason": "fixture-not-ready"}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=selective_ready)
+    router.acquire("low").release()
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post("/router/load", json={"name": "high"})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["type"] == "engine_not_ready"
+    assert response.json()["recovery"]["launched"] is True
+    assert manager.model == "low.gguf"
+    assert router.status()["activeProfile"] == "low"
+    assert router.status()["activeIdentityMatchesEngine"] is True
+
+
 def test_router_model_list_hides_model_paths_and_ready_never_cold_loads():
     manager = Manager()
     catalog_doc = ModelCatalog(

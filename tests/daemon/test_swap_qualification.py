@@ -183,6 +183,52 @@ def test_native_router_reload_conflict_canary_preserves_active_identity(
     assert "priority = 1" in catalog.read_text(encoding="utf-8")
 
 
+def test_native_router_failed_switch_canary_requires_rollback_and_restored_completion(
+    native_router_qualifier, monkeypatch
+):
+    statuses = iter((
+        {
+            "activeProfile": "model-a", "activeIdentityMatchesEngine": True,
+            "activeRequests": 0, "activationFailures": 3,
+        },
+        {
+            "activeProfile": "model-a", "activeIdentityMatchesEngine": True,
+            "activeRequests": 0, "activationFailures": 4,
+        },
+    ))
+    failure = json.dumps({
+        "error": {"type": "engine_not_ready", "message": "private failure"},
+        "recovery": {"launched": True},
+    }).encode()
+
+    def request_json(url, body=None, **kwargs):
+        if url.endswith("/router/status"):
+            return b"{}", next(statuses)
+        assert url.endswith("/router/load") and body == {"name": "model-invalid"}
+        raise native_router_qualifier.urllib.error.HTTPError(
+            url, 503, "unavailable", {}, io.BytesIO(failure)
+        )
+
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    monkeypatch.setattr(
+        native_router_qualifier, "canary",
+        lambda base, model, *, direct: (b"data: [DONE]\n\n", {"passed": True}),
+    )
+
+    failure_raw, restored_raw, observation = native_router_qualifier.failed_switch_canary(
+        "http://test", "model-invalid", "model-a"
+    )
+
+    assert failure_raw == failure
+    assert restored_raw == b"data: [DONE]\n\n"
+    assert observation == {
+        "failedProfile": "model-invalid", "restoredProfile": "model-a",
+        "failureType": "engine_not_ready", "rollbackLaunched": True,
+        "activationFailureIncremented": True, "restoredCompletionPassed": True,
+        "passed": True,
+    }
+
+
 def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
     native_router_qualifier, monkeypatch, tmp_path
 ):

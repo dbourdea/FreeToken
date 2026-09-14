@@ -90,8 +90,9 @@ The current native router is **not complete** until an approved GMKtek EVO-X2
 maintenance window runs the current branch's
 `benchmarks/swap/qualify_native_router.py`, retains its raw artifacts privately,
 and records sanitized direct, warm-routed, cold-routed, alternating-model,
-router-cancellation, same-model-concurrency, active-reload-conflict, and TTL-eviction
-results. It must also run Linux real-child tests and exercise failed-load rollback, accounting, and re-adoption on
+router-cancellation, same-model-concurrency, failed-switch rollback,
+active-reload-conflict, and TTL-eviction results. It must also run Linux real-child
+tests and exercise accounting and re-adoption on
 the current branch, then restore and health-check the protected workload. No
 merge, permanent service activation, or publication of raw artifacts is
 authorized by this audit.

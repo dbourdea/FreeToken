@@ -70,8 +70,11 @@ two simultaneous same-alias streams and fails unless both complete with zero
 activation delta and one unchanged resident profile. It stores the corresponding
 `/router/status` snapshot and Prometheus `/metrics` response for each routed
 comparison, and fails if activation counters do not prove the advertised
-warm/cold/alternating state. It also writes a private active-profile priority change and
-requires the router to reject it with HTTP 409 while retaining exact active identity.
+warm/cold/alternating state. It then switches to a deliberately missing private
+model fixture and requires HTTP 503, a successful rollback launch, restored exact
+identity, an activation-failure increment, and a valid completion from the restored
+model. It also writes a private active-profile priority change and requires the
+router to reject it with HTTP 409 while retaining exact active identity.
 Finally, it explicitly unloads its temporary resident, atomically reloads the private
 catalog with a two-second idle TTL, verifies TTL-driven eviction and listener closure,
 and leaves no temporary engine for daemon cleanup.

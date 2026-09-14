@@ -311,6 +311,55 @@ def reload_conflict_canary(base: str, catalog_path: Path, model_a: str, model_b:
     }
 
 
+def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[bytes, bytes, dict]:
+    """Require a failed disposable load to restore the prior resident engine."""
+    _, before = request_json(base + "/router/status")
+    prior_failures = before.get("activationFailures")
+    if (
+        before.get("activeProfile") != restored_model
+        or before.get("activeIdentityMatchesEngine") is not True
+        or not isinstance(prior_failures, int)
+    ):
+        raise RuntimeError("failed-switch qualification requires an exact healthy resident")
+    failure_raw = b""
+    try:
+        request_json(base + "/router/load", {"name": model}, timeout=90)
+    except urllib.error.HTTPError as exc:
+        failure_raw = exc.read(1024 * 1024 + 1)
+        if exc.code != 503 or len(failure_raw) > 1024 * 1024:
+            raise RuntimeError("failed replacement returned an invalid bounded response") from exc
+    else:
+        raise RuntimeError("disposable invalid model unexpectedly activated")
+    try:
+        failure = json.loads(failure_raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("failed replacement response was not JSON") from exc
+    error = failure.get("error") if isinstance(failure, dict) else None
+    recovery = failure.get("recovery") if isinstance(failure, dict) else None
+    if not isinstance(error, dict) or error.get("type") not in {"engine_not_ready", "switch_launch_failed"}:
+        raise RuntimeError("failed replacement did not report a lifecycle failure")
+    if not isinstance(recovery, dict) or recovery.get("launched") is not True:
+        raise RuntimeError("failed replacement did not report successful rollback launch")
+    _, after = request_json(base + "/router/status", timeout=30)
+    if (
+        after.get("activeProfile") != restored_model
+        or after.get("activeIdentityMatchesEngine") is not True
+        or after.get("activeRequests") != 0
+        or after.get("activationFailures") != prior_failures + 1
+    ):
+        raise RuntimeError("failed replacement did not restore exact idle residency")
+    restored_raw, restored = canary(base, restored_model, direct=False)
+    return failure_raw, restored_raw, {
+        "failedProfile": model,
+        "restoredProfile": restored_model,
+        "failureType": error["type"],
+        "rollbackLaunched": True,
+        "activationFailureIncremented": True,
+        "restoredCompletionPassed": restored.get("passed") is True,
+        "passed": restored.get("passed") is True,
+    }
+
+
 def ttl_eviction_canary(
     base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45
 ) -> dict:
@@ -351,7 +400,8 @@ def ttl_eviction_canary(
 
 
 def native_catalog_text(
-    model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0
+    model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0,
+    invalid_model: str | None = None,
 ) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
@@ -366,6 +416,12 @@ def native_catalog_text(
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
             f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
             "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), "",
+        ))
+    if invalid_model is not None:
+        catalog.extend((
+            "[models.model-invalid]", f"model = {json.dumps(invalid_model)}", "port = 0",
+            "ready_timeout_s = 15", "ttl_s = 0",
+            "args = " + json.dumps(common_args).replace("${MODEL_ID}", "model-invalid"), "",
         ))
     return "\n".join(catalog)
 
@@ -405,7 +461,10 @@ def main() -> int:
     env["TORCH_EXTENSIONS_DIR"] = str(artifacts / "torch-extensions")
     env["MAX_JOBS"] = "2"
     catalog_path = artifacts / "models.toml"
-    catalog_path.write_text(native_catalog_text(args.model_a, args.model_b), encoding="utf-8")
+    invalid_model = str(artifacts / "intentionally-missing-model.gguf")
+    catalog_path.write_text(
+        native_catalog_text(args.model_a, args.model_b, invalid_model=invalid_model), encoding="utf-8"
+    )
     with (artifacts / "kernel-preflight.log").open("wb") as log:
         subprocess.run(
             [args.python, "-c", "from freetoken.kernel.gguf import _module; _module(); print('NATIVE_KERNEL_READY')"],
@@ -475,6 +534,12 @@ def main() -> int:
                 final_engine_port = row["hardware"]["engine"]["port"]
                 result["trials"].append(row)
                 save()
+            failure_raw, restored_raw, failed_switch = failed_switch_canary(
+                base, "model-invalid", "model-a"
+            )
+            (artifacts / "failed-switch-response.json").write_bytes(failure_raw)
+            (artifacts / "failed-switch-restored-a.sse").write_bytes(restored_raw)
+            result["failedSwitch"] = failed_switch
             result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
             result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
             final_engine_port = result["ttl"]["port"]
@@ -486,6 +551,7 @@ def main() -> int:
                 and result.get("concurrency", {}).get("passed") is True
                 and result.get("ttl", {}).get("passed") is True
                 and result.get("reloadConflict", {}).get("passed") is True
+                and result.get("failedSwitch", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

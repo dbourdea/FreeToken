@@ -617,9 +617,12 @@ def build_app(
             lease = await run(lifecycle_pool, router.acquire, body.name)
         except RoutingError as exc:
             router_event("management_load_failed", profile=body.name, code=exc.code)
+            content = {"error": {"message": str(exc), "type": exc.code}}
+            if exc.recovery is not None:
+                content["recovery"] = exc.recovery
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"error": {"message": str(exc), "type": exc.code}},
+                content=content,
             )
         try:
             result = {"profile": lease.profile.name, "port": lease.port, "pid": lease.pid}
