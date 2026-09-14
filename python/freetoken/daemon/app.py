@@ -57,6 +57,10 @@ class RouterUnloadBody(BaseModel):
     name: str | None = None
 
 
+class RouterLoadBody(BaseModel):
+    name: str
+
+
 class AccountingAckBody(BaseModel):
     receiptId: str
 
@@ -456,6 +460,29 @@ def build_app(
         except (AccountingPrepareError, AccountingOutboxError) as exc:
             return accounting_error(exc)
         return {"unloaded": unloaded, "router": router.status()}
+
+    @app.post("/router/load", dependencies=auth)
+    async def router_load(body: RouterLoadBody):
+        """Activate one profile without inventing a synthetic inference request.
+
+        The short lease still uses the identical admission, readiness, switch,
+        accounting, and rollback transaction as automatic routing. Releasing it
+        afterwards permits the configured idle-TTL policy to apply normally.
+        """
+        try:
+            lease = await run(lifecycle_pool, router.acquire, body.name)
+        except RoutingError as exc:
+            router_event("management_load_failed", profile=body.name, code=exc.code)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": {"message": str(exc), "type": exc.code}},
+            )
+        try:
+            result = {"profile": lease.profile.name, "port": lease.port, "pid": lease.pid}
+        finally:
+            lease.release()
+        router_event("management_loaded", profile=lease.profile.name)
+        return {**result, "router": router.status()}
 
     @app.post("/router/reload", dependencies=auth)
     async def router_reload():

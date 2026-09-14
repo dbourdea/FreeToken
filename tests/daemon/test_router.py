@@ -483,3 +483,35 @@ def test_invalid_router_request_id_cannot_activate_an_engine(monkeypatch):
         )
     assert response.status_code == 400
     assert manager.calls == []
+
+
+def test_router_management_load_uses_native_admission_and_authentication():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", (), port=0)},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(
+        manager, catalog_doc, object(), ready_fn=ready, port_allocator=lambda: 20777,
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        assert client.post("/router/load", json={"name": "low"}).status_code == 401
+        loaded = client.post(
+            "/router/load", json={"name": "low"}, headers={"Authorization": "Bearer router-test-key"},
+        )
+        missing = client.post(
+            "/router/load", json={"name": "missing"}, headers={"Authorization": "Bearer router-test-key"},
+        )
+    assert loaded.status_code == 200
+    assert loaded.json()["profile"] == "low"
+    assert loaded.json()["port"] == 20777
+    assert loaded.json()["router"]["activeProfile"] == "low"
+    assert loaded.json()["router"]["activeRequests"] == 0
+    assert missing.status_code == 404
+    assert missing.json()["error"]["type"] == "unknown_model"
+    assert manager.calls == [("start", "low.gguf")]

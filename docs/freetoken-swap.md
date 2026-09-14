@@ -65,7 +65,9 @@ FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 resident state, capacity, queues, lifecycle timing, cancellation, and eviction
 signals. `POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
-and an active request. `GET /router/logs?since=` is a bounded SSE event stream;
+and an active request. `POST /router/load` activates a named profile through
+the same native lifecycle transaction without fabricating an inference request.
+`GET /router/logs?since=` is a bounded SSE event stream;
 it records only event type, alias, route path, status, cancellation state, and
 response byte count—never prompts, request bodies, headers, query strings,
 model paths, or API keys.
