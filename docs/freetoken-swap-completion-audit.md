@@ -56,7 +56,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
 | Production protection | Isolated test paths, explicit maintenance gate, historical restore/completion checks, no interruption during combined-tree checks | Maintained; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
-| FreeToken-only publication | Anonymous GitHub API recheck on 2026-09-14: draft PR 1 is open at current `feat/freetoken-swap` SHA `49615909c3e32e53995c2251749842781357e50f`, targeting `main`, and reports `mergeable_state=clean`; draft PR 2 remains open on its separate AMD branch and also reports clean | Submitted, draft, not merged |
+| FreeToken-only publication | Anonymous GitHub API recheck on 2026-09-14: draft PR 1 is open from `feat/freetoken-swap` to `main` and reports `mergeable_state=clean`; draft PR 2 remains open on its separate AMD branch and also reports clean | Submitted, draft, not merged |
 
 The PRs target different base branches: PR 1 targets `main`; PR 2 targets
 `amd-rocm-gfx1151`. Their current open/draft/clean state was rechecked through
