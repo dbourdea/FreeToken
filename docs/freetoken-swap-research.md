@@ -96,6 +96,15 @@ The additional Linux real-process suite passes both normal SIGTERM and SIGTERM-r
 
 The current native-router Windows daemon suite passes 203 tests with 7 expected Linux-only skips. Coverage exercises replacement launch failure, recovery launch failure, readiness error and timeout, recovery readiness failure, accounting failure preservation, replacement exit and persisted-state cleanup, one-use recovery tickets, automatic canonical and slash-namespaced alternate model-ID routing, hidden-profile list policy, exact `/models` public-list alias and separate profile-control authentication, atomic public pre-ownership/unloaded/activating/resident/stale model status without path disclosure, global/per-profile concurrency reservations and immediate rejection, concurrent cold dynamic-target sharing, sanitized side-effect-free browser preflight and authenticated model-list CORS, Bearer/Basic-password/`X-Api-Key` extraction and anti-bypass precedence with local credential termination, atomic readiness, disconnect-safe shared manual/routed lifecycle exclusion and rollback completion, coordinated HTTP and OS/lifespan daemon shutdown, drain-before-detach including preempted manual transactions, immediate shutdown admission closure under lifecycle-pool contention, queued/connecting/active cancellation ownership, guarded longest-prefix passthrough with escaped path/query preservation, race-safe atomic reload and dynamic-port binding, strict filters and namespaced-ID validation, exact explicit/dynamic/omitted-default-port re-adoption, capacity protection, invalidation by newer lifecycle operations, exact-origin qualification credentials, unauthenticated control/inference rejection, and authenticated alias/profile/metrics/router-log evidence capture. These are controlled CPU and loopback-HTTP tests, not new real-model measurements or current-branch Linux completion evidence.
 
+The pinned source audit also identified optional cold-load feedback as an
+applicable remaining implementation gap. Its loading writer is not a generic
+heartbeat: it starts only after scheduler admission for a streaming chat request
+whose model is not ready, reports queue/load progress as reasoning-content SSE,
+and converts a post-commit dispatch failure into an in-band error followed by
+`[DONE]`. FreeToken must preserve its existing request-ID, cancellation, lease,
+and accounting ownership while adding that behavior; a response that converts an
+immediate concurrency 429 into a committed 200 would not be parity.
+
 ## Privacy and publication
 
 Public material identifies the primary test computer as GMKtek EVO-X2. Personal home paths use `/home/operator` or equivalent placeholders, and LAN addresses use documentation-only example addresses. Raw logs remain private because they may contain personal paths, hostnames, device identifiers, and request content. Redaction must not make an example address appear to be a working deployment address.
