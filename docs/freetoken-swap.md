@@ -78,6 +78,8 @@ FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 resident state, capacity, queues, lifecycle timing, response bytes and proxy
 byte rate, cancellation, and eviction signals. These transport measurements do
 not substitute for live engine token-throughput qualification.
+`activeIdentityMatchesEngine` makes a stale or out-of-band child visible rather
+than reporting its configured alias as resident.
 `POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
 and an active request. `POST /router/load` activates a named profile through

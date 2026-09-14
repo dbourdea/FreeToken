@@ -537,11 +537,14 @@ def build_app(
         route_state = router.status()
         engine = manager.status()
         active = route_state["activeProfile"]
+        active_identity_matches = route_state["activeIdentityMatchesEngine"]
         data = []
         for profile in router.catalog.public():
             profile = dict(profile)
             profile["configured"] = True
-            profile["resident"] = profile["name"] == active and bool(engine.get("running"))
+            profile["resident"] = (
+                profile["name"] == active and bool(engine.get("running")) and active_identity_matches
+            )
             profile["activeRequests"] = route_state["activeRequests"] if profile["resident"] else 0
             data.append(profile)
         return {"data": data, "capacity": route_state["capacity"]}

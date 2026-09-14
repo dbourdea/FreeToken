@@ -185,10 +185,12 @@ class RoutingCoordinator:
     def status(self) -> dict:
         with self._cond:
             group = self._catalog.group_for(self._active_name) if self._active_name else None
+            active_identity_matches = self._active_matches_engine_locked()
             return {
                 "activeProfile": self._active_name,
                 "activeGroup": group.name if group else None,
                 "residentProfiles": [self._active_name] if self._active_name else [],
+                "activeIdentityMatchesEngine": active_identity_matches,
                 "persistent": bool(group and group.persistent),
                 "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
                 "activeRequests": self._leases,
@@ -223,13 +225,7 @@ class RoutingCoordinator:
         alias recorded by the coordinator.
         """
         with self._cond:
-            if self._active_name is None:
-                return False
-            try:
-                profile = self._catalog.get(self._active_name)
-            except CatalogError:
-                return False
-            return self._matches_active(profile, self._port_for(profile))
+            return self._active_matches_engine_locked()
 
     @property
     def upstream_timeout_s(self) -> float:
@@ -418,6 +414,16 @@ class RoutingCoordinator:
             and state.get("port") == port
             and self._manager.serve_args() == list(profile.args)
         )
+
+    def _active_matches_engine_locked(self) -> bool:
+        """Internal exact-identity check; caller holds ``self._cond``."""
+        if self._active_name is None:
+            return False
+        try:
+            profile = self._catalog.get(self._active_name)
+        except CatalogError:
+            return False
+        return self._matches_active(profile, self._port_for(profile))
 
     def _port_for(self, profile: ModelProfile) -> int:
         """Resolve a profile's proxy/readiness target under router ownership."""
