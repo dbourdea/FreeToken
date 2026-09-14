@@ -77,6 +77,11 @@ model. The harness compares the private accounting outbox before and after that
 failure and requires at least one new valid receipt ID, publishing only the count.
 It also writes a private active-profile priority change and requires the router to
 reject it with HTTP 409 while retaining exact active identity.
+Before that reload check, the harness gracefully terminates the first daemon while
+leaving its test-owned engine detached, starts a replacement daemon against the same
+private state, and requires the manager's adopted flag, engine PID, engine port, and
+router profile identity to match. A routed completion must succeed with zero router
+activations before the replacement daemon becomes the final cleanup owner.
 Finally, it explicitly unloads its temporary resident, atomically reloads the private
 catalog with a two-second idle TTL, verifies TTL-driven eviction and listener closure,
 and leaves no temporary engine for daemon cleanup.

@@ -393,6 +393,24 @@ def test_native_router_benchmark_captures_private_hardware_observation(
     assert (tmp_path / "warm-a.hardware.json").read_bytes() == captured
 
 
+def test_native_router_benchmark_validates_same_process_re_adoption(native_router_qualifier):
+    before = {"running": True, "pid": 41, "port": 24567, "adopted": False}
+    after = {"running": True, "pid": 41, "port": 24567, "adopted": True}
+    router = {
+        "activeProfile": "model-a", "activeIdentityMatchesEngine": True,
+        "activations": 0,
+    }
+
+    assert native_router_qualifier.validate_re_adoption(before, after, router) == {
+        "profile": "model-a", "samePid": True, "samePort": True,
+        "managerAdopted": True, "activationDelta": 0,
+    }
+    with pytest.raises(RuntimeError, match="exact adopted residency"):
+        native_router_qualifier.validate_re_adoption(
+            before, {**after, "pid": 42}, router
+        )
+
+
 @pytest.mark.parametrize(
     "hardware",
     [

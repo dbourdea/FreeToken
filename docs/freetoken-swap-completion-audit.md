@@ -91,8 +91,8 @@ maintenance window runs the current branch's
 `benchmarks/swap/qualify_native_router.py`, retains its raw artifacts privately,
 and records sanitized direct, warm-routed, cold-routed, alternating-model,
 router-cancellation, same-model-concurrency, failed-switch rollback/accounting,
-active-reload-conflict, and TTL-eviction results. It must also run Linux real-child
-tests and exercise re-adoption on
+same-process re-adoption, active-reload-conflict, and TTL-eviction results. It must
+also run Linux real-child tests on
 the current branch, then restore and health-check the protected workload. No
 merge, permanent service activation, or publication of raw artifacts is
 authorized by this audit.

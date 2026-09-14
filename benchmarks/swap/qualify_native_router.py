@@ -282,12 +282,71 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     return hardware
 
 
+def validate_re_adoption(before: dict, after: dict, router: dict) -> dict:
+    """Validate that a replacement daemon bound, rather than replaced, one engine."""
+    old_pid, old_port = before.get("pid"), before.get("port")
+    if (
+        not before.get("running")
+        or not isinstance(old_pid, int) or old_pid <= 0
+        or not isinstance(old_port, int) or not 1 <= old_port <= 65535
+    ):
+        raise RuntimeError("pre-restart engine identity is invalid")
+    if (
+        after.get("pid") != old_pid
+        or after.get("port") != old_port
+        or after.get("adopted") is not True
+        or router.get("activeProfile") != "model-a"
+        or router.get("activeIdentityMatchesEngine") is not True
+        or router.get("activations") != 0
+    ):
+        raise RuntimeError("replacement daemon did not bind the exact adopted residency")
+    return {
+        "profile": "model-a", "samePid": True, "samePort": True,
+        "managerAdopted": True, "activationDelta": 0,
+    }
+
+
 def require_listener_closed(port: int) -> None:
     """Fail the qualification if a temporary engine listener survived cleanup."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
         connection.settimeout(1)
         if connection.connect_ex(("127.0.0.1", port)) == 0:
             raise RuntimeError("temporary engine listener remains reachable after cleanup")
+
+
+def require_listener_open(port: int) -> None:
+    """Require a detached test-owned engine to remain reachable for re-adoption."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        connection.settimeout(1)
+        if connection.connect_ex(("127.0.0.1", port)) != 0:
+            raise RuntimeError("detached engine listener did not survive daemon restart")
+
+
+def stop_detached_engine(pid: int, port: int) -> None:
+    """Best-effort cleanup for the exact test-owned engine during a restart gap."""
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        try:
+            require_listener_closed(port)
+            return
+        except RuntimeError:
+            time.sleep(0.1)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            require_listener_closed(port)
+            return
+        except RuntimeError:
+            time.sleep(0.1)
+    raise RuntimeError("detached test-owned engine survived cleanup")
 
 
 def reload_conflict_canary(base: str, catalog_path: Path, model_a: str, model_b: str) -> dict:
@@ -492,19 +551,27 @@ def main() -> int:
         )
 
     daemon: subprocess.Popen[bytes] | None = None
+    detached_engine: tuple[int, int] | None = None
     maintenance = False
     final_engine_port: int | None = None
     base = f"http://127.0.0.1:{args.daemon_port}"
+
+    def launch_daemon(log, *, stop_serve_on_exit: bool) -> subprocess.Popen[bytes]:
+        command = [
+            args.python, "-m", "freetoken.cli", "daemon", "--host", "127.0.0.1",
+            "--port", str(args.daemon_port), "--state-dir", str(artifacts / "daemon-state"),
+            "--catalog", str(catalog_path), "--catalog-watch-interval", "0", "--no-oom",
+        ]
+        if stop_serve_on_exit:
+            command.append("--stop-serve-on-exit")
+        return subprocess.Popen(
+            command, cwd=args.source, env=env, stdout=log, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+
     try:
         with (artifacts / "daemon.log").open("wb") as log:
-            daemon = subprocess.Popen(
-                [args.python, "-m", "freetoken.cli", "daemon", "--host", "127.0.0.1",
-                 "--port", str(args.daemon_port), "--state-dir", str(artifacts / "daemon-state"),
-                 "--catalog", str(catalog_path), "--catalog-watch-interval", "0", "--no-oom",
-                 "--stop-serve-on-exit"],
-                cwd=args.source, env=env, stdout=log, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
-            )
+            daemon = launch_daemon(log, stop_serve_on_exit=False)
             wait_json(base + "/router/status", seconds=30)
             maintenance = True
             subprocess.run(service + ["stop", args.protected_service], check=True, timeout=90)
@@ -560,6 +627,35 @@ def main() -> int:
             (artifacts / "failed-switch-response.json").write_bytes(failure_raw)
             (artifacts / "failed-switch-restored-a.sse").write_bytes(restored_raw)
             result["failedSwitch"] = failed_switch
+
+            before_restart_raw, before_restart = request_json(base + "/engine/status")
+            old_pid, old_port = before_restart.get("pid"), before_restart.get("port")
+            if (
+                not before_restart.get("running")
+                or not isinstance(old_pid, int) or old_pid <= 0
+                or not isinstance(old_port, int) or not 1 <= old_port <= 65535
+            ):
+                raise RuntimeError("pre-restart engine identity is invalid")
+            (artifacts / "re-adoption-before-engine.json").write_bytes(before_restart_raw)
+            detached_engine = (old_pid, old_port)
+            stop_process_group(daemon)
+            daemon = None
+            require_listener_open(old_port)
+            daemon = launch_daemon(log, stop_serve_on_exit=True)
+            adopted_router = wait_json(base + "/router/status", seconds=30)
+            adopted_raw, adopted_engine = request_json(base + "/engine/status")
+            (artifacts / "re-adoption-after-engine.json").write_bytes(adopted_raw)
+            identity = validate_re_adoption(before_restart, adopted_engine, adopted_router)
+            readopted_raw, readopted_completion = canary(base, "model-a", direct=False)
+            (artifacts / "re-adoption-restored-a.sse").write_bytes(readopted_raw)
+            if request_json(base + "/router/status")[1].get("activations") != 0:
+                raise RuntimeError("routed request replaced the re-adopted engine")
+            result["reAdoption"] = {
+                **identity,
+                "completionPassed": readopted_completion.get("passed") is True,
+                "passed": readopted_completion.get("passed") is True,
+            }
+            detached_engine = None
             result["reloadConflict"] = reload_conflict_canary(base, catalog_path, args.model_a, args.model_b)
             result["ttl"] = ttl_eviction_canary(base, catalog_path, args.model_a, args.model_b)
             final_engine_port = result["ttl"]["port"]
@@ -572,6 +668,7 @@ def main() -> int:
                 and result.get("ttl", {}).get("passed") is True
                 and result.get("reloadConflict", {}).get("passed") is True
                 and result.get("failedSwitch", {}).get("passed") is True
+                and result.get("reAdoption", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)
@@ -590,6 +687,18 @@ def main() -> int:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 result["cleanupError"] = repr(exc)
             except RuntimeError as exc:
+                if detached_engine is None:
+                    result["cleanupError"] = repr(exc)
+                else:
+                    try:
+                        stop_detached_engine(*detached_engine)
+                        detached_engine = None
+                    except (OSError, RuntimeError) as detached_exc:
+                        result["cleanupError"] = repr(detached_exc)
+        elif detached_engine is not None:
+            try:
+                stop_detached_engine(*detached_engine)
+            except (OSError, RuntimeError) as exc:
                 result["cleanupError"] = repr(exc)
         if maintenance:
             try:
