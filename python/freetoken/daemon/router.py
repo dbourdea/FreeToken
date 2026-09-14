@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import socket
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -98,6 +99,10 @@ class RoutingCoordinator:
         self._terminal_streams = 0
         self._last_ttft_ms: float | None = None
         self._last_duration_ms: float | None = None
+        self._last_activation_ms: float | None = None
+        self._last_queue_wait_ms: float | None = None
+        self._last_response_bytes: int | None = None
+        self._last_proxy_bytes_per_second: float | None = None
 
     def acquire(self, name: str) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
@@ -106,6 +111,7 @@ class RoutingCoordinator:
         except CatalogError as exc:
             raise RoutingError("unknown_model", str(exc), status_code=404) from exc
         port = self._port_for(profile)
+        queued_at = time.monotonic()
         with self._cond:
             ticket = (-profile.priority, self._next_sequence, name)
             self._next_sequence += 1
@@ -123,6 +129,7 @@ class RoutingCoordinator:
                     self._pending.remove(ticket)
                     self._leases += 1
                     self._admissions += 1
+                    self._last_queue_wait_ms = round((time.monotonic() - queued_at) * 1000, 3)
                     state = self._manager.status()
                     self._cond.notify_all()
                     return RouteLease(self, profile, port, state.get("pid"))
@@ -138,6 +145,7 @@ class RoutingCoordinator:
                 self._pending.remove(ticket)
                 break
 
+        activated_at = time.monotonic()
         try:
             pid = self._activate(profile, port)
         except Exception as exc:
@@ -158,6 +166,8 @@ class RoutingCoordinator:
             self._cancel_idle_timer()
             self._leases += 1
             self._admissions += 1
+            self._last_queue_wait_ms = round((activated_at - queued_at) * 1000, 3)
+            self._last_activation_ms = round((time.monotonic() - activated_at) * 1000, 3)
             self._cond.notify_all()
         return RouteLease(self, profile, port, pid)
 
@@ -193,6 +203,10 @@ class RoutingCoordinator:
                 "terminalStreams": self._terminal_streams,
                 "lastTtftMs": self._last_ttft_ms,
                 "lastDurationMs": self._last_duration_ms,
+                "lastActivationMs": self._last_activation_ms,
+                "lastQueueWaitMs": self._last_queue_wait_ms,
+                "lastResponseBytes": self._last_response_bytes,
+                "lastProxyBytesPerSecond": self._last_proxy_bytes_per_second,
                 "scheduler": self._catalog.settings.scheduler,
             }
 
@@ -253,8 +267,14 @@ class RoutingCoordinator:
             metric = f"freetoken_swap_{name}"
             metric_type = "counter" if name.endswith("_total") else "gauge"
             lines.extend((f"# TYPE {metric} {metric_type}", f"{metric} {value}"))
-        for name, value in (("last_ttft_ms", status["lastTtftMs"]),
-                            ("last_duration_ms", status["lastDurationMs"])):
+        for name, value in (
+            ("last_ttft_ms", status["lastTtftMs"]),
+            ("last_duration_ms", status["lastDurationMs"]),
+            ("last_activation_ms", status["lastActivationMs"]),
+            ("last_queue_wait_ms", status["lastQueueWaitMs"]),
+            ("last_response_bytes", status["lastResponseBytes"]),
+            ("last_proxy_bytes_per_second", status["lastProxyBytesPerSecond"]),
+        ):
             if value is not None:
                 metric = f"freetoken_swap_{name}"
                 lines.extend((f"# TYPE {metric} gauge", f"{metric} {value}"))
@@ -264,11 +284,15 @@ class RoutingCoordinator:
         with self._cond:
             self._cancellations += 1
 
-    def record_stream(self, *, ttft_s: float | None, duration_s: float) -> None:
+    def record_stream(
+        self, *, ttft_s: float | None, duration_s: float, response_bytes: int
+    ) -> None:
         with self._cond:
             self._terminal_streams += 1
             self._last_ttft_ms = round(ttft_s * 1000, 3) if ttft_s is not None else None
             self._last_duration_ms = round(duration_s * 1000, 3)
+            self._last_response_bytes = response_bytes
+            self._last_proxy_bytes_per_second = round(response_bytes / duration_s, 3) if duration_s > 0 else None
 
     def evict_idle(self, name: str | None = None) -> bool:
         """Unload a truly idle matching engine, preserving lifecycle accounting.

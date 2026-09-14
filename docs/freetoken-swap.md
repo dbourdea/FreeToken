@@ -75,8 +75,10 @@ The routed inference surface is `GET /v1/models` plus `POST /v1/chat/completions
 `/v1/messages/count_tokens`. Unknown aliases return a stable 404; unsupported
 FreeToken modalities are not fabricated. `GET /router/status`, `/router/models`,
 `/router/profiles`, `/router/requests`, and `/metrics` expose configured and
-resident state, capacity, queues, lifecycle timing, cancellation, and eviction
-signals. `POST /router/unload`, `/router/reload`, and
+resident state, capacity, queues, lifecycle timing, response bytes and proxy
+byte rate, cancellation, and eviction signals. These transport measurements do
+not substitute for live engine token-throughput qualification.
+`POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
 and an active request. `POST /router/load` activates a named profile through
 the same native lifecycle transaction without fabricating an inference request.

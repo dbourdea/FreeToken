@@ -446,6 +446,7 @@ def build_app(
                 router.record_stream(
                     ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
                     duration_s=ended - started,
+                    response_bytes=byte_count,
                 )
                 lease.release()
                 with inflight_lock:

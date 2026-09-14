@@ -449,7 +449,16 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         assert router.status()["terminalStreams"] == 1
         assert router.status()["lastTtftMs"] is not None
         assert router.status()["lastDurationMs"] is not None
-        assert "freetoken_swap_last_ttft_ms" in router.prometheus()
+        assert router.status()["lastActivationMs"] is not None
+        assert router.status()["lastQueueWaitMs"] is not None
+        assert router.status()["lastResponseBytes"] == len(response.content)
+        assert router.status()["lastProxyBytesPerSecond"] is not None
+        metrics = router.prometheus()
+        assert "freetoken_swap_last_ttft_ms" in metrics
+        assert "freetoken_swap_last_activation_ms" in metrics
+        assert "freetoken_swap_last_queue_wait_ms" in metrics
+        assert f"freetoken_swap_last_response_bytes {len(response.content)}" in metrics
+        assert "freetoken_swap_last_proxy_bytes_per_second" in metrics
     finally:
         server.shutdown()
         server.server_close()
