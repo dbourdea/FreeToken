@@ -107,7 +107,7 @@ def main() -> int:
     parser.add_argument("--allow-maintenance", action="store_true", required=True)
     parser.add_argument("--daemon-port", type=int, default=1964)
     args = parser.parse_args()
-    if os.name == "nt":
+    if not sys.platform.startswith("linux"):
         raise SystemExit("native maintenance qualification requires Linux process-group semantics")
 
     artifacts = Path(args.artifacts)
