@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from freetoken.daemon.app import build_app
-from freetoken.daemon.catalog import ModelCatalog, ModelProfile
+from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.pidfile import ServeState, ServeStateStore
 from freetoken.daemon.proxy import ServeProbe
@@ -161,7 +161,10 @@ def test_native_router_supervises_a_real_child_and_relays_sse(tmp_path):
                            grace_s=0.2, reap_wait_s=3,
                            read_stats=lambda p: json_get(p, "/v1/stats"))
     probe = ServeProbe()
-    catalog = ModelCatalog({"good": ModelProfile("good", "good", (), port=port)})
+    catalog = ModelCatalog(
+        {"good": ModelProfile("good", "good", (), port=port)},
+        settings=RouterSettings(send_loading_state=True),
+    )
     try:
         with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(2) as proxy:
             app = build_app(
@@ -172,6 +175,7 @@ def test_native_router_supervises_a_real_child_and_relays_sse(tmp_path):
                 "/v1/chat/completions", json={"model": "good", "stream": True},
             )
         assert response.status_code == 200
+        assert b'"reasoning_content":"freetoken-swap loading model: good\\n"' in response.content
         assert b'"model":"good"' in response.content
         assert response.content.endswith(b"data: [DONE]\n\n")
         assert manager.status()["running"] is True

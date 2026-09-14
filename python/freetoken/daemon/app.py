@@ -769,7 +769,7 @@ def build_app(
         if loading_eligible:
             loop = asyncio.get_running_loop()
             reserved = asyncio.Event()
-            reservation_state: dict[str, bool] = {}
+            reservation_state: dict[str, Any] = {}
 
             def on_reserved(loading_required: bool, queue_position: int) -> None:
                 reservation_state["loadingRequired"] = loading_required
