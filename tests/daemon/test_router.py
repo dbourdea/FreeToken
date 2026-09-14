@@ -416,6 +416,34 @@ def test_router_reload_atomically_replaces_a_valid_catalog(tmp_path):
         assert [item["name"] for item in client.get("/models").json()["data"]] == ["two"]
 
 
+def test_router_catalog_reload_rotates_bearer_keys_atomically(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        "[router]\napi_keys = ['first-key']\n[models.low]\nmodel = 'low.gguf'\n",
+        encoding="utf-8",
+    )
+    manager = Manager()
+    catalog_doc = ModelCatalog.load(str(path))
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            catalog_path=str(path),
+        )
+        client = TestClient(app)
+        path.write_text(
+            "[router]\napi_keys = ['second-key']\n[models.low]\nmodel = 'low.gguf'\n",
+            encoding="utf-8",
+        )
+        reloaded = client.post("/router/reload", headers={"Authorization": "Bearer first-key"})
+        old_key = client.get("/router/status", headers={"Authorization": "Bearer first-key"})
+        new_key = client.get("/router/status", headers={"Authorization": "Bearer second-key"})
+    assert reloaded.status_code == 200
+    assert old_key.status_code == 401
+    assert new_key.status_code == 200
+
+
 def test_router_reload_rejects_redefining_active_profile():
     manager = Manager()
     router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
