@@ -138,3 +138,11 @@ def test_native_router_benchmark_rejects_nonterminal_or_wrong_answer_streams(nat
     with pytest.raises(RuntimeError):
         native_router_qualifier.canary("http://test", "model-a", direct=True)
     assert stream.closed
+
+
+def test_native_router_benchmark_keeps_prometheus_capture_private_bytes(native_router_qualifier, monkeypatch):
+    stream = io.BytesIO(b"freetoken_swap_admissions_total 3\n")
+    monkeypatch.setattr(native_router_qualifier.urllib.request, "urlopen", lambda *a, **k: stream)
+
+    assert native_router_qualifier.request_bytes("http://test/metrics") == b"freetoken_swap_admissions_total 3\n"
+    assert stream.closed

@@ -63,7 +63,7 @@ cache, then records private raw artifacts for: a direct request to the
 router-owned engine port, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It reads first-byte and final
 duration at the client, and stores the corresponding `/router/status` snapshot
-for each routed request.
+and Prometheus `/metrics` response for each routed request.
 
 The harness requires `--allow-maintenance`, a new empty `--artifacts`
 directory, two known-good model paths, and the protected service's private

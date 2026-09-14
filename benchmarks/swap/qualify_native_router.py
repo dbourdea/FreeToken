@@ -28,6 +28,11 @@ def request_json(url: str, body: dict | None = None, *, timeout: float = 30) -> 
     return raw, json.loads(raw)
 
 
+def request_bytes(url: str, *, timeout: float = 30) -> bytes:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read()
+
+
 def wait_json(url: str, *, seconds: float) -> dict:
     deadline = time.monotonic() + seconds
     last: Exception | None = None
@@ -180,6 +185,7 @@ def main() -> int:
                 row["scenario"] = label
                 row["router"] = request_json(base + "/router/status")[1]
                 (artifacts / f"{label}.sse").write_bytes(raw)
+                (artifacts / f"{label}.metrics").write_bytes(request_bytes(base + "/metrics"))
                 result["trials"].append(row)
                 save()
             result["passed"] = len(result["trials"]) == 4 and all(x["passed"] for x in result["trials"])
