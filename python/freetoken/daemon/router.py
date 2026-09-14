@@ -9,12 +9,28 @@ leases, readiness, and rollback directly testable without a model runtime.
 from __future__ import annotations
 
 import threading
+import socket
 from dataclasses import dataclass
 from typing import Callable
 
 from .catalog import CatalogError, ModelCatalog, ModelProfile
 from .readiness import wait_for_ready
 from .serve_manager import Conflict, SwitchLaunchError
+
+
+def allocate_loopback_port() -> int:
+    """Ask the kernel for an ephemeral loopback TCP port.
+
+    The listener is intentionally closed before the child starts: FreeToken's
+    serve process, not the daemon, must own the listening socket. The manager
+    serializes the immediately following launch; a hostile or unrelated local
+    process can still win that unavoidable bind race, in which case readiness
+    fails closed and the normal rollback path applies.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 class RoutingError(RuntimeError):
@@ -58,6 +74,7 @@ class RoutingCoordinator:
         default_port: int = 1919,
         ready_fn: Callable = wait_for_ready,
         timer_factory: Callable[[float, Callable[[], None]], object] | None = None,
+        port_allocator: Callable[[], int] = allocate_loopback_port,
     ) -> None:
         self._manager = manager
         self._catalog = catalog
@@ -65,6 +82,7 @@ class RoutingCoordinator:
         self._default_port = default_port
         self._ready_fn = ready_fn
         self._timer_factory = timer_factory or self._new_timer
+        self._port_allocator = port_allocator
         self._cond = threading.Condition(threading.Lock())
         self._next_sequence = 0
         self._pending: list[tuple[int, int, str]] = []
@@ -87,7 +105,7 @@ class RoutingCoordinator:
             profile = self._catalog.get(name)
         except CatalogError as exc:
             raise RoutingError("unknown_model", str(exc), status_code=404) from exc
-        port = profile.port or self._default_port
+        port = self._port_for(profile)
         with self._cond:
             ticket = (-profile.priority, self._next_sequence, name)
             self._next_sequence += 1
@@ -266,7 +284,7 @@ class RoutingCoordinator:
             if active is None or self._leases or self._switching:
                 return False
             profile = self._catalog.get(active)
-            port = profile.port or self._default_port
+            port = self._port_for(profile)
             if not self._matches_active(profile, port):
                 self._active_name = None
                 self._idle_timer = None
@@ -339,6 +357,20 @@ class RoutingCoordinator:
             and state.get("port") == port
             and self._manager.serve_args() == list(profile.args)
         )
+
+    def _port_for(self, profile: ModelProfile) -> int:
+        """Resolve a profile's proxy/readiness target under router ownership."""
+        if profile.port is None:
+            return self._default_port
+        if profile.port != 0:
+            return profile.port
+        state = self._manager.status()
+        # A dynamic profile retains its concrete port for its whole residency;
+        # a fresh activation gets a new kernel-selected one.
+        if (self._active_name == profile.name and state.get("running")
+                and isinstance(state.get("port"), int) and state["port"] > 0):
+            return state["port"]
+        return self._port_allocator()
 
     def _activate(self, profile: ModelProfile, port: int) -> int | None:
         state = self._manager.status()

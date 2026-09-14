@@ -66,6 +66,8 @@ class ModelProfile:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
         if self.port is not None:
             body["port"] = self.port
+            if self.port == 0:
+                body["dynamicPort"] = True
         return body
 
     def public(self) -> dict[str, Any]:
@@ -223,8 +225,13 @@ def _profile(name: str, value: object) -> ModelProfile:
         ):
             raise CatalogError(f"models.{name}.args must not set --model or --port")
     port = value.get("port")
-    if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535):
-        raise CatalogError(f"models.{name}.port must be an integer from 1 through 65535")
+    # Port zero is an explicit request for a fresh loopback port on each
+    # activation. It is not passed through to uvicorn: the native router
+    # reserves an OS-selected candidate and records that concrete target for
+    # readiness, proxying, accounting, and re-adoption. ``None`` keeps the
+    # daemon-wide fixed default for backwards-compatible catalogs.
+    if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535):
+        raise CatalogError(f"models.{name}.port must be an integer from 0 through 65535")
     description = value.get("description")
     if description is not None and (not isinstance(description, str) or "\x00" in description):
         raise CatalogError(f"models.{name}.description must be a string without NUL")

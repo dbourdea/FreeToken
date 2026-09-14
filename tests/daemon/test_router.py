@@ -84,6 +84,33 @@ def test_unknown_model_is_a_stable_404_router_error():
     assert exc.value.status_code == 404
 
 
+def test_dynamic_profile_port_is_stable_while_resident_and_fresh_after_a_swap():
+    manager = Manager()
+    catalog_doc = ModelCatalog({
+        "dynamic": ModelProfile("dynamic", "dynamic.gguf", (), port=0),
+        "other": ModelProfile("other", "other.gguf", (), port=19555),
+    })
+    allocated = iter([20101, 20102])
+    router = RoutingCoordinator(
+        manager, catalog_doc, object(), ready_fn=ready, port_allocator=lambda: next(allocated),
+    )
+
+    first = router.acquire("dynamic")
+    first.release()
+    warm = router.acquire("dynamic")
+    assert (first.port, warm.port) == (20101, 20101)
+    warm.release()
+    router.acquire("other").release()
+    cold_again = router.acquire("dynamic")
+    assert cold_again.port == 20102
+    cold_again.release()
+    assert manager.calls == [
+        ("start", "dynamic.gguf"),
+        ("switch", "other.gguf"),
+        ("switch", "dynamic.gguf"),
+    ]
+
+
 def test_switch_waits_until_an_active_lease_finishes():
     manager = Manager()
     router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)

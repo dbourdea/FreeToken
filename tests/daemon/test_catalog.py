@@ -31,7 +31,7 @@ def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
     ("[models.bad]\nmodel = 'm'\nargs = ['--port', '9']\n", "must not set --model or --port"),
     ("[models.bad]\nmodel = 'm'\ncmd = 'anything'\n", "unsupported keys"),
     ("[models.bad]\nmodel = ''\n", "non-empty string"),
-    ("[models.bad]\nmodel = 'm'\nport = 0\n", "1 through 65535"),
+    ("[models.bad]\nmodel = 'm'\nport = -1\n", "0 through 65535"),
 ])
 def test_catalog_rejects_ambiguous_or_shell_style_profiles(tmp_path, content, message):
     path = tmp_path / "models.toml"
@@ -43,6 +43,14 @@ def test_catalog_rejects_ambiguous_or_shell_style_profiles(tmp_path, content, me
 def test_catalog_unknown_profile_has_operator_facing_error():
     with pytest.raises(CatalogError, match="unknown model profile 'missing'"):
         ModelCatalog.empty().get("missing")
+
+
+def test_catalog_marks_port_zero_as_an_explicit_dynamic_port(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text("[models.dynamic]\nmodel = 'm'\nport = 0\n", encoding="utf-8")
+    profile = ModelCatalog.load(str(path)).get("dynamic")
+    assert profile.port == 0
+    assert profile.public()["dynamicPort"] is True
 
 
 def test_readiness_waits_for_engine_health_not_just_a_listening_process():

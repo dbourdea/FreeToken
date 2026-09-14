@@ -50,6 +50,11 @@ fields are owned by the supervisor and are part of its conflict and re-adoption
 identity. The model files and catalog remain local operational configuration,
 not repository content.
 
+Set `port = 0` to request a kernel-selected loopback port on every cold native
+activation. The daemon records the concrete assigned port and uses that same
+target for child identity, readiness, proxying, accounting, and re-adoption;
+an already resident dynamic profile keeps its port until it is unloaded.
+
 ## Native router API
 
 The routed inference surface is `POST /v1/chat/completions`,

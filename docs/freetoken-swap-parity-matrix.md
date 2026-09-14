@@ -16,7 +16,7 @@ Status labels:
 
 | Pinned llama-swap capability | Current FreeToken state | Required native parity evidence |
 | --- | --- | --- |
-| Model catalog and aliases | Native TOML catalog with validated model, port, args, readiness, unload, and upstream response timeouts | Documented YAML-to-TOML translation and atomic reload exist. Dynamic port allocation and native selector transforms remain missing. |
+| Model catalog and aliases | Native TOML catalog with validated model, port, args, readiness, unload, and upstream response timeouts. `port = 0` requests a concrete kernel-selected loopback port for each activation. | Deterministic tests cover dynamic-port residency stability and a fresh target after a swap; native selector transforms remain intentionally unsupported except safe `drop_fields`. |
 | Start, stop, switch, PID identity, re-adoption | Native and tested | Preserve as router substrate; exercise automatic-request ownership |
 | Readiness and diagnostic health | Native `/ready` plus diagnostic `/health` | Preserve exact HTTP behavior through the unified router |
 | Automatic OpenAI model-ID routing | Native single-engine coordinator with priority-aware admission and health-gated activation | `tests/daemon/test_router.py` covers cold activation, same-model concurrent leases, safe swap waiting, and unknown-model errors. Linux and GMKtek EVO-X2 evidence remains required. |

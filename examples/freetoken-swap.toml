@@ -2,7 +2,8 @@
 #
 # Migration: map each llama-swap models.<alias>.cmd to one native model path
 # plus argv tokens. Map checkEndpoint /ready to the built-in readiness gate.
-# Never paste shell fragments, ${PORT}, or command substitutions here.
+# Never paste shell fragments, ${PORT}, or command substitutions here. Set
+# `port = 0` for a kernel-selected loopback port per native activation.
 
 [router]
 # Inference routes require `Authorization: Bearer <key>` when this is nonempty.

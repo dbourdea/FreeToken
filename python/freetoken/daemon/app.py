@@ -29,7 +29,7 @@ from .catalog import CatalogError, ModelCatalog
 from .inference_proxy import RequestModelError, filter_request_body, open_upstream, request_model
 from .logring import LogRing
 from .readiness import wait_for_ready
-from .router import RoutingCoordinator, RoutingError
+from .router import RoutingCoordinator, RoutingError, allocate_loopback_port
 from .serve_manager import Conflict, SwitchLaunchError
 from .version import DAEMON_VERSION
 
@@ -208,6 +208,8 @@ def build_app(
         return await loop.run_in_executor(pool, functools.partial(fn, *args, **kwargs))
 
     def resolve_port(explicit: int | None) -> int:
+        if explicit == 0:
+            return allocate_loopback_port()
         if explicit is not None:
             return explicit
         st = manager.status()
