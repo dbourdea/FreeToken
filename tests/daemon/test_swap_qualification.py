@@ -200,10 +200,19 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
         "error": {"type": "engine_not_ready", "message": "private failure"},
         "recovery": {"launched": True},
     }).encode()
+    pending = iter((
+        {"receipts": [{"receiptId": "existing-receipt"}]},
+        {"receipts": [
+            {"receiptId": "existing-receipt"},
+            {"receiptId": "failed-switch-receipt"},
+        ]},
+    ))
 
     def request_json(url, body=None, **kwargs):
         if url.endswith("/router/status"):
             return b"{}", next(statuses)
+        if url.endswith("/accounting/pending"):
+            return b"{}", next(pending)
         assert url.endswith("/router/load") and body == {"name": "model-invalid"}
         raise native_router_qualifier.urllib.error.HTTPError(
             url, 503, "unavailable", {}, io.BytesIO(failure)
@@ -224,7 +233,8 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
     assert observation == {
         "failedProfile": "model-invalid", "restoredProfile": "model-a",
         "failureType": "engine_not_ready", "rollbackLaunched": True,
-        "activationFailureIncremented": True, "restoredCompletionPassed": True,
+        "activationFailureIncremented": True, "newAccountingReceiptCount": 1,
+        "restoredCompletionPassed": True,
         "passed": True,
     }
 

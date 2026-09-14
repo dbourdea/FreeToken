@@ -314,6 +314,14 @@ def reload_conflict_canary(base: str, catalog_path: Path, model_a: str, model_b:
 def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[bytes, bytes, dict]:
     """Require a failed disposable load to restore the prior resident engine."""
     _, before = request_json(base + "/router/status")
+    _, pending_before = request_json(base + "/accounting/pending")
+    receipts_before = pending_before.get("receipts")
+    if not isinstance(receipts_before, list):
+        raise RuntimeError("accounting outbox response has an invalid shape")
+    before_ids = {
+        receipt.get("receiptId") for receipt in receipts_before
+        if isinstance(receipt, dict) and isinstance(receipt.get("receiptId"), str)
+    }
     prior_failures = before.get("activationFailures")
     if (
         before.get("activeProfile") != restored_model
@@ -348,6 +356,17 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
         or after.get("activationFailures") != prior_failures + 1
     ):
         raise RuntimeError("failed replacement did not restore exact idle residency")
+    _, pending_after = request_json(base + "/accounting/pending")
+    receipts_after = pending_after.get("receipts")
+    if not isinstance(receipts_after, list):
+        raise RuntimeError("post-failure accounting outbox response has an invalid shape")
+    after_ids = {
+        receipt.get("receiptId") for receipt in receipts_after
+        if isinstance(receipt, dict) and isinstance(receipt.get("receiptId"), str)
+    }
+    new_receipts = after_ids - before_ids
+    if not new_receipts:
+        raise RuntimeError("failed switch produced no new durable accounting receipt")
     restored_raw, restored = canary(base, restored_model, direct=False)
     return failure_raw, restored_raw, {
         "failedProfile": model,
@@ -355,6 +374,7 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
         "failureType": error["type"],
         "rollbackLaunched": True,
         "activationFailureIncremented": True,
+        "newAccountingReceiptCount": len(new_receipts),
         "restoredCompletionPassed": restored.get("passed") is True,
         "passed": restored.get("passed") is True,
     }
