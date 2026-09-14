@@ -161,6 +161,32 @@ def test_native_router_benchmark_rejects_completed_stream_without_usage(native_r
     assert stream.closed
 
 
+def test_native_router_concurrent_canaries_require_same_residency(native_router_qualifier, monkeypatch):
+    snapshots = iter((
+        {"activeProfile": "model-a", "activations": 4, "activeRequests": 0},
+        {"activeProfile": "model-a", "activations": 4, "activeRequests": 0},
+    ))
+    monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (b"{}", next(snapshots)))
+
+    def fake_canary(base, model, *, direct):
+        assert base == "http://test" and model == "model-a" and direct is False
+        time.sleep(0.01)
+        return b"data: [DONE]\n\n", {"passed": True}
+
+    monkeypatch.setattr(native_router_qualifier, "canary", fake_canary)
+    rows, observation = native_router_qualifier.concurrent_canaries("http://test", "model-a", seconds=2)
+
+    assert len(rows) == 2
+    assert observation == {
+        "route": "native_router",
+        "model": "model-a",
+        "requests": 2,
+        "activationDelta": 0,
+        "activeRequestsAfter": 0,
+        "passed": True,
+    }
+
+
 def test_native_router_cancellation_canary_requires_idle_without_completion_credit(native_router_qualifier):
     state = {"active": 0, "cancellations": 0, "terminal": 0}
     cancelled = threading.Event()

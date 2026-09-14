@@ -107,6 +107,57 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     }
 
 
+def concurrent_canaries(base: str, model: str, *, seconds: float = 180) -> tuple[list[tuple[bytes, dict]], dict]:
+    """Run two same-profile streams and prove they did not trigger a model swap."""
+    _, before = request_json(base + "/router/status")
+    prior_activations = before.get("activations")
+    if before.get("activeProfile") != model or not isinstance(prior_activations, int):
+        raise RuntimeError("same-model concurrency requires an already active profile")
+    results: list[tuple[bytes, dict]] = []
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+    gate = threading.Barrier(3)
+
+    def run_one() -> None:
+        try:
+            gate.wait(timeout=seconds)
+            value = canary(base, model, direct=False)
+            with lock:
+                results.append(value)
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
+
+    workers = [threading.Thread(target=run_one, name=f"native-router-concurrent-{index}", daemon=True)
+               for index in range(2)]
+    for worker in workers:
+        worker.start()
+    gate.wait(timeout=seconds)
+    for worker in workers:
+        worker.join(seconds)
+    if any(worker.is_alive() for worker in workers):
+        raise TimeoutError("same-model concurrent streams did not finish")
+    if errors:
+        raise RuntimeError("same-model concurrent stream failed") from errors[0]
+    _, after = request_json(base + "/router/status")
+    if (
+        len(results) != 2
+        or not all(row.get("passed") is True for _, row in results)
+        or after.get("activeRequests") != 0
+        or after.get("activeProfile") != model
+        or after.get("activations") != prior_activations
+    ):
+        raise RuntimeError("same-model concurrency changed native routing residency")
+    return results, {
+        "route": "native_router",
+        "model": model,
+        "requests": 2,
+        "activationDelta": 0,
+        "activeRequestsAfter": 0,
+        "passed": True,
+    }
+
+
 def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[bytes, dict]:
     """Prove native router cancellation reaches idle without a normal completion credit.
 
@@ -335,6 +386,11 @@ def main() -> int:
             cancel_raw, cancellation = cancellation_canary(base, "model-a")
             (artifacts / "cancel-a.partial.sse").write_bytes(cancel_raw)
             result["cancellation"] = cancellation
+
+            concurrent_rows, concurrency = concurrent_canaries(base, "model-a")
+            for index, (concurrent_raw, _) in enumerate(concurrent_rows):
+                (artifacts / f"concurrent-a-{index}.sse").write_bytes(concurrent_raw)
+            result["concurrency"] = concurrency
             save()
 
             for label, alias, expected_delta in (
@@ -360,6 +416,7 @@ def main() -> int:
                 len(result["trials"]) == 4
                 and all(x["passed"] for x in result["trials"])
                 and result.get("cancellation", {}).get("passed") is True
+                and result.get("concurrency", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

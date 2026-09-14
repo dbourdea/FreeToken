@@ -65,9 +65,11 @@ then records first-byte time, final duration, completion tokens, and usage-deriv
 decode tokens/second at the client. Before the comparison sequence it also opens a
 long routed stream, explicitly cancels its opaque request ID, and fails unless the
 router returns to idle, increments cancellation telemetry, emits no normal terminal
-completion credit, and the retained private partial SSE lacks `[DONE]`. It stores the
-corresponding `/router/status` snapshot and Prometheus `/metrics` response for each
-routed comparison, and fails if activation counters do not prove the advertised
+completion credit, and the retained private partial SSE lacks `[DONE]`. It then runs
+two simultaneous same-alias streams and fails unless both complete with zero
+activation delta and one unchanged resident profile. It stores the corresponding
+`/router/status` snapshot and Prometheus `/metrics` response for each routed
+comparison, and fails if activation counters do not prove the advertised
 warm/cold/alternating state.
 The direct comparison retains its router-owned load receipt and activation
 snapshot privately as well.
