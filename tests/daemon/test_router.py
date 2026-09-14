@@ -539,6 +539,9 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         def do_POST(self):
             seen["path"] = self.path
             seen["body"] = self.rfile.read(int(self.headers["Content-Length"]))
+            seen["authorization"] = self.headers.get("Authorization")
+            seen["daemon_token"] = self.headers.get("X-FT-Token")
+            seen["correlation"] = self.headers.get("X-Correlation-ID")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("X-Engine", "loopback")
@@ -554,22 +557,37 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
     try:
         manager = Manager()
         port = server.server_address[1]
-        catalog_doc = ModelCatalog({"low": ModelProfile("low", "low.gguf", (), port=port)})
+        catalog_doc = ModelCatalog(
+            {"low": ModelProfile("low", "low.gguf", (), port=port)},
+            settings=RouterSettings(api_keys=("router-test-key",)),
+        )
         router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
         with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
             app = build_app(
                 manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
                 lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+                token="daemon-control-secret",
             )
             payload = b'{"model":"low","stream":true,"messages":[]}'
             response = TestClient(app).post(
                 "/v1/chat/completions", content=payload,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer router-test-key",
+                    "X-FT-Token": "daemon-control-secret",
+                    "X-Correlation-ID": "client-safe-id",
+                },
             )
         assert response.status_code == 200
         assert response.headers["x-engine"] == "loopback"
         assert response.content == b"data: {\"ok\":true}\n\ndata: [DONE]\n\n"
-        assert seen == {"path": "/v1/chat/completions", "body": payload}
+        assert seen == {
+            "path": "/v1/chat/completions",
+            "body": payload,
+            "authorization": None,
+            "daemon_token": None,
+            "correlation": "client-safe-id",
+        }
         assert router.status()["activeRequests"] == 0
         assert router.status()["terminalStreams"] == 1
         assert router.status()["lastTtftMs"] is not None
