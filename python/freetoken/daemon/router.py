@@ -238,8 +238,29 @@ class RoutingCoordinator:
                         "cannot remove the active profile until it is unloaded",
                         status_code=409,
                     ) from exc
-                if (replacement.model, replacement.port, replacement.args) != (
-                    current.model, current.port, current.args
+                current_group = self._catalog.group_for(self._active_name)
+                replacement_group = catalog.group_for(self._active_name)
+                current_ttl = (
+                    current.ttl_s if current.ttl_s is not None else self._catalog.settings.default_ttl_s
+                )
+                replacement_ttl = (
+                    replacement.ttl_s if replacement.ttl_s is not None else catalog.settings.default_ttl_s
+                )
+                current_unload_timeout = (
+                    current.unload_timeout_s
+                    if current.unload_timeout_s is not None
+                    else self._catalog.settings.unload_timeout_s
+                )
+                replacement_unload_timeout = (
+                    replacement.unload_timeout_s
+                    if replacement.unload_timeout_s is not None
+                    else catalog.settings.unload_timeout_s
+                )
+                if (
+                    replacement != current
+                    or replacement_group != current_group
+                    or replacement_ttl != current_ttl
+                    or replacement_unload_timeout != current_unload_timeout
                 ):
                     raise RoutingError(
                         "reload_conflict",
