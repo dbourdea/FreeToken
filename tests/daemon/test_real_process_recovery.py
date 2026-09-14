@@ -22,6 +22,7 @@ from freetoken.daemon.logring import LogRing
 from freetoken.daemon.pidfile import ServeStateStore
 from freetoken.daemon.proxy import ServeProbe
 from freetoken.daemon.readiness import wait_for_ready
+from freetoken.daemon.router import RoutingCoordinator
 from freetoken.daemon.serve_manager import PopenChild, ServeManager
 
 
@@ -178,6 +179,62 @@ def test_native_router_supervises_a_real_child_and_relays_sse(tmp_path):
         manager.stop()
         assert store.load() is None
         assert children[0].reaped.is_set()
+    finally:
+        for child in children:
+            try:
+                os.killpg(child.pid, 9)
+            except ProcessLookupError:
+                pass
+            if child.proc.poll() is None:
+                child.proc.wait(timeout=3)
+
+
+def test_native_router_uses_fresh_dynamic_ports_for_real_child_reactivation(tmp_path):
+    def free_port():
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            return reservation.getsockname()[1]
+
+    first_port, second_port = free_port(), free_port()
+    assert first_port != second_port
+    children = []
+
+    def spawn(model, actual_port, args):
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "-c", SERVER, model, str(actual_port), "no"],
+            start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        child = PopenChild(proc, None)
+        children.append(child)
+        return child
+
+    store = ServeStateStore(str(tmp_path / "serve.json"))
+    manager = ServeManager(LogRing(), store, spawn_fn=spawn, apply_oom=False,
+                           grace_s=0.2, reap_wait_s=3,
+                           read_stats=lambda p: json_get(p, "/v1/stats"))
+    probe = ServeProbe()
+    catalog = ModelCatalog({"good": ModelProfile("good", "good", (), port=0)})
+    ports = iter((first_port, second_port))
+    router = RoutingCoordinator(manager, catalog, probe, port_allocator=lambda: next(ports))
+    try:
+        with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(2) as proxy:
+            app = build_app(
+                manager=manager, ring=LogRing(), probe=probe, footprint_fn=lambda pid: {},
+                lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog, router=router,
+            )
+            client = TestClient(app)
+            first = client.post("/v1/chat/completions", json={"model": "good", "stream": True})
+            assert first.status_code == 200
+            assert manager.status()["port"] == first_port
+            assert router.evict_idle("good") is True
+            second = client.post("/v1/chat/completions", json={"model": "good", "stream": True})
+        assert second.status_code == 200
+        assert manager.status()["port"] == second_port
+        assert router.status()["activations"] == 2
+        assert len(children) == 2 and children[0].reaped.is_set()
+        manager.stop()
+        assert children[1].reaped.is_set() and store.load() is None
     finally:
         for child in children:
             try:
