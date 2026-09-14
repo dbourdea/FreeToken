@@ -832,6 +832,85 @@ def test_router_reload_refuses_active_scheduling_or_effective_lifecycle_changes(
     lease.release()
 
 
+def test_router_reload_cannot_race_atomic_profile_lookup_and_dynamic_port_binding():
+    entered = threading.Event()
+    release_status = threading.Event()
+
+    class BlockingStatusManager(Manager):
+        block_next_status = False
+
+        def status(self):
+            if self.block_next_status:
+                self.block_next_status = False
+                entered.set()
+                assert release_status.wait(2)
+            return super().status()
+
+    manager = BlockingStatusManager()
+    current = ModelCatalog({"low": ModelProfile("low", "low.gguf", (), port=0)})
+    router = RoutingCoordinator(
+        manager, current, object(), ready_fn=ready, port_allocator=lambda: 20101
+    )
+    manager.block_next_status = True
+    acquired = []
+    acquire_thread = threading.Thread(target=lambda: acquired.append(router.acquire("low")))
+    acquire_thread.start()
+    assert entered.wait(1)
+
+    replacement = ModelCatalog({"low": ModelProfile("low", "changed.gguf", (), port=0)})
+    reload_result = {}
+
+    def reload_catalog():
+        try:
+            router.replace_catalog(replacement)
+        except RoutingError as exc:
+            reload_result["error"] = exc
+
+    reload_thread = threading.Thread(target=reload_catalog)
+    reload_thread.start()
+    time.sleep(0.05)
+    assert reload_thread.is_alive()
+
+    release_status.set()
+    acquire_thread.join(2)
+    reload_thread.join(2)
+    assert not acquire_thread.is_alive() and not reload_thread.is_alive()
+    assert reload_result["error"].code == "reload_conflict"
+    assert router.catalog is current
+    assert manager.model == "low.gguf"
+    acquired.pop().release()
+
+
+def test_router_reload_cannot_redefine_a_profile_already_queued_for_admission():
+    manager = Manager()
+    current = catalog()
+    router = RoutingCoordinator(manager, current, object(), ready_fn=ready)
+    active = router.acquire("low")
+    queued_lease = []
+    queued = threading.Thread(target=lambda: queued_lease.append(router.acquire("high")))
+    queued.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        time.sleep(0.01)
+    assert router.status()["queuedRequests"] == 1
+
+    replacement = ModelCatalog({
+        "low": ModelProfile("low", "low.gguf", ()),
+        "high": ModelProfile("high", "changed.gguf", (), priority=10),
+    })
+    with pytest.raises(RoutingError, match="admission or lifecycle") as exc:
+        router.replace_catalog(replacement)
+    assert exc.value.code == "reload_conflict"
+    assert router.catalog is current
+
+    active.release()
+    queued.join(2)
+    assert not queued.is_alive()
+    assert manager.model == "high.gguf"
+    queued_lease.pop().release()
+
+
 def test_persistent_group_protects_the_single_resident_slot_until_unloaded():
     manager = Manager()
     catalog_doc = ModelCatalog(

@@ -134,17 +134,17 @@ class RoutingCoordinator:
 
     def acquire(self, name: str, cancellation: threading.Event | None = None) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
-        try:
-            profile = self._catalog.get(name)
-        except CatalogError as exc:
-            raise RoutingError("unknown_model", str(exc), status_code=404) from exc
-        port = self._port_for(profile)
         queued_at = time.monotonic()
         with self._cond:
             if self._shutdown_requested:
                 raise RoutingError(
                     "router_shutting_down", "router shutdown is in progress", status_code=503
                 )
+            try:
+                profile = self._catalog.get(name)
+            except CatalogError as exc:
+                raise RoutingError("unknown_model", str(exc), status_code=404) from exc
+            port = self._port_for(profile)
             if cancellation is not None and cancellation.is_set():
                 raise RoutingError(
                     "request_cancelled", "request cancelled before admission", status_code=409
@@ -353,6 +353,17 @@ class RoutingCoordinator:
         changing the ownership contract of an existing engine.
         """
         with self._cond:
+            if (
+                self._shutdown_requested
+                or self._switching
+                or self._pending
+                or self._manual_lifecycle_tokens
+            ):
+                raise RoutingError(
+                    "reload_conflict",
+                    "cannot reload while admission or lifecycle work is in progress",
+                    status_code=409,
+                )
             if self._active_name is not None:
                 try:
                     replacement = catalog.get(self._active_name)

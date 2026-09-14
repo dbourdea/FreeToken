@@ -25,6 +25,9 @@ a successful stop requests daemon exit even if the initiating client disconnects
 OS- and lifespan-triggered exit also quiesces this coordinator. The default
 detach policy drains ownership and leaves the exact persisted child available
 for re-adoption; `--stop-serve-on-exit` drains and permanently stops it instead.
+Catalog reload binds profile lookup, priority ticketing, and dynamic-port
+selection atomically. Reload is rejected while admission or lifecycle work is
+pending, so an activating or queued request cannot change definitions mid-flight.
 
 The read-only, pinned llama-swap source remains a compatibility reference and
 an optional separate deployment mode, not a runtime dependency. That direct
