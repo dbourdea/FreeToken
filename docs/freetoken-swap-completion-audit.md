@@ -35,15 +35,16 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 307 daemon
+- Local deterministic verification on the current Windows checkout: 309 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `2c90c605b01eff10eb4abe926c3775a8c8c9ec08` (Actions run `34925951808`)
-  reported 314 passed with zero failures, errors, or skips. This includes the
+  `07abf686f3bbd000d006d2f05188dd77daa74b04` (Actions run `34926703394`)
+  reported 316 passed with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
-  listing coverage, ordered upstream-model/request-filter and generated-alias coverage, and
+  listing coverage, model display/metadata collision precedence, ordered
+  upstream-model/request-filter and generated-alias coverage, and
   pin/warm selector and runtime routing-profile parsing, routing, listing,
   metadata, management-isolation, reload-reset, safe readiness/proxy-target,
   and qualifier gates.
