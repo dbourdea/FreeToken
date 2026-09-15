@@ -1,27 +1,52 @@
+# What: set name to FreeToken swap daemon; why: GitHub displays this label in checks and operators use it to identify the daemon lane or step.
 name: FreeToken swap daemon
 
+# What: set on to its nested mapping; why: GitHub evaluates these events to decide whether the daemon lane is eligible to run.
 on:
+  # What: set pull request to its nested mapping; why: changes targeting the integration branch must pass the daemon contract before merge.
   pull_request:
+    # What: set branches to [main]; why: only pull requests aimed at main receive this automatic validation.
     branches: [main]
+  # What: set workflow dispatch to its nested mapping; why: maintainers can rerun the public lane without altering the candidate commit.
   workflow_dispatch:
 
+# What: set permissions to its nested mapping; why: the workflow token receives only the capabilities declared in this mapping.
 permissions:
+  # What: set contents to read; why: checkout can read repository content while pull-request code receives no write token.
   contents: read
 
+# What: configure concurrency as a nested section; why: GitHub consumes concurrency to preserve this lane's repository gate, ordered execution, or bounded result reporting.
 concurrency:
+  # What: set group to freetoken-swap-daemon-${{ github.ref }}; why: runs for different refs do not cancel one another, while stale runs for one ref share a key.
   group: freetoken-swap-daemon-${{ github.ref }}
+  # What: set cancel in progress to true; why: a newer commit supersedes an older run for the same workflow and ref.
   cancel-in-progress: true
 
+# What: set jobs to its nested mapping; why: GitHub treats each nested entry as an independently gated validation job.
 jobs:
+  # What: set daemon linux to its nested mapping; why: this job isolates the torch-free daemon contract on the hosted Linux process model.
   daemon-linux:
     # This is a hosted, secret-free smoke lane. Never route pull-request code to
     # the repository's self-hosted engine builder or any protected runtime.
+    # What: set if to github.repository == 'dbourdea/FreeToken'; why: fork or renamed-repository execution is rejected before hosted work begins.
     if: github.repository == 'dbourdea/FreeToken'
+    # What: set runs on to ubuntu-latest; why: the daemon suite exercises Linux process behavior on an isolated hosted runner.
     runs-on: ubuntu-latest
+    # What: set timeout minutes to 10; why: a stalled install or child-process test cannot consume the runner beyond the bounded window.
     timeout-minutes: 10
+    # What: set steps to its nested mapping; why: the runner preserves checkout, dependency installation, testing, reporting, and final gating in this order.
     steps:
+      # What: set uses to actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd; why: the immutable action revision prevents an upstream tag change from altering checkout behavior.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      # What: set name to Install torch-free daemon test dependencies; why: GitHub displays this label in checks and operators use it to identify the daemon lane or step.
       - name: Install torch-free daemon test dependencies
+        # What: set run to |; why: the runner executes this exact command or block scalar as the step's behavior.
+        # What: preserve the exact python m pip install disable pip version check dependency-install command; why: the hosted lane executes this byte-preserved command to install the torch-free packages required by the daemon suite.
+        # What: add pytest's constraint to the shared pip command; why: the hosted lane needs the supported test runner without unrelated production stacks.
+        # What: add FastAPI's constraint to the shared pip command; why: daemon API tests construct the control and routing application.
+        # What: add HTTPX's constraint to the shared pip command; why: the test client exercises in-process HTTP routes and streaming behavior.
+        # What: add Pydantic's constraint to the shared pip command; why: FastAPI request and response models require the supported validation layer.
+        # What: add Uvicorn's constraint to the shared pip command; why: daemon startup imports the ASGI server without requiring GPU packages.
         run: |
           python -m pip install --disable-pip-version-check \
             'pytest>=8,<9' \
@@ -29,17 +54,75 @@ jobs:
             'httpx>=0.27,<1' \
             'pydantic>=2.9,<3' \
             'uvicorn>=0.30,<1'
+      # What: set name to Run daemon suite, including disposable Linux child gates; why: GitHub displays this label in checks and operators use it to identify the daemon lane or step.
       - name: Run daemon suite, including disposable Linux child gates
+        # What: set id to daemon-tests; why: later reporting and gate expressions address this step outcome through the stable identifier.
         id: daemon-tests
+        # What: set continue on error to true; why: the reporting step can inspect JUnit output before the final gate restores failure status.
         continue-on-error: true
+        # What: set env to its nested mapping; why: the step receives only the report path and prior-step outcome inputs needed by its command.
         env:
+          # What: add the repository's python directory to pytest imports; why: the daemon suite loads freetoken directly without installing torch-heavy runtime dependencies.
           PYTHONPATH: python
+        # What: set run to python -m pytest tests/daemon -q --junitxml="$RUNNER_TEMP/daemon.xml"; why: the runner executes this exact command or block scalar as the step's behavior.
         run: python -m pytest tests/daemon -q --junitxml="$RUNNER_TEMP/daemon.xml"
+      # What: set name to Report bounded test result; why: GitHub displays this label in checks and operators use it to identify the daemon lane or step.
       - name: Report bounded test result
+        # What: run the reporting step regardless of earlier outcomes; why: JUnit notices and errors remain visible even when the daemon test step failed or was cancelled.
         if: always()
+        # What: set env to its nested mapping; why: the step receives only the report path and prior-step outcome inputs needed by its command.
         env:
+          # What: preserve the exact report runner temp daemon xml reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
           REPORT: ${{ runner.temp }}/daemon.xml
+          # What: preserve the exact outcome steps daemon tests outcome reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
           OUTCOME: ${{ steps.daemon-tests.outcome }}
+        # What: set run to |; why: the runner executes this exact command or block scalar as the step's behavior.
+        # What: start the embedded Python reporter; why: the shell step needs a bounded script to parse JUnit XML and restore the test outcome.
+        # What: import os inside the inline reporter; why: the reporter directly uses os to read environment state, exit status, or JUnit XML.
+        # What: import sys inside the inline reporter; why: the reporter directly uses sys to read environment state, exit status, or JUnit XML.
+        # What: import xml.etree.ElementTree inside the inline reporter; why: the reporter directly uses xml etree element tree to read environment state, exit status, or JUnit XML.
+        # What: compute reporter state root from et parse os environ report getroot; why: the later JUnit summary or failure gate reads root to determine its annotation and exit behavior.
+        # What: compute reporter state suites from root if root tag testsuite else root findall; why: the later JUnit summary or failure gate reads suites to determine its annotation and exit behavior.
+        # What: start the JUnit outcome-count mapping; why: the reporter aggregates tests, failures, errors, and skips across every testsuite node.
+        # What: sum one JUnit outcome attribute across suites; why: multi-suite reports need a single count for the workflow notice and failure diagnosis.
+        # What: enumerate the four JUnit outcome counters; why: the summary reports total tests and distinguishes failed, errored, and skipped cases.
+        # What: finish the JUnit count-comprehension; why: all four counters must be aggregated before the workflow emits its summary notice.
+        # What: emit the print workflow annotation; why: GitHub surfaces this notice or error to identify the bounded daemon result without exposing raw private artifacts.
+        # What: compute reporter state notice title from daemon linux suite; why: the later JUnit summary or failure gate reads notice title to determine its annotation and exit behavior.
+        # What: compute reporter state join f key from value for key value in counts items; why: the later JUnit summary or failure gate reads join f key to determine its annotation and exit behavior.
+        # What: finish the summary formatting expression; why: the notice must include every computed JUnit counter in one readable message.
+        # What: compute reporter state failures from the JUnit expression delimiter; why: the later JUnit summary or failure gate reads failures to determine its annotation and exit behavior.
+        # What: iterate for case in root iter testcase in the reporter; why: the inline reporter inspects every bounded suite, testcase, or escaped annotation component before deciding the result.
+        # What: compute reporter state node from case find failure; why: the later JUnit summary or failure gate reads node to determine its annotation and exit behavior.
+        # What: test whether the case lacks a failure node; why: the reporter then falls back to an error node so both JUnit failure categories are covered.
+        # What: compute reporter state node from case find error; why: the later JUnit summary or failure gate reads node to determine its annotation and exit behavior.
+        # What: test whether the case lacks both failure and error nodes; why: successful and skipped cases do not need GitHub error annotations.
+        # What: skip test cases without failure or error nodes; why: successful and skipped cases do not need GitHub error annotations.
+        # What: compute reporter state test id from f case get classname case get name strip; why: the later JUnit summary or failure gate reads test id to determine its annotation and exit behavior.
+        # What: compute reporter state message from node get message or test failed splitlines; why: the later JUnit summary or failure gate reads message to determine its annotation and exit behavior.
+        # What: compute reporter state detail from next; why: the later JUnit summary or failure gate reads detail to determine its annotation and exit behavior.
+        # What: start selecting the first nonempty failure-detail line; why: annotations need a concise diagnostic instead of the entire traceback payload.
+        # What: normalize each candidate diagnostic line before selection; why: whitespace-only lines must not become the visible failure detail.
+        # What: iterate for line in node text or splitlines in the reporter; why: the inline reporter inspects every bounded suite, testcase, or escaped annotation component before deciding the result.
+        # What: gate the reporter on if line lstrip startswith; why: the inline reporter emits errors or exits only when this parsed JUnit or step-outcome predicate requires it.
+        # What: preserve the exact group boundary around if line lstrip startswith and the JUnit expression delimiter reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: preserve the exact group boundary around the JUnit expression delimiter and the JUnit expression delimiter reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: preserve the exact group boundary around the JUnit expression delimiter and if detail reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: gate the reporter on if detail; why: the inline reporter emits errors or exits only when this parsed JUnit or step-outcome predicate requires it.
+        # What: compute reporter state message from f message detail; why: the later JUnit summary or failure gate reads message to determine its annotation and exit behavior.
+        # What: iterate for old new in r d in the reporter; why: the inline reporter inspects every bounded suite, testcase, or escaped annotation component before deciding the result.
+        # What: compute reporter state message from message replace old new; why: the later JUnit summary or failure gate reads message to determine its annotation and exit behavior.
+        # What: preserve the exact failures append test id message reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: gate the reporter on if os environ outcome success; why: the inline reporter emits errors or exits only when this parsed JUnit or step-outcome predicate requires it.
+        # What: gate the reporter on if not failures; why: the inline reporter emits errors or exits only when this parsed JUnit or step-outcome predicate requires it.
+        # What: emit the print workflow annotation; why: GitHub surfaces this notice or error to identify the bounded daemon result without exposing raw private artifacts.
+        # What: compute reporter state error title from daemon linux suite; why: the later JUnit summary or failure gate reads error title to determine its annotation and exit behavior.
+        # What: preserve the exact pytest failed without a junit failure reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: preserve the exact group boundary around pytest failed without a junit failure and for test id message in failures reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
+        # What: iterate for test id message in failures in the reporter; why: the inline reporter inspects every bounded suite, testcase, or escaped annotation component before deciding the result.
+        # What: emit the print f error title test id message workflow annotation; why: GitHub surfaces this notice or error to identify the bounded daemon result without exposing raw private artifacts.
+        # What: exit the reporter with failure status; why: the workflow must remain red after reporting an unsuccessful daemon test step.
+        # What: preserve the exact py reporter fragment; why: the inline script consumes this byte-preserved fragment as part of its JUnit parse, annotation, or final failure decision.
         run: |
           python - <<'PY'
           import os

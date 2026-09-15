@@ -20,7 +20,9 @@ DAEMON_MODULES = [
     "freetoken.daemon",
     "freetoken.daemon.version",
     "freetoken.daemon.accounting",
+    # What: arrange the freetoken daemon catalog portion of daemon modules; why: the daemon import safety scenario uses this clause to evaluate daemon modules as one grouped value.
     "freetoken.daemon.catalog",
+    # What: arrange the freetoken daemon readiness portion of daemon modules; why: the daemon import safety scenario uses this clause to evaluate daemon modules as one grouped value.
     "freetoken.daemon.readiness",
     "freetoken.daemon.logfmt",
     "freetoken.daemon.logring",

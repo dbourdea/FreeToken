@@ -63,14 +63,22 @@ class ServeProbe:
     def health(self, port: int) -> dict:
         return self._cached("health", "/health", port)
 
+    # What: define an uncached health probe for the active engine port; why: readiness checks must bypass a replaced generation's cached response before accepting the new process.
     def fresh_health(self, port: int) -> dict:
         """Read this generation, never a cached response from a replaced engine."""
+        # What: document read this generation never a cached in the fresh_health docstring; why: introspection and maintainers read this exact docstring fragment to understand fresh health behavior without executing it.
+        # What: return fetch and port and health from fresh_health; why: fresh_health exposes fetch and port and health so its caller can continue with the function\'s computed outcome.
         return self._fetch("/health", port)
 
+    # What: define fresh_readiness around the active port and probe path; why: callers route health probes through fresh_health and fetch other readiness paths directly, preserving generation-local evidence.
     def fresh_readiness(self, port: int, path: str) -> dict:
         """Probe a validated profile path without reusing prior-generation state."""
+        # What: document probe a validated profile path without in the fresh_readiness docstring; why: introspection and maintainers read this exact docstring fragment to understand fresh readiness behavior without executing it.
+        # What: gate on path before fresh health and port; why: fresh_readiness admits fresh health and port only for this predicate and excludes the opposite state.
         if path == "/health":
+            # What: return fresh health and port from fresh_readiness; why: fresh_readiness exposes fresh health and port so its caller can continue with the function\'s computed outcome.
             return self.fresh_health(port)
+        # What: return fetch and path and port from fresh_readiness; why: fresh_readiness exposes fetch and path and port so its caller can continue with the function\'s computed outcome.
         return self._fetch(path, port)
 
     def stats(self, port: int) -> dict:
@@ -124,11 +132,15 @@ class ServeProbe:
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
+        # What: establish the handler boundary for the protected operation; why: ServeProbe._urlopen routes failures to unicode decode error and jsondecode error and json while preserving cleanup and success flow.
         try:
+            # What: return loads and json and decode and raw and utf 8 from _urlopen; why: _urlopen exposes loads and json and decode and raw and utf 8 so its caller can continue with the function\'s computed outcome.
             return json.loads(raw.decode("utf-8"))
+        # What: handle unicode decode error and jsondecode error and json by return; why: ServeProbe._urlopen converts that failure into this concrete recovery, response, or cleanup behavior.
         except (UnicodeDecodeError, json.JSONDecodeError):
             # A custom readiness endpoint follows HTTP-status semantics. Do
             # not retain or surface an arbitrary successful response body.
+            # What: return no value from _urlopen; why: _urlopen returns no value to callers that depend on its completed result.
             return {}
 
     @staticmethod

@@ -5,60 +5,99 @@
 # Never paste shell fragments, ${PORT}, or command substitutions here. Set
 # `port = 0` for a kernel-selected loopback port per native activation.
 
+# What: open the router TOML table; why: following settings belong to the router configuration namespace.
 [router]
 # Inference routes accept Bearer, a Basic-auth password, or `X-Api-Key` when
 # this is nonempty. Router credentials are never forwarded to the engine.
+# What: show an illustrative router API-key list; why: operators must replace the placeholder before clients authenticate to control and inference routes.
 api_keys = ["replace-with-a-secret"]
+# What: set an illustrative 300-second default idle lifetime; why: operators balance model residency against the latency and memory cost of later reloads.
 default_ttl_s = 300
+# What: set an illustrative 30-second unload deadline; why: the router needs a finite bound for stopping an engine before declaring cleanup failure.
 unload_timeout_s = 30
+# What: set an illustrative 900-second upstream request deadline; why: long generations may need time while the finite limit prevents requests from hanging forever.
 upstream_timeout_s = 900
 # Safe static suffixes that return 409 rather than cold-loading through
 # /upstream/{model-id}/...; set [] to disable. No regex is accepted.
+# What: list static suffixes that must not cold-load a model; why: asset-like requests fail with 409 instead of spending memory and startup time on accidental activation.
 upstream_no_activation_suffixes = [".js", ".json", ".css", ".png", ".gif", ".jpg", ".jpeg", ".ico", ".txt"]
 # Body-free activity rows are always bounded. Captures are sensitive, in-memory,
 # credential-redacted, and opt-in; zero disables request/response retention.
+# What: retain at most 1000 body-free activity rows; why: the bounded history supports diagnosis without unbounded memory growth.
 activity_max_entries = 1000
+# What: disable sensitive body capture by setting its budget to zero; why: operators must opt in explicitly before request or response bodies are retained in memory.
 capture_buffer_mb = 0
 # Session grouping stores only a stable SHA-256 label, never the raw value.
+# What: name headers used to derive a hashed session label; why: activity grouping works without storing the raw potentially sensitive header values.
 activity_session_headers = ["X-Session-ID", "X-Litellm-Session-Id"]
 # Retain at most one hour of owned-process RAM/VRAM samples in memory.
+# What: leave owned-process performance sampling enabled; why: operators can observe RAM and VRAM while retaining the option to disable sampler overhead.
 performance_disabled = false
+# What: sample performance every five seconds; why: the interval balances trend visibility against monitoring overhead.
 performance_every_s = 5
+# What: select first-in-first-out request scheduling; why: the example favors predictable arrival order over alternate prioritization policies.
 scheduler = "fifo"
 # Zero disables the global cap. Every profile still has a default cap of 10.
+# What: cap concurrent routed requests at 32; why: the finite limit protects host capacity while operators tune it for their workload.
 global_concurrency_limit = 32
 # Include alternate IDs in /v1/models. They remain routable when this is false.
+# What: include aliases in the public model listing; why: clients can discover alternate IDs, with the tradeoff of a larger advertised catalog.
 include_aliases_in_list = true
 
+# What: open the router.groups.interactive TOML table; why: following settings belong to the router.groups.interactive configuration namespace.
 [router.groups.interactive]
+# What: assign coding and chat profiles to the interactive group; why: the group policy coordinates residency and exclusivity across both profiles.
 members = ["coding", "chat"]
+# What: enable swaps within the interactive group; why: activating one member may replace another instead of requiring simultaneous residency.
 swap = true
+# What: make the interactive group mutually exclusive; why: only one member occupies the constrained group at a time.
 exclusive = true
+# What: disable persistent residency for this group; why: idle members may unload so memory can be reclaimed.
 persistent = false
 
+# What: open the models.coding TOML table; why: following settings belong to the models.coding configuration namespace.
 [models.coding]
+# What: show an illustrative local GGUF model path; why: operators replace the placeholder with the model file available on their host.
 model = "/models/coding.gguf"
 # Slash-namespaced IDs are valid; every segment uses letters, digits, `.`, `_`, or `-`.
+# What: show alternate routed identifiers for the coding profile; why: compatible clients can select the same model through either approved alias.
 aliases = ["coding-compatible", "local/coding-compatible"]
+# What: show an illustrative engine port; why: operators must avoid collisions or use the supported dynamic-port policy for their deployment.
 port = 1919
+# What: show illustrative ft serve arguments; why: the served name and context limit must match client identity and available memory.
 args = ["--served-model-name", "coding", "--max-seq-len-override", "32768"]
+# What: allow up to 300 seconds for model readiness; why: large models may need startup time while the finite limit keeps activation bounded.
 ready_timeout_s = 300
+# What: set this profile idle lifetime to zero; why: the example unloads immediately after leases end rather than retaining model memory.
 ttl_s = 0
+# What: set the profile scheduling priority; why: operators tune this value to control which queued activation wins contention.
 priority = 10
+# What: set the profile request concurrency cap; why: the cap protects that model from more simultaneous work than the host can sustain.
 concurrency_limit = 2
+# What: assign the profile to the interactive routing group; why: members share the group swap and exclusivity policy.
 group = "interactive"
 # Optional narrow compatibility filter. It removes only named top-level JSON
 # fields from requests for this profile. `model` can never be removed.
+# What: drop the optional metadata request field; why: the narrow compatibility filter removes only the named unsupported field.
 drop_fields = ["metadata"]
 
+# What: open the models.chat TOML table; why: following settings belong to the models.chat configuration namespace.
 [models.chat]
+# What: show an illustrative local GGUF model path; why: operators replace the placeholder with the model file available on their host.
 model = "/models/chat.gguf"
 # Hidden profiles remain routable and manageable but are omitted from /v1/models,
 # along with all of their aliases.
+# What: hide the chat profile from model listings; why: the profile remains directly routable while discovery omits it and its aliases.
 unlisted = true
+# What: show an illustrative engine port; why: operators must avoid collisions or use the supported dynamic-port policy for their deployment.
 port = 1919
+# What: show illustrative ft serve arguments; why: the served name and context limit must match client identity and available memory.
 args = ["--served-model-name", "chat", "--max-seq-len-override", "16384"]
+# What: allow up to 300 seconds for model readiness; why: large models may need startup time while the finite limit keeps activation bounded.
 ready_timeout_s = 300
+# What: set the profile scheduling priority; why: operators tune this value to control which queued activation wins contention.
 priority = 0
+# What: set the profile request concurrency cap; why: the cap protects that model from more simultaneous work than the host can sustain.
 concurrency_limit = 4
+# What: assign the profile to the interactive routing group; why: members share the group swap and exclusivity policy.
 group = "interactive"

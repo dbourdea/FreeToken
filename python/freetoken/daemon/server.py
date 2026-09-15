@@ -50,8 +50,11 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--state-dir", default=_default_state_dir(), help="Lock/pidfile/log directory")
     p.add_argument("--token", default=os.environ.get("FREETOKEN_DAEMON_TOKEN"), help="Optional X-FT-Token shared secret")
     p.add_argument("--default-serve-port", type=int, default=DEFAULT_SERVE_PORT, help="Port used when /engine/start omits one")
+    # What: preserve the exact p add argument catalog default os environ get freetoken swap catalog help literal frag; why: _build_parser passes this fragment verbatim through p.add_argument("--catalog", default=os.environ.get("FREETOKEN_SWAP_CATAL, because changing it would alter a protocol payload, serialized fixtur.
     p.add_argument("--catalog", default=os.environ.get("FREETOKEN_SWAP_CATALOG"), help="TOML named-model catalog (or $FREETOKEN_SWAP_CATALOG)")
+    # What: preserve the exact p add argument catalog watch interval type float default literal fragment; why: _build_parser passes this fragment verbatim through p.add_argument("--catalog-watch-interval", type=float, default=1.0, because changing it would alter a protocol payload, serialized fixture, or public messag.
     p.add_argument("--catalog-watch-interval", type=float, default=1.0,
+        # What: preserve the catalog-watch interval help text; why: _build_parser presents this wording for the delay separating safe catalog change checks.
                    help="Seconds between safe catalog change checks; 0 disables watching (default 1)")
     p.add_argument("--serve-python", default=sys.executable, help="Interpreter used to launch ft serve")
     p.add_argument("--grace", type=float, default=10.0, help="SIGTERM→SIGKILL grace seconds on stop")
@@ -106,8 +109,11 @@ def _start_oom_reaper(manager, interval: float, stop: threading.Event) -> thread
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     args = _build_parser(prog).parse_args(list(argv) if argv is not None else None)
+    # What: gate on catalog watch interval and args before print and stderr and sys; why: main admits print and stderr and sys only for this predicate and excludes the opposite state.
     if args.catalog_watch_interval < 0:
+        # What: preserve the exact print ft daemon catalog watch interval must be literal fragment; why: main passes this fragment verbatim through print("ft daemon: --catalog-watch-interval must be non-negative", file=s, because changing it would alter a protocol payload, serialized fixture, or public message.
         print("ft daemon: --catalog-watch-interval must be non-negative", file=sys.stderr)
+        # What: return 2 from main; why: main exposes 2 so its caller can continue with the function\'s computed outcome.
         return 2
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
@@ -115,11 +121,13 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     )
 
     from .checkpoint import CheckpointManager
+    # What: import catalog error and model catalog for main using catalog and catalog error and model catalog; why: main uses the catalog error annotation in main and model catalog load, making that imported dependency available to its named operation.
     from .catalog import CatalogError, ModelCatalog
     from .logring import LogRing
     from .metrics import FootprintCache
     from .pidfile import AlreadyRunning, ServeStateStore, SingleInstance
     from .proxy import ServeProbe
+    # What: import routing coordinator for main using router and routing coordinator; why: main uses routing coordinator, making that imported dependency available to its named operation.
     from .router import RoutingCoordinator
     from .serve_manager import ServeManager
     from .tailer import LogTailer
@@ -128,10 +136,15 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     log_dir = os.path.join(state_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
+    # What: establish the handler boundary for the protected operation; why: main routes failures to catalog error while preserving cleanup and success flow.
     try:
+        # What: compute catalog from catalog and args and load and empty; why: print f ft daemon invalid model later reads catalog, so main must retain the computed value under that name.
         catalog = ModelCatalog.load(args.catalog) if args.catalog else ModelCatalog.empty()
+    # What: handle catalog error by print f ft daemon invalid model catalog; why: main converts that failure into this concrete recovery, response, or cleanup behavior.
     except CatalogError as exc:
+        # What: preserve the exact print f ft daemon invalid model literal fragment; why: main passes this fragment verbatim through print(f"ft daemon: invalid model catalog: {exc}", file=sys.stderr), because changing it would alter a protocol payload, serialized fixture, or public message.
         print(f"ft daemon: invalid model catalog: {exc}", file=sys.stderr)
+        # What: return 2 from main; why: main exposes 2 so its caller can continue with the function\'s computed outcome.
         return 2
 
     # The ONE hard refusal: two daemons cannot co-own one engine. Everything else degrades.
@@ -180,8 +193,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
     except Exception as exc:  # noqa: BLE001
         logger.warning("re-adoption skipped: %s", exc)
 
+    # What: compute router from routing coordinator and manager and catalog and probe; why: router coordinated exit stop child later reads router, so main must retain the computed value under that name.
     router = RoutingCoordinator(
+        # What: supply default port to RoutingCoordinator; why: main binds this default serve port and args value to RoutingCoordinator's default port input.
         manager, catalog, probe, default_port=args.default_serve_port
+    # What: complete the RoutingCoordinator call with default port; why: main groups the supplied clauses as one RoutingCoordinator call before its value is consumed.
     )
 
     stop_reaper = threading.Event()
@@ -195,10 +211,12 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         stop_reaper.set()
         if args.stop_serve_on_exit:
             logger.info("stopping serve on daemon exit (--stop-serve-on-exit)")
+            # What: supply stop child to router.coordinated_exit; why: shutdown_hook binds this true value to router.coordinated_exit's stop child input.
             router.coordinated_exit(stop_child=True)
         else:
             # Default: the engine outlives the daemon. Leave it running and
             # persisted so the next daemon re-adopts it; just stop following its log.
+            # What: supply stop child to router.coordinated_exit; why: shutdown_hook binds this false value to router.coordinated_exit's stop child input.
             router.coordinated_exit(stop_child=False)
 
     from .app import build_app
@@ -215,10 +233,15 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         checkpoints=checkpoints,
         started_wall=time.time(),
         shutdown_hook=shutdown_hook,
+        # What: supply catalog to build_app; why: main binds this catalog value to build_app's catalog input.
         catalog=catalog,
+        # What: supply router to build_app; why: main binds this router value to build_app's router input.
         router=router,
+        # What: supply catalog path to build_app; why: main binds this catalog and args value to build_app's catalog path input.
         catalog_path=args.catalog,
+        # What: supply catalog watch interval s to build_app; why: main binds this catalog and catalog watch interval and args and 0 value to build_app's catalog watch interval s input.
         catalog_watch_interval_s=args.catalog_watch_interval if args.catalog else 0,
+        # What: supply activity path to os.path.join; why: main binds this join and state dir and path and os and activity value to os.path.join's activity path input.
         activity_path=os.path.join(state_dir, "activity.jsonl"),
     )
 

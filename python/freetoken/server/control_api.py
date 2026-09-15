@@ -58,13 +58,20 @@ def register_control_routes(
     async def health():
         return build_health(get_state(), app.version)
 
+    # What: register GET /ready on the application router; why: clients reach ready's handler only through this method-and-path binding.
     @app.get("/ready")
+    # What: define ready around the current object state; why: the registered API client call ready for ready and rely on this exact input and result contract.
     async def ready():
         """HTTP readiness for supervisors that cannot inspect health JSON."""
+        # What: document http readiness for supervisors that cannot in the ready docstring; why: introspection and maintainers read this exact docstring fragment to understand ready behavior without executing it.
+        # What: import jsonresponse for ready using fastapi and responses and jsonresponse; why: ready uses jsonresponse, making that imported dependency available to its named operation.
         from fastapi.responses import JSONResponse
 
+        # What: compute doc from build health and version and get state and app; why: accepting doc get status ok and doc get later reads doc, so ready must retain the computed value under that name.
         doc = build_health(get_state(), app.version)
+        # What: compute accepting from get and doc and ok and serving and status; why: return jsonresponse status code if accepting else later reads accepting, so ready must retain the computed value under that name.
         accepting = doc.get("status") == "ok" and doc.get("maintenance") == "serving"
+        # What: return HTTP 200 when accepting and 503 otherwise; why: supervisors use this status and ready boolean to decide whether the daemon control plane may receive traffic.
         return JSONResponse(status_code=200 if accepting else 503, content=doc)
 
     from . import request_ring

@@ -1,23 +1,43 @@
 # Integration template, not a claim that these placeholder models are qualified.
 # Use a pinned llama-swap build and a FreeToken build containing GET /ready.
 # Do not also manage these processes with ft daemon.
+# What: set health check timeout to 300; why: the example permits slow model startup while still bounding a failed readiness probe.
 healthCheckTimeout: 300
+# What: set global ttl to 0; why: the example disables an implicit global eviction policy so per-model TTL choices remain visible.
 globalTTL: 0
+# What: set unload timeout to 30; why: the example allows bounded graceful shutdown before an operator chooses a stricter limit.
 unloadTimeout: 30
+# What: show the illustrative models value; why: operators adapt this models choice to their model, memory budget, port policy, and startup latency rather than treating it as universal.
 models:
+  # What: show the illustrative model a value; why: operators adapt this model a choice to their model, memory budget, port policy, and startup latency rather than treating it as universal.
   model-a:
+    # What: show the illustrative cmd value >-; why: operators adapt this cmd choice to their model, memory budget, port policy, and startup latency rather than treating it as universal.
+    # What: provide the illustrative ft serve model and loopback launch fragment; why: llama-swap starts this model path on the allocated local port; operators replace the placeholder path.
+    # What: forward llama-swap's model identifier to ft serve; why: the launched engine advertises the same routed model identity selected by llama-swap.
+    # What: show illustrative context and token-cache limits; why: operators tune these memory-throughput tradeoffs for their hardware instead of treating 4096 as universal.
     cmd: >-
       ft serve --model /models/model-a --host 127.0.0.1 --port ${PORT}
       --served-model-name ${MODEL_ID}
       --max-seq-len-override 4096 --num-tokens 4096
+    # What: set check endpoint to /ready; why: llama-swap probes the daemon readiness contract rather than treating a listening socket as ready.
     checkEndpoint: /ready
+    # What: set proxy to http://127.0.0.1:${PORT}; why: llama-swap forwards model traffic to the loopback port allocated for this model entry.
     proxy: http://127.0.0.1:${PORT}
+    # What: set ttl to 0; why: the example demonstrates the unload-latency versus residency tradeoff for this model.
     ttl: 0
+  # What: show the illustrative model b value; why: operators adapt this model b choice to their model, memory budget, port policy, and startup latency rather than treating it as universal.
   model-b:
+    # What: show the illustrative cmd value >-; why: operators adapt this cmd choice to their model, memory budget, port policy, and startup latency rather than treating it as universal.
+    # What: provide the illustrative ft serve model and loopback launch fragment; why: llama-swap starts this model path on the allocated local port; operators replace the placeholder path.
+    # What: forward llama-swap's model identifier to ft serve; why: the launched engine advertises the same routed model identity selected by llama-swap.
+    # What: show illustrative context and token-cache limits; why: operators tune these memory-throughput tradeoffs for their hardware instead of treating 4096 as universal.
     cmd: >-
       ft serve --model /models/model-b --host 127.0.0.1 --port ${PORT}
       --served-model-name ${MODEL_ID}
       --max-seq-len-override 4096 --num-tokens 4096
+    # What: set check endpoint to /ready; why: llama-swap probes the daemon readiness contract rather than treating a listening socket as ready.
     checkEndpoint: /ready
+    # What: set proxy to http://127.0.0.1:${PORT}; why: llama-swap forwards model traffic to the loopback port allocated for this model entry.
     proxy: http://127.0.0.1:${PORT}
+    # What: set ttl to 300; why: the example demonstrates the unload-latency versus residency tradeoff for this model.
     ttl: 300
