@@ -38,11 +38,11 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 - Local deterministic verification on the current Windows checkout: 235 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
-- GitHub-hosted Ubuntu verification at `5ee1e2604d077b332e07ff9318c8478eae56d6da`
-  passed the complete daemon suite independently in the branch and draft-PR
-  runs. The latest exact-branch run at
-  `bf70a04b833016d6ad6e0fd573ea3ab88961113b` reported 234 passed with no
-  skips, including fail-closed maintenance-host checks. This executes the
+- GitHub-hosted Ubuntu verification at
+  `261d80f93a7d0f878f8bba90fb93189462f435d1` (Actions run `34917024240`)
+  reported 242 passed with zero failures, errors, or skips. This includes the
+  fail-closed maintenance-host and measured-memory gates, AMD SMI parsing, and
+  queued-disconnect ownership regression. It also executes the
   disposable process-group, readiness rollback,
   re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
   It is current-branch Linux process evidence, not current-engine or GPU-model
