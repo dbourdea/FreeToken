@@ -219,6 +219,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         router=router,
         catalog_path=args.catalog,
         catalog_watch_interval_s=args.catalog_watch_interval if args.catalog else 0,
+        activity_path=os.path.join(state_dir, "activity.jsonl"),
     )
 
     import uvicorn

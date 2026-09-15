@@ -50,6 +50,7 @@ upstream_no_activation_suffixes = [".js", ".json", ".css", ".png"]
 # default; enabling them retains redacted bodies in memory only.
 activity_max_entries = 1000
 capture_buffer_mb = 0
+activity_session_headers = ["X-Session-ID", "X-Litellm-Session-Id"]
 
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
@@ -328,13 +329,18 @@ The UI presents configured/resident models, load/unload/reload controls, router
 status, and the privacy-preserving `GET /router/hardware` memory view. Authenticated
 `GET /router/activity`, `/router/activity/stats`, and `/router/captures/{id}`
 provide bounded diagnostics. Activity rows never contain bodies or headers.
+Real daemon runs persist them as bounded, fsynced JSONL under the daemon-owned
+state directory; the file is atomically compacted and corrupt/truncated rows
+fail closed. API responses expose persistence health without exposing its path.
 Captures are disabled unless `router.capture_buffer_mb` is positive, live only
 in memory, cap each response at 1 MiB, obey the total serialized-byte budget,
 and redact Authorization, proxy authorization, cookies, `X-Api-Key`,
 `X-FT-Token`, and custom token/secret/API-key header names. Bodies use Base64
-fields for binary fidelity. Restart-durable
-activity history and UI activity/capture views remain unimplemented. MCP and
-Tailcat remain deferred product expansions.
+fields for binary fidelity and are never persisted. The UI lists body-free
+activity and fetches a capture only after an explicit click. Configured session
+headers are validated, may not name credentials, and are stored/displayed only
+as stable 16-character SHA-256 labels; raw identifiers are never retained. MCP
+and Tailcat remain deferred product expansions.
 
 When `router.api_keys` is configured, authentication accepts an
 `Authorization: Bearer` value, an HTTP Basic password, or `X-Api-Key` for

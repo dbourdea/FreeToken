@@ -894,13 +894,16 @@ def test_upstream_static_suffix_refuses_cold_activation_and_allows_exact_residen
     assert manager.calls == [("start", "exact.gguf")]
 
 
-def test_activity_and_opt_in_capture_apis_are_authenticated_and_redacted(monkeypatch):
+def test_activity_and_opt_in_capture_apis_are_authenticated_redacted_and_durable(
+    monkeypatch, tmp_path
+):
     manager = Manager()
     catalog_doc = ModelCatalog(
         {"low": ModelProfile("low", "low.gguf", ())},
         RouterSettings(api_keys=("secret",), activity_max_entries=2, capture_buffer_mb=1),
     )
     router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    activity_path = tmp_path / "activity.jsonl"
 
     def upstream(**kwargs):
         return UpstreamResponse(
@@ -914,10 +917,14 @@ def test_activity_and_opt_in_capture_apis_are_authenticated_and_redacted(monkeyp
         app = build_app(
             manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
             lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            activity_path=str(activity_path),
         )
         client = TestClient(app)
         assert client.get("/router/activity").status_code == 401
-        headers = {"Authorization": "Bearer secret", "X-Trace": "visible"}
+        headers = {
+            "Authorization": "Bearer secret", "X-Trace": "visible",
+            "X-Session-ID": "private-session-value",
+        }
         response = client.post(
             "/v1/chat/completions", content=b'{"model":"low","prompt":"private"}',
             headers={**headers, "Content-Type": "application/json"},
@@ -930,12 +937,34 @@ def test_activity_and_opt_in_capture_apis_are_authenticated_and_redacted(monkeyp
         assert row["model"] == "low"
         assert row["route"] == "/v1/chat/completions"
         assert row["hasCapture"] is True
+        assert len(row["sessionId"]) == 16
+        assert row["sessionId"] != "private-session-value"
         assert client.get("/router/activity/stats", headers=headers).json()["count"] == 1
         capture = client.get(f'/router/captures/{row["id"]}', headers=headers).json()
         assert capture["requestHeaders"]["authorization"] == "[REDACTED]"
         assert capture["responseHeaders"]["Set-Cookie"] == "[REDACTED]"
         assert base64.b64decode(capture["requestBodyBase64"]) == b'{"model":"low","prompt":"private"}'
         assert base64.b64decode(capture["responseBodyBase64"]) == b"\xffresult"
+
+    restarted_manager = Manager()
+    restarted_router = RoutingCoordinator(
+        restarted_manager, catalog_doc, object(), ready_fn=ready
+    )
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        restarted_app = build_app(
+            manager=restarted_manager, ring=LogRing(), probe=object(),
+            footprint_fn=lambda pid: {}, lifecycle_pool=lifecycle, proxy_pool=proxy,
+            catalog=catalog_doc, router=restarted_router, activity_path=str(activity_path),
+        )
+        restarted = TestClient(restarted_app)
+        page = restarted.get("/router/activity", headers=headers).json()
+        assert page["count"] == 1
+        assert page["data"][0]["hasCapture"] is False
+        assert page["data"][0]["sessionId"] == row["sessionId"]
+        assert page["persistence"] == {"enabled": True, "healthy": True, "error": None}
+        assert restarted.get(
+            f'/router/captures/{page["data"][0]["id"]}', headers=headers
+        ).status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -3615,6 +3644,10 @@ def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_g
     assert page.status_code == 200
     assert "/router/load" in page.text
     assert "/router/hardware" in page.text
+    assert "/router/activity?limit=25" in page.text
+    assert "/router/captures/" in page.text
+    assert "innerHTML" not in page.text
+    assert "Captures may contain prompts and are fetched only when selected" in page.text
     assert "/private/models/low.gguf" not in page.text
     assert "router-test-key" not in page.text
     assert hardware.json() == {

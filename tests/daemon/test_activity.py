@@ -39,6 +39,7 @@ def test_activity_rows_are_bounded_filterable_and_aggregated():
     assert store.stats(model="a") == {
         "count": 1, "cancelled": 1, "errors": 0,
         "responseBytes": 3, "averageDurationS": latest["durationS"],
+        "persistence": {"enabled": False, "healthy": True, "error": None},
     }
 
 
@@ -77,3 +78,62 @@ def test_capture_skips_cancelled_and_over_budget_items_and_reconfigures():
     retained.reconfigure(2, 0)
     assert retained.list(limit=2)["data"][0]["hasCapture"] is False
     assert retained.capture(row["id"]) is None
+
+
+def test_body_free_activity_survives_restart_and_compacts_corrupt_history(tmp_path):
+    path = tmp_path / "activity.jsonl"
+    first = ActivityStore(2, 1024, str(path))
+    _record(first, model="a", body=b"first")
+    _record(first, model="b", body=b"second")
+    latest = _record(first, model="c", body=b"third")
+    with path.open("a", encoding="utf-8") as target:
+        target.write("truncated{\n")
+        target.write("x" * 9000 + "\n")
+
+    recovered = ActivityStore(2, 1024, str(path))
+    page = recovered.list(limit=10)
+
+    assert [row["model"] for row in page["data"]] == ["c", "b"]
+    assert all(row["hasCapture"] is False for row in page["data"])
+    assert page["persistence"] == {"enabled": True, "healthy": True, "error": None}
+    assert recovered.capture(latest["id"]) is None
+    next_row = _record(recovered, model="d")
+    assert next_row["id"] == latest["id"] + 1
+    assert len(path.read_text(encoding="utf-8").splitlines()) <= 4
+
+
+def test_persistence_failure_never_breaks_in_memory_activity(tmp_path):
+    missing_parent = tmp_path / "missing" / "activity.jsonl"
+    store = ActivityStore(2, 0, str(missing_parent))
+    row = _record(store)
+
+    page = store.list(limit=10)
+    assert page["data"][0]["id"] == row["id"]
+    assert page["persistence"] == {
+        "enabled": True, "healthy": False, "error": "write_failed",
+    }
+
+
+def test_load_failure_requires_atomic_rewrite_before_health_recovers(tmp_path, monkeypatch):
+    path = tmp_path / "activity.jsonl"
+    path.write_text('{"unread":"history"}\n', encoding="utf-8")
+    real_open = open
+
+    def fail_initial_read(name, *args, **kwargs):
+        if str(name) == str(path) and not args:
+            raise OSError("private path detail")
+        return real_open(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fail_initial_read)
+    store = ActivityStore(2, 0, str(path))
+    monkeypatch.setattr("builtins.open", real_open)
+    assert store.list()["persistence"] == {
+        "enabled": True, "healthy": False, "error": "load_failed",
+    }
+
+    row = _record(store)
+    assert store.list()["persistence"] == {
+        "enabled": True, "healthy": True, "error": None,
+    }
+    assert path.read_text(encoding="utf-8").count("\n") == 1
+    assert ActivityStore(2, 0, str(path)).list()["data"][0]["id"] == row["id"]

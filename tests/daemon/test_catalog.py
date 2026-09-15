@@ -50,6 +50,7 @@ def test_catalog_validates_bounded_activity_and_capture_settings(tmp_path):
         """[router]
 activity_max_entries = 25
 capture_buffer_mb = 4
+activity_session_headers = ["X-Conversation-ID"]
 
 [models.local]
 model = "local.gguf"
@@ -61,6 +62,7 @@ model = "local.gguf"
 
     assert settings.activity_max_entries == 25
     assert settings.capture_buffer_mb == 4
+    assert settings.activity_session_headers == ("x-conversation-id",)
 
 
 @pytest.mark.parametrize("key,value", [
@@ -76,6 +78,23 @@ def test_catalog_rejects_unbounded_activity_or_capture_settings(tmp_path, key, v
         encoding="utf-8",
     )
     with pytest.raises(CatalogError, match=key):
+        ModelCatalog.load(str(path))
+
+
+@pytest.mark.parametrize("headers", [
+    '["Authorization"]',
+    '["X-Auth-Token"]',
+    '["X-Api-Key"]',
+    '["X-Session-ID", "x-session-id"]',
+    '["bad header"]',
+])
+def test_catalog_rejects_credential_or_invalid_activity_session_headers(tmp_path, headers):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[router]\nactivity_session_headers = {headers}\n\n[models.local]\nmodel = "local.gguf"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match="activity_session_headers"):
         ModelCatalog.load(str(path))
 
 

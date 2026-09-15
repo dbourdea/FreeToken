@@ -50,8 +50,8 @@ Pinned sources: `internal/config/config.go` (`Config`, `GroupConfig`,
 | request-log level/time/stdio fields | **Equivalent** | Native daemon logging and bounded rings have their own process-level controls; these are not hot catalog policy. Router events deliberately omit bodies, headers, query strings, and secrets. |
 | `metricsMaxInMemory` | **Equivalent** | Native router logs and metric state are bounded; Prometheus counters are aggregate rather than a queryable in-memory activity table. |
 | `captureBuffer` | **Native safe equivalent** | `router.capture_buffer_mb` is opt-in and defaults to zero. Captures are credential-redacted, serialized-byte-budgeted, per-response capped, binary-safe, memory-only, and retrieved by activity ID. |
-| `store.path` | **Equivalent / partial** | Durable lifecycle accounting and process identity use native state paths. Inference activity is queryable and bounded in memory, but restart-durable history is **Missing**. |
-| `ui.activity.session_id` | **Missing** | Native APIs expose bounded activity and captures, but the UI has no activity-table session grouping or capture view. |
+| `store.path` | **Native safe equivalent** | The daemon-owned state directory contains lifecycle/accounting state and bounded body-free `activity.jsonl`. Rows are fsynced, streamed on recovery, strictly validated, and atomically compacted; persistence health is exposed without its path. Captures remain memory-only. |
+| `ui.activity.session_id` | **Native privacy-preserving equivalent** | Validated non-credential header names select the first nonempty value, but only a stable truncated SHA-256 label is stored and shown. Matching is case-insensitive and raw identifiers/general headers are not persisted. |
 | `performance.disabled`, `performance.every` | **Equivalent / partial** | Prometheus and private qualification collect point/per-trial process, memory, timing, TTFT and throughput evidence. A periodic historical performance sampler/API is **Missing**. |
 | `tailcat` | **Deferred** | No Tailcat network dependency or remote-listener product contract exists. Local auth and route allowlisting do not claim Tailcat interoperability. |
 
@@ -134,9 +134,9 @@ registrations are in `python/freetoken/daemon/app.py`.
 | Inflight ownership/cancellation | **Native** | Opaque IDs reserve before admission and cancel queued, connecting, or active work. |
 | Bounded logs and SSE resume | **Native** | Separate engine and privacy-safe router rings. |
 | Prometheus metrics | **Native** | Lifecycle, queue, activation, cancellation, eviction, terminal stream, TTFT, duration and byte signals. |
-| Durable activity/performance store | **Native bounded / missing durability** | Inference activity is bounded and queryable; lifecycle accounting is durable. Activity and periodic performance history do not survive daemon restart. |
+| Durable activity/performance store | **Native activity / missing periodic performance** | Body-free inference activity survives restart in a bounded fsynced/compacted store. Periodic performance samples are not yet retained. |
 | Redacted bounded request/response captures | **Native** | Disabled by default; opt-in memory budget, sensitive-header redaction, binary-safe bodies, overflow/cancellation refusal, authenticated retrieval, and deterministic tests. Captures must never become public evidence artifacts. |
-| Embedded management UI | **Native applicable subset** | Status/models/profiles/requests/logs/metrics/hardware controls are local and dependency-free. Historical activity/capture views are absent with their APIs. |
+| Embedded management UI | **Native applicable subset** | Status/models/profiles/requests/logs/metrics/hardware plus body-free activity and explicit-on-click capture views are local and dependency-free. The initial HTML embeds no operational data. |
 | Hardware snapshot | **Native, extended** | Current process-tree RAM plus NVIDIA/AMD per-process VRAM, with unavailable distinct from zero. |
 | Embedded documentation MCP | **Deferred** | No FreeToken MCP contract. This does not affect inference or lifecycle parity. |
 | Tailcat remote access | **Deferred** | No FreeToken Tailcat contract. This does not imply generic remote access is safe. |
@@ -152,16 +152,15 @@ tests, and UI tests. Native deterministic coverage lives in `tests/daemon`:
 | Disposable actual-child process, process-group cleanup, re-adoption and routed SSE on Linux | **Native hosted-Linux evidence present** at the exact PR lineage recorded in the parity matrix. |
 | Combined-tree/current engine compatibility | Required at final head; prior evidence does not substitute for the final audit. |
 | GMKtek EVO-X2 direct/warm/cold/A-B-A/concurrency/cancellation/failure/rollback/re-adoption/reload/TTL/auth/metrics/logs/restoration | **Live evidence missing; maintenance authorization required.** |
-| Bounded activity/stat and opt-in capture APIs | **Native deterministic implementation and tests present.** Restart durability and UI views remain missing. |
+| Bounded activity/stat and opt-in capture APIs | **Native deterministic implementation and tests present.** Body-free rows survive app reconstruction; captures remain memory-only by policy. UI fetches captures only on explicit selection. |
 | Periodic performance history | **Implementation and tests missing.** |
 
 ## Open applicable implementation gaps
 
-This inventory currently identifies two protocol-agnostic gaps that cannot be
+This inventory currently identifies one protocol-agnostic gap that cannot be
 closed by claiming a backend modality limitation:
 
-1. restart-durable inference activity plus native UI activity/capture views; and
-2. periodic performance history (point Prometheus and private benchmark evidence
+1. periodic performance history (point Prometheus and private benchmark evidence
    already exist).
 
 They remain explicit until implemented or until a stronger, source-backed

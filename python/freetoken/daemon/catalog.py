@@ -23,6 +23,7 @@ _SIMPLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_HTTP_PATH = re.compile(r"^/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?$")
 _UPSTREAM_SUFFIX = re.compile(r"^\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+_HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$")
 _PROXY_TEMPLATE = re.compile(
     r"^http://127\.0\.0\.1:\$\{PORT\}(?P<prefix>/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?)?$"
 )
@@ -32,6 +33,7 @@ DEFAULT_PROXY = "http://127.0.0.1:${PORT}"
 DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES = (
     ".js", ".json", ".css", ".png", ".gif", ".jpg", ".jpeg", ".ico", ".txt",
 )
+DEFAULT_ACTIVITY_SESSION_HEADERS = ("x-session-id", "x-litellm-session-id")
 
 
 class CatalogError(ValueError):
@@ -67,6 +69,7 @@ class RouterSettings:
     upstream_no_activation_suffixes: tuple[str, ...] = DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES
     activity_max_entries: int = 1000
     capture_buffer_mb: int = 0
+    activity_session_headers: tuple[str, ...] = DEFAULT_ACTIVITY_SESSION_HEADERS
 
 
 @dataclass(frozen=True)
@@ -492,6 +495,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         "send_loading_state", "preload_model", "startup_routing_profile",
         "upstream_no_activation_suffixes",
         "activity_max_entries", "capture_buffer_mb",
+        "activity_session_headers",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -550,6 +554,29 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     if (not isinstance(capture_buffer_mb, int) or isinstance(capture_buffer_mb, bool)
             or not 0 <= capture_buffer_mb <= 256):
         raise CatalogError("router.capture_buffer_mb must be an integer from 0 through 256")
+    activity_session_headers = value.get(
+        "activity_session_headers", list(DEFAULT_ACTIVITY_SESSION_HEADERS)
+    )
+    if (
+        not isinstance(activity_session_headers, list)
+        or len(activity_session_headers) > 16
+        or not all(
+            isinstance(header, str) and _HTTP_HEADER_NAME.fullmatch(header)
+            for header in activity_session_headers
+        )
+    ):
+        raise CatalogError(
+            "router.activity_session_headers must contain at most 16 safe HTTP header names"
+        )
+    normalized_session_headers = tuple(header.lower() for header in activity_session_headers)
+    if len(set(normalized_session_headers)) != len(normalized_session_headers):
+        raise CatalogError("router.activity_session_headers must not contain duplicates")
+    if any(
+        "authorization" in header or "token" in header or "secret" in header
+        or ("api" in header.split("-") and "key" in header.split("-"))
+        for header in normalized_session_headers
+    ):
+        raise CatalogError("router.activity_session_headers must not name credential headers")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -612,6 +639,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         upstream_no_activation_suffixes=tuple(upstream_no_activation_suffixes),
         activity_max_entries=activity_max_entries,
         capture_buffer_mb=capture_buffer_mb,
+        activity_session_headers=normalized_session_headers,
     )
 
 

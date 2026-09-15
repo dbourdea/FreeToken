@@ -168,11 +168,12 @@ body{font:15px system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1
 </style></head><body><h1>FreeToken swap</h1><p>Enter a router bearer key to inspect or control this local daemon. The key is kept only in this page's memory.</p>
 <div class="row"><label>Bearer key <input id="key" type="password" autocomplete="off"></label><button id="refresh">Refresh</button><button id="reload">Reload catalog</button><button id="unload">Unload resident</button></div>
 <h2>Status</h2><pre id="status">Not loaded.</pre><h2>Models</h2><div id="models"></div><h2>Hardware</h2><pre id="hardware">Not loaded.</pre>
+<h2>Activity</h2><p>Rows are body-free. Captures may contain prompts and are fetched only when selected.</p><div id="activity"></div><pre id="capture">No capture selected.</pre>
 <script>
 const $=id=>document.getElementById(id), headers=()=>({Authorization:'Bearer '+$('key').value});
 async function api(path,opt={}){let r=await fetch(path,{...opt,headers:{...headers(),...(opt.headers||{})}});let d=await r.json();if(!r.ok)throw new Error(d.detail||d.error?.message||r.status);return d}
 function show(id,value){$(id).textContent=JSON.stringify(value,null,2)}
-async function refresh(){try{let [s,m,h]=await Promise.all([api('/router/status'),api('/router/models'),api('/router/hardware')]);show('status',s);show('hardware',h);let box=$('models');box.replaceChildren();for(const p of m.data){let b=document.createElement('button');b.textContent='Load '+p.name;b.onclick=async()=>{await api('/router/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name})});refresh()};box.append(b)}}catch(e){show('status',{error:e.message})}}
+async function refresh(){try{let [s,m,h,a]=await Promise.all([api('/router/status'),api('/router/models'),api('/router/hardware'),api('/router/activity?limit=25')]);show('status',s);show('hardware',h);let box=$('models');box.replaceChildren();for(const p of m.data){let b=document.createElement('button');b.textContent='Load '+p.name;b.onclick=async()=>{await api('/router/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name})});refresh()};box.append(b)}let activity=$('activity');activity.replaceChildren();for(const row of a.data){let line=document.createElement('div');line.textContent='#'+row.id+' '+row.method+' '+row.route+' '+row.model+' status='+row.status+' bytes='+row.responseBytes+(row.sessionId?' session='+row.sessionId:'')+' ';if(row.hasCapture){let b=document.createElement('button');b.textContent='View capture';b.onclick=async()=>show('capture',await api('/router/captures/'+row.id));line.append(b)}activity.append(line)}}catch(e){show('status',{error:e.message})}}
 $('refresh').onclick=refresh;$('reload').onclick=async()=>{await api('/router/reload',{method:'POST'});refresh()};$('unload').onclick=async()=>{await api('/router/unload',{method:'POST'});refresh()};
 </script></body></html>"""
 
@@ -251,6 +252,7 @@ def build_app(
     catalog_path: str | None = None,
     router_ring: LogRing | None = None,
     catalog_watch_interval_s: float = 0.0,
+    activity_path: str | None = None,
 ) -> FastAPI:
     import time as _time
 
@@ -289,6 +291,8 @@ def build_app(
     activity_store = ActivityStore(
         catalog.settings.activity_max_entries,
         catalog.settings.capture_buffer_mb * 1024 * 1024,
+        activity_path,
+        catalog.settings.activity_session_headers,
     )
     app.state.activity_store = activity_store
     inflight_lock = threading.Lock()
@@ -554,6 +558,7 @@ def build_app(
                     activity_store.reconfigure(
                         replacement.settings.activity_max_entries,
                         replacement.settings.capture_buffer_mb * 1024 * 1024,
+                        replacement.settings.activity_session_headers,
                     )
                 except CatalogError:
                     record_watch("invalid_catalog")
@@ -852,20 +857,25 @@ def build_app(
                         cancelled=cancelled,
                         responseBytes=byte_count,
                     )
-                    activity_store.record(
-                        model=lease.profile.name,
-                        route=safe_route,
-                        method=request.method,
-                        status=upstream.status if upstream is not None else 200,
-                        started=started,
-                        ttft_s=ttft_s,
-                        response_bytes=byte_count,
-                        cancelled=cancelled,
-                        request_headers=request.headers,
-                        request_body=outbound_body,
-                        response_headers=upstream.headers if upstream is not None else {},
-                        response_body=(
-                            None if upstream is None or capture_overflow else bytes(captured_response)
+                    await asyncio.get_running_loop().run_in_executor(
+                        proxy_pool,
+                        functools.partial(
+                            activity_store.record,
+                            model=lease.profile.name,
+                            route=safe_route,
+                            method=request.method,
+                            status=upstream.status if upstream is not None else 200,
+                            started=started,
+                            ttft_s=ttft_s,
+                            response_bytes=byte_count,
+                            cancelled=cancelled,
+                            request_headers=dict(request.headers),
+                            request_body=outbound_body,
+                            response_headers=upstream.headers if upstream is not None else {},
+                            response_body=(
+                                None if upstream is None or capture_overflow
+                                else bytes(captured_response)
+                            ),
                         ),
                     )
 
@@ -1494,9 +1504,12 @@ def build_app(
         try:
             replacement = await run(proxy_pool, ModelCatalog.load, catalog_path)
             await run(lifecycle_pool, router.replace_catalog, replacement)
-            activity_store.reconfigure(
+            await run(
+                proxy_pool,
+                activity_store.reconfigure,
                 replacement.settings.activity_max_entries,
                 replacement.settings.capture_buffer_mb * 1024 * 1024,
+                replacement.settings.activity_session_headers,
             )
         except CatalogError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

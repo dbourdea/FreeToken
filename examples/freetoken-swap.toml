@@ -19,6 +19,8 @@ upstream_no_activation_suffixes = [".js", ".json", ".css", ".png", ".gif", ".jpg
 # credential-redacted, and opt-in; zero disables request/response retention.
 activity_max_entries = 1000
 capture_buffer_mb = 0
+# Session grouping stores only a stable SHA-256 label, never the raw value.
+activity_session_headers = ["X-Session-ID", "X-Litellm-Session-Id"]
 scheduler = "fifo"
 # Zero disables the global cap. Every profile still has a default cap of 10.
 global_concurrency_limit = 32
