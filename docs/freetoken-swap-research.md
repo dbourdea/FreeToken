@@ -101,9 +101,11 @@ The same complete daemon suite passed twice on GitHub-hosted Ubuntu at commit
 for the draft PR synchronization. Those runs execute the actual disposable
 Linux child, process-group escalation, readiness rollback, exact re-adoption,
 dynamic-port reactivation, routed SSE, and cleanup cases skipped on Windows.
-A later exact-branch hosted run reported 230 passed with no skips. These runs
-establish current-branch Linux process behavior only; current-engine and GMKtek
-GPU-model qualification remain separate gates.
+The latest exact-branch hosted run at
+`bf70a04b833016d6ad6e0fd573ea3ab88961113b` reported 234 passed with no
+skips, including fail-closed maintenance-host checks. These runs establish
+current-branch Linux process behavior only; current-engine and GMKtek GPU-model
+qualification remain separate gates.
 
 The pinned optional cold-load feedback behavior is now implemented through an
 atomic reservation callback after concurrency admission. Strictly streaming chat

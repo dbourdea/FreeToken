@@ -40,8 +40,10 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at `5ee1e2604d077b332e07ff9318c8478eae56d6da`
   passed the complete daemon suite independently in the branch and draft-PR
-  runs. A later exact-branch run reported 230 passed with no skips. This executes
-  the disposable process-group, readiness rollback,
+  runs. The latest exact-branch run at
+  `bf70a04b833016d6ad6e0fd573ea3ab88961113b` reported 234 passed with no
+  skips, including fail-closed maintenance-host checks. This executes the
+  disposable process-group, readiness rollback,
   re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
   It is current-branch Linux process evidence, not current-engine or GPU-model
   qualification.
