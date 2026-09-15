@@ -555,6 +555,24 @@ class RoutingCoordinator:
         with self._cond:
             return self._active_matches_engine_locked()
 
+    def profile_is_resident(self, model_id: str) -> bool:
+        """Whether *model_id* resolves to the exact readiness-gated resident.
+
+        This lifecycle-state query intentionally does not perform network I/O.
+        It lets direct static-asset requests refuse a cold activation while
+        using the same exact identity check as ordinary warm admission.
+        """
+        with self._cond:
+            try:
+                profile = self._catalog.get(model_id)
+            except CatalogError:
+                return False
+            return (
+                not self._shutdown_requested
+                and not self._switching
+                and self._active_profile_ready_locked(profile)
+            )
+
     def is_ready(self, probe=None) -> bool:
         """Atomically verify resident identity and fresh engine readiness.
 

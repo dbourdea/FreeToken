@@ -1224,6 +1224,25 @@ def build_app(
         normalized = remaining_path.lstrip("/")
         if normalized == "v1/admin/prepare-stop":
             raise HTTPException(status_code=403, detail="upstream prepare-stop is daemon-managed")
+        if (
+            any(
+                remaining_path.endswith(suffix)
+                for suffix in router.catalog.settings.upstream_no_activation_suffixes
+            )
+            and not router.profile_is_resident(model)
+        ):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "message": (
+                            f"model {model!r} is not loaded; path matches "
+                            "router.upstream_no_activation_suffixes"
+                        ),
+                        "type": "model_not_loaded",
+                    }
+                },
+            )
         raw_path = request.scope.get("raw_path")
         escaped_path = (
             _escaped_path_suffix(raw_path, f"/upstream/{source_model}")

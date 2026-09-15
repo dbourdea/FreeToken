@@ -27,6 +27,45 @@ def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
     }]
 
 
+def test_catalog_validates_safe_upstream_no_activation_suffixes(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[router]
+upstream_no_activation_suffixes = [".wasm", ".map"]
+
+[models.local]
+model = "local.gguf"
+""",
+        encoding="utf-8",
+    )
+
+    settings = ModelCatalog.load(str(path)).settings
+
+    assert settings.upstream_no_activation_suffixes == (".wasm", ".map")
+
+
+@pytest.mark.parametrize("value", [
+    '".js"',
+    '["js"]',
+    '["../secret"]',
+    '[".js", ".js"]',
+])
+def test_catalog_rejects_unsafe_upstream_no_activation_suffixes(tmp_path, value):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f"""[router]
+upstream_no_activation_suffixes = {value}
+
+[models.local]
+model = "local.gguf"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CatalogError, match="upstream_no_activation_suffixes"):
+        ModelCatalog.load(str(path))
+
+
 def test_catalog_validates_custom_readiness_and_owned_loopback_proxy_targets(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(

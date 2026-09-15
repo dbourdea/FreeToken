@@ -22,12 +22,16 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in the Python 3.10 p
 _SIMPLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_HTTP_PATH = re.compile(r"^/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?$")
+_UPSTREAM_SUFFIX = re.compile(r"^\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 _PROXY_TEMPLATE = re.compile(
     r"^http://127\.0\.0\.1:\$\{PORT\}(?P<prefix>/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?)?$"
 )
 
 DEFAULT_CHECK_ENDPOINT = "/health"
 DEFAULT_PROXY = "http://127.0.0.1:${PORT}"
+DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES = (
+    ".js", ".json", ".css", ".png", ".gif", ".jpg", ".jpeg", ".ico", ".txt",
+)
 
 
 class CatalogError(ValueError):
@@ -60,6 +64,7 @@ class RouterSettings:
     send_loading_state: bool = False
     preload_model: str | None = None
     startup_routing_profile: str | None = None
+    upstream_no_activation_suffixes: tuple[str, ...] = DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES
 
 
 @dataclass(frozen=True)
@@ -483,6 +488,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         "api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s",
         "scheduler", "groups", "include_aliases_in_list", "global_concurrency_limit",
         "send_loading_state", "preload_model", "startup_routing_profile",
+        "upstream_no_activation_suffixes",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -517,6 +523,22 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         startup_routing_profile = _simple_name(
             startup_routing_profile, "router.startup_routing_profile"
         )
+    upstream_no_activation_suffixes = value.get(
+        "upstream_no_activation_suffixes", list(DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES)
+    )
+    if (
+        not isinstance(upstream_no_activation_suffixes, list)
+        or len(upstream_no_activation_suffixes) > 64
+        or not all(
+            isinstance(suffix, str) and _UPSTREAM_SUFFIX.fullmatch(suffix)
+            for suffix in upstream_no_activation_suffixes
+        )
+    ):
+        raise CatalogError(
+            "router.upstream_no_activation_suffixes must contain at most 64 safe dot suffixes"
+        )
+    if len(set(upstream_no_activation_suffixes)) != len(upstream_no_activation_suffixes):
+        raise CatalogError("router.upstream_no_activation_suffixes must not contain duplicates")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -576,6 +598,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         send_loading_state=send_loading_state,
         preload_model=preload_model,
         startup_routing_profile=startup_routing_profile,
+        upstream_no_activation_suffixes=tuple(upstream_no_activation_suffixes),
     )
 
 

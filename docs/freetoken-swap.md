@@ -43,6 +43,9 @@ The catalog is TOML and is optional. Start the daemon with `--catalog` or set `F
 send_loading_state = true
 preload_model = "qwen-coder-compatible"
 startup_routing_profile = "coding"
+# Matching direct-upstream assets return 409 instead of cold-loading. This
+# suffix-only safe subset defaults to js/json/css/png/gif/jpg/jpeg/ico/txt.
+upstream_no_activation_suffixes = [".js", ".json", ".css", ".png"]
 
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
@@ -318,8 +321,9 @@ operations.
 catalog values, paths, keys, or machine data; the operator enters a bearer key
 for the current browser session and it calls the authenticated router APIs.
 The UI presents configured/resident models, load/unload/reload controls, router
-status, and the privacy-preserving `GET /router/hardware` memory view. Captures,
-MCP, and Tailcat remain outside FreeToken's current product scope.
+status, and the privacy-preserving `GET /router/hardware` memory view. Bounded
+request/response captures remain an applicable but unimplemented diagnostic;
+MCP and Tailcat remain deferred product expansions.
 
 When `router.api_keys` is configured, authentication accepts an
 `Authorization: Bearer` value, an HTTP Basic password, or `X-Api-Key` for
@@ -331,7 +335,13 @@ it. Invalid requests include a `WWW-Authenticate` challenge. An explicit daemon
 engine `prepare-stop`, which only the lifecycle owner may invoke. For
 slash-namespaced IDs, the longest configured canonical or alternate ID wins;
 encoded model separators and the remaining escaped path and query are
-forwarded without decoding.
+forwarded without decoding. By default, direct-upstream paths ending in
+`.js`, `.json`, `.css`, `.png`, `.gif`, `.jpg`, `.jpeg`, `.ico`, or `.txt`
+return HTTP 409 while the selected model is unloaded, rather than activating
+an engine for a speculative asset request. They proxy normally when that exact
+model is resident. Configure the bounded, dot-suffix-only
+`router.upstream_no_activation_suffixes` list, or set it to `[]` to disable the
+guard. Matching is case-sensitive and excludes the query string.
 
 These are illustrative paths, not a list of qualified models. In particular, dense Qwen GGUF support requires a compatible AMD/model-loader branch and cannot be inferred from this control-plane PR.
 

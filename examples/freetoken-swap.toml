@@ -12,6 +12,9 @@ api_keys = ["replace-with-a-secret"]
 default_ttl_s = 300
 unload_timeout_s = 30
 upstream_timeout_s = 900
+# Safe static suffixes that return 409 rather than cold-loading through
+# /upstream/{model-id}/...; set [] to disable. No regex is accepted.
+upstream_no_activation_suffixes = [".js", ".json", ".css", ".png", ".gif", ".jpg", ".jpeg", ".ico", ".txt"]
 scheduler = "fifo"
 # Zero disables the global cap. Every profile still has a default cap of 10.
 global_concurrency_limit = 32

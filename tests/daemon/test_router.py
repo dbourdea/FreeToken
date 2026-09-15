@@ -848,6 +848,47 @@ def test_namespaced_upstream_uses_longest_model_prefix_and_preserves_escaped_suf
     assert calls[0]["body"] == b"exact"
 
 
+def test_upstream_static_suffix_refuses_cold_activation_and_allows_exact_resident(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog({
+        "author/model": ModelProfile(
+            "author/model", "exact.gguf", (), aliases=("org/compat",)
+        ),
+    })
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    calls = []
+
+    def upstream(**kwargs):
+        calls.append(kwargs)
+        return UpstreamResponse(200, {"Content-Type": "text/plain"}, BytesIO(b"asset"))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+
+        cold_asset = client.get("/upstream/org/compat/ui/app.js")
+        assert cold_asset.status_code == 409
+        assert cold_asset.json()["error"]["type"] == "model_not_loaded"
+        assert manager.calls == []
+        assert calls == []
+        assert router.status()["reservedRequests"] == 0
+
+        cold_api = client.get("/upstream/org/compat/api/status")
+        assert cold_api.status_code == 200
+        assert manager.calls == [("start", "exact.gguf")]
+
+        warm_asset = client.get("/upstream/org/compat/ui/app.js")
+        assert warm_asset.status_code == 200
+        assert warm_asset.content == b"asset"
+
+    assert [call["path_and_query"] for call in calls] == ["/api/status", "/ui/app.js"]
+    assert manager.calls == [("start", "exact.gguf")]
+
+
 @pytest.mark.parametrize(
     "path",
     (
