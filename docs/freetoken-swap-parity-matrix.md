@@ -78,15 +78,15 @@ stops the child and verifies pidfile cleanup. A second Linux-only test persists
 a live disposable child as prior-daemon state, re-adopts it into a new manager,
 binds the exact catalog profile in a new routing coordinator, routes SSE without
 calling the spawn function, and verifies cleanup by the new owner. It is skipped
-on Windows. The complete 351-test daemon suite, including these tests, passed
-with no skips in GitHub-hosted Ubuntu run `34938927860` for commit `174bda1c`.
+on Windows. The complete 352-test daemon suite, including these tests, passed
+with no skips in GitHub-hosted Ubuntu run `34941311939` for commit `39c3aaab`.
 This closes the current-branch
 disposable Linux process gate only; it does not qualify the current FreeToken
 engine, GPU models, or the GMKtek maintenance matrix.
 
 Git also produced clean synthetic combined tree
-`7d46740d9562abee5f7afa3d522ff25614cc6b2c` from swap head `da4b8df7` and
-draft AMD compatibility head `c0534c6f`. In an isolated Windows export, 376
+`74a4f3b1649442d9d8c24576751d29f30e218d04` from swap head `39c3aaab` and
+draft AMD compatibility head `c0534c6f`. In an isolated Windows export, 377
 daemon/privacy/benchmark-contract/reproducibility tests passed with 7 expected
 Linux skips, followed by 21/21 grouped-output, SSM, and GGUF configuration
 tests in a disposable CPU torch environment. This is source-tree compatibility

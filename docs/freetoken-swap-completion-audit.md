@@ -35,13 +35,13 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification at `174bda1c09cd9eb144b1c9f80fa767e1aeca7d16`
-  on the current Windows checkout: 344 daemon
+- Local deterministic verification at `39c3aaabd6fefd7dd462e85e8dfd2ba03be849ab`
+  on the current Windows checkout: 345 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `174bda1c09cd9eb144b1c9f80fa767e1aeca7d16` (Actions run `34938927860`)
-  reported 351 tests with zero failures, errors, or skips. This includes the
+  `39c3aaabd6fefd7dd462e85e8dfd2ba03be849ab` (Actions run `34941311939`)
+  reported 352 tests with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
   listing coverage, model display/metadata collision precedence, ordered
@@ -69,10 +69,10 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 - No current-branch maintenance-window benchmark artifact has been published.
   Raw paths, prompts, responses, logs, and host data must remain private.
 - Current isolated combined-tree CPU verification used swap head
-  `da4b8df7ddb191651a095e3266b8360b5b13307d` and draft AMD compatibility
+  `39c3aaabd6fefd7dd462e85e8dfd2ba03be849ab` and draft AMD compatibility
   head `c0534c6f38162cb2ddfd0193cd9bf1031613dde1`. Git produced the clean
-  synthetic tree `7d46740d9562abee5f7afa3d522ff25614cc6b2c` without checking out or
-  changing either branch. On Windows, 376 daemon/privacy/benchmark-contract/
+  synthetic tree `74a4f3b1649442d9d8c24576751d29f30e218d04` without checking out or
+  changing either branch. On Windows, 377 daemon/privacy/benchmark-contract/
   reproducibility tests passed with 7 expected Linux skips, and all 21
   grouped-output, SSM, and GGUF configuration tests passed in a disposable
   Python 3.13 / torch 2.13 CPU environment. This proves source compatibility
