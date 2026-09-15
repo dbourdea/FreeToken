@@ -37,8 +37,13 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
 - Local deterministic verification on the current Windows checkout: 223 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
-  behavior only; it does not substitute for Linux real-child or real-model
-  evidence.
+  behavior only; it does not substitute for real-model evidence.
+- GitHub-hosted Ubuntu verification at `5ee1e2604d077b332e07ff9318c8478eae56d6da`
+  passed the complete daemon suite independently in the branch and draft-PR
+  runs. This executes the disposable process-group, readiness rollback,
+  re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
+  It is current-branch Linux process evidence, not current-engine or GPU-model
+  qualification.
 - No current-branch maintenance-window benchmark artifact has been published.
   Raw paths, prompts, responses, logs, and host data must remain private.
 
@@ -50,9 +55,9 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Model catalog and lifecycle controls | Validated TOML catalog, collision-safe slash-namespaced alternate IDs, unlisted profiles, authenticated profile endpoints, native process manager, longest-prefix direct-upstream resolution, and exact explicit/dynamic/omitted-default-port re-adoption | Implemented and CPU/HTTP tested |
 | Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions, side-effect-free sanitized browser preflight, authenticated model-list CORS, exact `/models` listing alias, and public model entries with atomic loaded/activating/unloaded status | CPU/HTTP tested; current native real-engine evidence required |
-| Streaming cold-load feedback | Global/per-profile safe configuration; atomic post-concurrency cold admission; reasoning and queue-position SSE; upstream continuation; in-band terminal errors; strict warm/route/stream bypass; explicit cancellation and disconnect cleanup | Implemented and deterministically HTTP-tested; Linux disposable-child and private native gates added, current Linux/GMKtek execution required |
+| Streaming cold-load feedback | Global/per-profile safe configuration; atomic post-concurrency cold admission; reasoning and queue-position SSE; upstream continuation; in-band terminal errors; strict warm/route/stream bypass; explicit cancellation and disconnect cleanup | Deterministic HTTP and hosted Linux disposable-child gates passed; current GMKtek native execution required |
 | Concurrency and unloading | Race-safe global/per-profile reservations, default and configured limits, immediate 429, canonical/alternate sharing, same-model and conflicting-model admission, concurrent cold dynamic binding, and idle eviction are deterministically tested | Current native real-engine verification required |
-| Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and Linux real-child tests are implemented; historical invalid-GGUF evidence is retained separately | Current Linux/current-branch recovery execution required |
+| Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and current-branch hosted Linux real-child rollback/process-group cleanup passed; historical invalid-GGUF evidence is retained separately | Current-engine real-model recovery execution remains required |
 | Client cancellation | Native opaque router request IDs, atomic duplicate-ID rejection before admission/upstream work, disconnect-aware admission, queued/connecting/active request list, explicit cancel endpoint across every owned phase, orphan socket close, lease release, and cancellation metrics. Failed, disconnected, or cancelled admission and failed upstream connection release ownership safely. | Deterministic HTTP tested; current native same-instance GPU verification required |
 | Authentication and observability | Bearer, Basic-password, and `X-Api-Key` inference authentication with precedence and local termination; separate `X-FT-Token` lifecycle control; catalog-key-protected `/models` compatibility alias; configured aliases and profiles; Prometheus metrics; bounded router-log SSE; exact-origin qualification credentials | Deterministic HTTP tested; current native GMKtek control-plane execution required |
 | Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
@@ -65,10 +70,10 @@ The PRs target different base branches: PR 1 targets `main`; PR 2 targets
 rechecked on their public GitHub pages; current mergeability was not reverified,
 and no authenticated mutation was attempted. The clean combined tree is
 compatibility evidence, not an instruction to merge either PR or change the
-repository's release strategy. The public Checks pages showed no hosted checks
-for either PR at this audit. The test results above are independently executed
-evidence, not claims of passing hosted CI. PR 1's public description remains
-historical and is not the authoritative record of current-branch qualification.
+repository's release strategy. PR 1 now has a secret-free GitHub-hosted Ubuntu
+daemon check; PR 2 has no hosted check at this audit. The local and hosted test
+results are separate evidence. PR 1's public description remains historical and
+is not the authoritative record of current-branch qualification.
 
 ## Historical maintenance-window evidence
 

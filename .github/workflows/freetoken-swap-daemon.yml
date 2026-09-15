@@ -1,8 +1,6 @@
 name: FreeToken swap daemon
 
 on:
-  push:
-    branches: [feat/freetoken-swap]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -37,16 +35,27 @@ jobs:
         env:
           PYTHONPATH: python
         run: python -m pytest tests/daemon -q --junitxml="$RUNNER_TEMP/daemon.xml"
-      - name: Report bounded failure diagnostics
-        if: steps.daemon-tests.outcome == 'failure'
+      - name: Report bounded test result
+        if: always()
         env:
           REPORT: ${{ runner.temp }}/daemon.xml
+          OUTCOME: ${{ steps.daemon-tests.outcome }}
         run: |
           python - <<'PY'
           import os
+          import sys
           import xml.etree.ElementTree as ET
 
           root = ET.parse(os.environ["REPORT"]).getroot()
+          suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+          counts = {
+              key: sum(int(suite.get(key, "0")) for suite in suites)
+              for key in ("tests", "failures", "errors", "skipped")
+          }
+          print(
+              "::notice title=daemon Linux suite::"
+              + ", ".join(f"{key}={value}" for key, value in counts.items())
+          )
           failures = []
           for case in root.iter("testcase"):
               node = case.find("failure")
@@ -73,5 +82,6 @@ jobs:
               print("::error title=daemon Linux suite::pytest failed without a JUnit failure record")
           for test_id, message in failures[:10]:
               print(f"::error title={test_id}::{message}")
+          if os.environ["OUTCOME"] != "success":
+              sys.exit(1)
           PY
-          exit 1
