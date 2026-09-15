@@ -72,8 +72,8 @@ stops the child and verifies pidfile cleanup. A second Linux-only test persists
 a live disposable child as prior-daemon state, re-adopts it into a new manager,
 binds the exact catalog profile in a new routing coordinator, routes SSE without
 calling the spawn function, and verifies cleanup by the new owner. It is skipped
-on Windows. The complete 295-test daemon suite, including these tests, passed
-with no skips in GitHub-hosted Ubuntu run `34923302826` for commit `3b257bd`.
+on Windows. The complete 311-test daemon suite, including these tests, passed
+with no skips in GitHub-hosted Ubuntu run `34924927010` for commit `c0833f4`.
 This closes the current-branch
 disposable Linux process gate only; it does not qualify the current FreeToken
 engine, GPU models, or the GMKtek maintenance matrix.
