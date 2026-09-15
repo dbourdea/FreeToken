@@ -385,23 +385,16 @@ def build_app(
         try:
             return await shielded
         except asyncio.CancelledError:
-            def release_orphaned_lease(done) -> None:
-                try:
-                    lease = done.result()
-                except BaseException:
-                    return
-                lease.release()
-
-            future.add_done_callback(release_orphaned_lease)
-            # ``asyncio.shield`` creates a wrapper future. If the underlying
-            # admission ends with an expected cancellation error after its
-            # waiter is gone, retrieve that exception instead of letting the
-            # event loop report it as unhandled.
-            shielded.add_done_callback(
-                lambda done: None if done.cancelled() else done.exception()
-            )
             router.cancel_acquire(cancellation)
-            router.record_cancellation()
+            # Retain ownership until the executor-side admission is terminal.
+            # This retrieves its expected RoutingError before the event loop
+            # can close and releases a lease if admission won the race.
+            try:
+                orphaned = await asyncio.shield(future)
+            except BaseException:
+                pass
+            else:
+                orphaned.release()
             raise
 
     async def connect_upstream(**kwargs):
@@ -591,12 +584,15 @@ def build_app(
                 + b"\n\ndata: [DONE]\n\n"
             )
 
-        stream_state = {"started": False}
+        abandon_state = {"done": False}
 
         def abandon_loading_acquisition(
             acquisition: asyncio.Task, *, record_cancellation: bool = True
         ) -> None:
             """Wake an abandoned admission and release any lease it later returns."""
+            if abandon_state["done"]:
+                return
+            abandon_state["done"] = True
             router.cancel_acquire(admission_cancellation)
             if record_cancellation:
                 router.record_cancellation()
@@ -620,7 +616,6 @@ def build_app(
             cancellation_recorded = False
             last_position = None
             try:
-                stream_state["started"] = True
                 yield loading_frame("━━━━━\n")
                 yield loading_frame(f"freetoken-swap loading model: {model}\n")
                 initial_position = reservation_state.get("queuePosition")
@@ -697,8 +692,7 @@ def build_app(
                     yield chunk
             except asyncio.CancelledError:
                 cancelled = True
-                router.cancel_acquire(admission_cancellation)
-                router.record_cancellation()
+                abandon_loading_acquisition(acquisition)
                 cancellation_recorded = True
                 router_event("request_cancelled", profile=model, route=safe_route)
                 raise
@@ -794,17 +788,15 @@ def build_app(
                                 try:
                                     await super().__call__(scope, receive, send)
                                 finally:
-                                    # ASGI cancellation may happen after the
-                                    # response object is returned but before
-                                    # its body iterator starts. The response,
-                                    # not an unstarted generator, must release
-                                    # that admission ownership.
-                                    if not stream_state["started"]:
-                                        with inflight_lock:
-                                            owned = request_id in request_reservations
-                                            request_reservations.pop(request_id, None)
-                                        if owned:
-                                            abandon_loading_acquisition(acquisition)
+                                    # Async-generator finalization can be deferred
+                                    # beyond response termination. The response is
+                                    # the ownership barrier for both unstarted and
+                                    # suspended loading iterators.
+                                    with inflight_lock:
+                                        owned = request_id in request_reservations
+                                        request_reservations.pop(request_id, None)
+                                    if owned:
+                                        abandon_loading_acquisition(acquisition)
 
                         return AdmissionOwnedStreamingResponse(
                             loading_stream(acquisition),
@@ -863,6 +855,13 @@ def build_app(
                 content=content,
                 headers={"Retry-After": "1"} if exc.status_code == 429 else None,
             )
+        except asyncio.CancelledError:
+            with inflight_lock:
+                request_reservations.pop(request_id, None)
+            router.cancel_acquire(admission_cancellation)
+            router.record_cancellation()
+            router_event("request_cancelled", profile=model, route=safe_route)
+            raise
         except BaseException:
             with inflight_lock:
                 request_reservations.pop(request_id, None)

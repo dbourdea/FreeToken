@@ -560,6 +560,12 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
         raise RuntimeError("router hardware observation does not identify a running engine")
     if not all(isinstance(memory.get(key), int) for key in ("ramBytes", "vramBytes")):
         raise RuntimeError("router hardware observation lacks byte measurements")
+    if memory.get("ramAvailable") is not True or memory.get("vramAvailable") is not True:
+        raise RuntimeError("router hardware observation contains unavailable memory measurements")
+    if memory["ramBytes"] <= 0 or memory["vramBytes"] <= 0:
+        raise RuntimeError("router hardware observation contains non-positive memory measurements")
+    if not all(isinstance(memory.get(key), str) and memory[key] for key in ("ramSource", "vramSource")):
+        raise RuntimeError("router hardware observation lacks memory measurement sources")
     (artifacts / f"{label}.hardware.json").write_bytes(raw)
     return hardware
 

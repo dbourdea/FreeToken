@@ -91,7 +91,9 @@ class RoutingCoordinator:
         self._cond = threading.Condition(threading.Lock())
         self._next_sequence = 0
         self._pending: list[tuple[int, int, str]] = []
-        self._pending_by_cancellation: dict[threading.Event, tuple[int, int, str]] = {}
+        self._pending_by_cancellation: dict[
+            threading.Event, tuple[tuple[int, int, str], ModelProfile]
+        ] = {}
         self._leases = 0
         self._reservations = 0
         self._profile_reservations: dict[str, int] = {}
@@ -172,7 +174,7 @@ class RoutingCoordinator:
             self._next_sequence += 1
             self._pending.append(ticket)
             if cancellation is not None:
-                self._pending_by_cancellation[cancellation] = ticket
+                self._pending_by_cancellation[cancellation] = (ticket, profile)
             if on_reserved is not None:
                 try:
                     position = sorted(self._pending).index(ticket) + 1
@@ -184,15 +186,15 @@ class RoutingCoordinator:
                     raise
             while True:
                 if self._shutdown_requested:
-                    self._remove_pending_locked(ticket, cancellation)
-                    self._drop_concurrency_reservation_locked(profile)
+                    if self._remove_pending_locked(ticket, cancellation):
+                        self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
                         "router_shutting_down", "router shutdown is in progress", status_code=503
                     )
                 if cancellation is not None and cancellation.is_set():
-                    self._remove_pending_locked(ticket, cancellation)
-                    self._drop_concurrency_reservation_locked(profile)
+                    if self._remove_pending_locked(ticket, cancellation):
+                        self._drop_concurrency_reservation_locked(profile)
                     self._cond.notify_all()
                     raise RoutingError(
                         "request_cancelled", "request cancelled before admission", status_code=409
@@ -269,17 +271,23 @@ class RoutingCoordinator:
         return RouteLease(self, profile, port, pid)
 
     def cancel_acquire(self, cancellation: threading.Event) -> None:
-        """Wake a queued admission so it can observe caller cancellation."""
+        """Atomically retire queued ownership, then wake its admission worker."""
         with self._cond:
             cancellation.set()
+            pending = self._pending_by_cancellation.get(cancellation)
+            if pending is not None:
+                ticket, profile = pending
+                if self._remove_pending_locked(ticket, cancellation):
+                    self._drop_concurrency_reservation_locked(profile)
             self._cond.notify_all()
 
     def queue_position(self, cancellation: threading.Event) -> int | None:
         """Return the current one-based scheduler position for a reserved request."""
         with self._cond:
-            ticket = self._pending_by_cancellation.get(cancellation)
-            if ticket is None:
+            pending = self._pending_by_cancellation.get(cancellation)
+            if pending is None:
                 return None
+            ticket, _profile = pending
             return sorted(self._pending).index(ticket) + 1
 
     def loading_feedback_enabled(self, name: str) -> bool:
@@ -696,11 +704,18 @@ class RoutingCoordinator:
         self,
         ticket: tuple[int, int, str],
         cancellation: threading.Event | None,
-    ) -> None:
-        """Remove one pending ticket and its optional progress lookup atomically."""
-        self._pending.remove(ticket)
-        if cancellation is not None and self._pending_by_cancellation.get(cancellation) == ticket:
+    ) -> bool:
+        """Idempotently remove one ticket and its optional progress lookup."""
+        try:
+            self._pending.remove(ticket)
+        except ValueError:
+            removed = False
+        else:
+            removed = True
+        pending = self._pending_by_cancellation.get(cancellation) if cancellation is not None else None
+        if pending is not None and pending[0] == ticket:
             self._pending_by_cancellation.pop(cancellation, None)
+        return removed
 
     def _active_profile_ready_locked(self, profile: ModelProfile) -> bool:
         """Whether *profile* is the exact readiness-gated resident engine."""

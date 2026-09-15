@@ -105,8 +105,10 @@ and leaves no temporary engine for daemon cleanup.
 The direct comparison retains its router-owned load receipt and activation
 snapshot privately as well.
 It also saves the authenticated-local `/router/hardware` process and memory
-snapshot for every comparison privately; the published result must remain a
-sanitized aggregate.
+snapshot for every comparison privately. Each loaded-model snapshot must contain
+positive Linux process-tree PSS and per-process GPU-memory values with explicit
+available/source markers; an unavailable probe or compatibility zero fails the
+run. The published result must remain a sanitized aggregate.
 
 The harness requires `--allow-maintenance`, the exact operating-system hostname
 in `--expected-hostname`, a new empty `--artifacts` directory, two known-good

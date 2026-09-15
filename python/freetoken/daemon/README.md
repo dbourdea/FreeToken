@@ -45,7 +45,7 @@ ft daemon start MODEL --port 1919 -- --moe-cache-auto   # args after -- go to ft
 ft daemon status
 ft daemon logs                                 # stream engine logs (SSE)
 ft daemon health                               # proxied serve /health (camelCased)
-ft daemon metrics                              # engine-only RAM(PSS)+VRAM footprint
+ft daemon metrics                              # engine-only RAM(PSS)+process GPU-memory footprint
 ft daemon switch OTHER_MODEL                    # stop old + start new
 ft daemon models                                # list freetoken-swap named profiles
 ft daemon switch-profile coding                 # atomic switch via the local TOML catalog
@@ -77,7 +77,7 @@ vectors for `ft serve`, never shell commands.
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
 | `GET /router/logs?since=` | SSE, bounded native router admission/proxy/cancellation events. It is separate from engine stdout and records route templates only—never concrete paths, request bodies, headers, query strings, model paths, or keys. |
 | `/upstream/{model-id}/...` | Guarded direct passthrough with longest-prefix slash-namespaced ID resolution and escaped suffix preservation. |
-| `GET /engine/metrics` | `{ramBytes,vramBytes}` — the serve tree's own footprint only. |
+| `GET /engine/metrics` | The serve tree's own `{ramBytes,vramBytes,pids}` footprint only. `ramAvailable`/`vramAvailable` and source fields distinguish a measured zero from an unavailable probe; Linux PSS, NVIDIA NVML/SMI, and AMD SMI process memory are supported. |
 | `GET /engine/health` | Proxied serve `/health` + daemon reachability. |
 | `GET /engine/stats` | Proxied serve `/v1/stats`. |
 | `GET /accounting/pending` | Unacknowledged durable final-accounting receipts, replayable after a Desktop/client crash. |

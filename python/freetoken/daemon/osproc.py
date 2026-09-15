@@ -156,6 +156,24 @@ def read_pss_bytes(pid: int) -> int:
     return 0
 
 
+def read_pss_bytes_if_available(pid: int) -> int | None:
+    """PSS in bytes, or ``None`` when this host/process cannot provide it.
+
+    Unlike :func:`read_pss_bytes`, this preserves the distinction between an
+    actual zero and an unavailable ``/proc`` measurement for observability
+    callers that must not present a safe default as measured data.
+    """
+    raw = _read_proc(pid, "smaps_rollup")
+    if not raw:
+        return None
+    for line in raw.splitlines():
+        if line.startswith("Pss:"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1]) * 1024
+    return None
+
+
 def is_ft_serve_on_port(pid: int, port: int, *, starttime: int | None = None) -> bool:
     """Verify ``pid`` is (still) an ``ft serve`` bound to ``port`` — the re-adoption / liveness
     identity check. Requires: alive, unchanged start time (PID-reuse

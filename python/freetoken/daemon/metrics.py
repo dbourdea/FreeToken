@@ -1,13 +1,13 @@
-"""The engine's OWN footprint. Boundary: only the serve tree's RAM/VRAM — system-wide host
-telemetry is not this daemon's job.
+"""The engine's own process-tree footprint, never system-wide host telemetry.
 
-RAM = summed PSS across the serve process group (shared pages counted once, the honest number).
-VRAM = per-process GPU memory for those pids, via ``pynvml`` if importable (optional), else
-parsed from ``nvidia-smi``, else 0. All best-effort and off the event loop — a missing GPU or
-absent NVML returns 0, never an error."""
+RAM is summed Linux PSS. VRAM is per-process GPU memory from NVML/``nvidia-smi`` or
+``amd-smi``. Byte fields remain integers for API compatibility; availability fields prevent an
+unavailable best-effort probe from being misrepresented as a measured zero.
+"""
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -18,11 +18,25 @@ from . import osproc
 
 def engine_footprint(pid: int | None) -> dict:
     if pid is None:
-        return {"ramBytes": 0, "vramBytes": 0, "pids": []}
+        return {
+            "ramBytes": 0, "vramBytes": 0, "pids": [],
+            "ramAvailable": False, "vramAvailable": False,
+            "ramSource": None, "vramSource": None,
+        }
     pids = osproc.tree_pids(pid)
-    ram = sum(osproc.read_pss_bytes(p) for p in pids)
-    vram = vram_bytes_for_pids(pids)
-    return {"ramBytes": ram, "vramBytes": vram, "pids": pids}
+    ram_parts = [osproc.read_pss_bytes_if_available(p) for p in pids]
+    ram_available = bool(ram_parts) and all(value is not None for value in ram_parts)
+    ram = sum(value or 0 for value in ram_parts)
+    vram, vram_available, vram_source = _vram_measurement_for_pids(pids)
+    return {
+        "ramBytes": ram,
+        "vramBytes": vram,
+        "pids": pids,
+        "ramAvailable": ram_available,
+        "vramAvailable": vram_available,
+        "ramSource": "proc-smaps-rollup-pss" if ram_available else None,
+        "vramSource": vram_source,
+    }
 
 
 class FootprintCache:
@@ -48,15 +62,27 @@ class FootprintCache:
 
 
 def vram_bytes_for_pids(pids: list[int]) -> int:
+    return _vram_measurement_for_pids(pids)[0]
+
+
+def _vram_measurement_for_pids(pids: list[int]) -> tuple[int, bool, str | None]:
     want = set(pids)
     if not want:
-        return 0
-    usage = _nvml_process_vram()
-    if usage is None:
-        usage = _smi_process_vram()
-    if not usage:
-        return 0
-    return sum(nbytes for p, nbytes in usage.items() if p in want)
+        return 0, False, None
+    available_source = None
+    for source, probe in (
+        ("nvml", _nvml_process_vram),
+        ("nvidia-smi", _smi_process_vram),
+        ("amd-smi", _amd_smi_process_vram),
+    ):
+        usage = probe()
+        if usage is not None:
+            if any(pid in usage for pid in want):
+                return sum(nbytes for p, nbytes in usage.items() if p in want), True, source
+            available_source = available_source or source
+    if available_source is not None:
+        return 0, True, available_source
+    return 0, False, None
 
 
 # NVML is initialized ONCE and held for the daemon's life — nvmlInit()+nvmlShutdown() on every
@@ -83,6 +109,7 @@ def _nvml_process_vram() -> dict[int, int] | None:
     if not pynvml:
         return None
     out: dict[int, int] = {}
+    queried = False
     try:
         count = pynvml.nvmlDeviceGetCount()
         for i in range(count):
@@ -98,18 +125,18 @@ def _nvml_process_vram() -> dict[int, int] | None:
                         used = getattr(proc, "usedGpuMemory", None)
                         if used:  # None == "not available", per NVML
                             out[int(proc.pid)] = out.get(int(proc.pid), 0) + int(used)
+                    queried = True
                     break
                 except Exception:  # noqa: BLE001
                     continue
     except Exception:  # noqa: BLE001
         return out or None
-    # Empty → NVML enumeration gave nothing usable (e.g. every process getter raised on a
-    # driver/MIG mismatch); signal that with None so the nvidia-smi fallback still runs, matching
-    # the error path above.
-    return out or None
+    # A successfully queried empty process list is a real zero. If every getter failed,
+    # ``queried`` stays false and the command-line fallbacks still run.
+    return out if queried else None
 
 
-def _smi_process_vram() -> dict[int, int]:
+def _smi_process_vram() -> dict[int, int] | None:
     try:
         out = subprocess.run(
             [
@@ -122,13 +149,90 @@ def _smi_process_vram() -> dict[int, int]:
             timeout=3.0,
         )
     except (OSError, subprocess.SubprocessError):
-        return {}
+        return None
     if out.returncode != 0:
-        return {}
+        return None
     usage: dict[int, int] = {}
+    malformed = False
     for line in out.stdout.splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            if line.strip():
+                malformed = True
             continue
         usage[int(parts[0])] = usage.get(int(parts[0]), 0) + int(parts[1]) * 1024 * 1024  # MiB
-    return usage
+    return None if malformed else usage
+
+
+def _memory_bytes(value) -> int | None:
+    """Parse AMD SMI's version-dependent JSON scalar or ``{value, unit}`` form."""
+    if isinstance(value, dict) and "value" in value:
+        unit = value.get("unit", "B")
+        value = value["value"]
+    elif isinstance(value, str):
+        parts = value.strip().split()
+        if not parts:
+            return None
+        value, unit = parts[0], parts[1] if len(parts) > 1 else "B"
+    else:
+        unit = "B"
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    scales = {
+        "b": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3, "tb": 1000**4,
+        "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4,
+    }
+    scale = scales.get(str(unit).strip().lower())
+    if scale is None or amount < 0:
+        return None
+    return int(amount * scale)
+
+
+def _amd_smi_process_vram() -> dict[int, int] | None:
+    """Read process VRAM from the documented ``amd-smi process --json`` schema."""
+    try:
+        out = subprocess.run(
+            ["amd-smi", "process", "--json", "--general"],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        doc = json.loads(out.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    usage: dict[int, int] = {}
+    saw_process = False
+    saw_vram = False
+
+    def visit(node) -> None:
+        nonlocal saw_process, saw_vram
+        if isinstance(node, dict):
+            fields = {str(key).lower(): value for key, value in node.items()}
+            pid = fields.get("pid")
+            memory = fields.get("memory_usage")
+            if isinstance(pid, int) and not isinstance(pid, bool):
+                saw_process = True
+                if isinstance(memory, dict):
+                    memory_fields = {str(key).lower(): value for key, value in memory.items()}
+                    vram = _memory_bytes(memory_fields.get("vram_mem"))
+                    if vram is not None:
+                        saw_vram = True
+                        usage[pid] = usage.get(pid, 0) + vram
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(doc)
+    return None if saw_process and not saw_vram else usage

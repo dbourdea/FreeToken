@@ -305,10 +305,12 @@ def test_admission_reservation_reports_cold_queue_position_and_cleans_up_on_canc
     assert cold == [(True, 1)]
     assert router.queue_position(cancellation) == 1
     router.cancel_acquire(cancellation)
+    assert router.queue_position(cancellation) is None
+    assert router.status()["queuedRequests"] == 0
+    assert router.status()["reservedRequests"] == 1  # only the active low lease remains
     thread.join(1)
     assert not thread.is_alive()
     assert [(error.code, error.status_code) for error in errors] == [("request_cancelled", 409)]
-    assert router.queue_position(cancellation) is None
     assert router.status()["reservedRequests"] == 1
     active.release()
 

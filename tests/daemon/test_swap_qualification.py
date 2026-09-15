@@ -701,10 +701,12 @@ def test_native_router_benchmark_validates_warm_and_swap_activation_labels(nativ
 def test_native_router_benchmark_captures_private_hardware_observation(
     native_router_qualifier, monkeypatch, tmp_path
 ):
-    captured = b'{"engine":{"running":true,"pid":7,"port":1234},"memory":{"ramBytes":3,"vramBytes":4}}'
+    captured = b'{"engine":{"running":true,"pid":7,"port":1234},"memory":{"ramBytes":3,"vramBytes":4,"ramAvailable":true,"vramAvailable":true,"ramSource":"proc-smaps-rollup-pss","vramSource":"amd-smi"}}'
     monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (captured, {
         "engine": {"running": True, "pid": 7, "port": 1234},
-        "memory": {"ramBytes": 3, "vramBytes": 4},
+        "memory": {"ramBytes": 3, "vramBytes": 4, "ramAvailable": True,
+                   "vramAvailable": True, "ramSource": "proc-smaps-rollup-pss",
+                   "vramSource": "amd-smi"},
     }))
 
     hardware = native_router_qualifier.capture_hardware("http://test", tmp_path, "warm-a")
@@ -745,6 +747,34 @@ def test_native_router_benchmark_rejects_incomplete_hardware_observation(
     native_router_qualifier, monkeypatch, tmp_path, hardware
 ):
     monkeypatch.setattr(native_router_qualifier, "request_json", lambda *a, **k: (b"{}", hardware))
+    with pytest.raises(RuntimeError):
+        native_router_qualifier.capture_hardware("http://test", tmp_path, "bad")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("vramAvailable", False), ("ramBytes", 0), ("vramSource", None)],
+)
+def test_native_router_benchmark_rejects_unmeasured_hardware_values(
+    native_router_qualifier, monkeypatch, tmp_path, field, value
+):
+    memory = {
+        "ramBytes": 3,
+        "vramBytes": 4,
+        "ramAvailable": True,
+        "vramAvailable": True,
+        "ramSource": "proc-smaps-rollup-pss",
+        "vramSource": "amd-smi",
+    }
+    memory[field] = value
+    hardware = {
+        "engine": {"running": True, "pid": 7, "port": 1234},
+        "memory": memory,
+    }
+    monkeypatch.setattr(
+        native_router_qualifier, "request_json", lambda *args, **kwargs: (b"{}", hardware)
+    )
+
     with pytest.raises(RuntimeError):
         native_router_qualifier.capture_hardware("http://test", tmp_path, "bad")
 
