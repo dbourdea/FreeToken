@@ -1140,10 +1140,28 @@ def build_app(
                     "targets": list(selector.targets),
                 })
                 record["meta"] = {"freetoken": selector_metadata}
-            elif profile.description:
-                record["description"] = profile.description
             if profile is not None:
-                record.update(profile.capabilities.model_listing_fields())
+                if profile.display_name:
+                    record["name"] = profile.display_name.strip()
+                if profile.description:
+                    record["description"] = profile.description.strip()
+                capability_fields = profile.capabilities.model_listing_fields()
+                record.update(capability_fields)
+                metadata = profile.metadata()
+                if not profile.capabilities.empty():
+                    for key in (
+                        "architecture", "capabilities", "supported_parameters",
+                        "context_length", "context_window",
+                    ):
+                        metadata.pop(key, None)
+                if model_id == profile.name:
+                    internal_metadata = {"type": "model"}
+                    if profile.aliases:
+                        internal_metadata["aliases"] = list(profile.aliases)
+                else:
+                    internal_metadata = {"type": "alias", "modelID": profile.name}
+                metadata.update(internal_metadata)
+                record.setdefault("meta", {})["freetoken"] = metadata
             data.append(record)
         routing_profile = (
             catalog_snapshot.routing_profile(active_routing_profile)

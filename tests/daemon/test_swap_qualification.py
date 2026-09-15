@@ -620,9 +620,25 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                 body = {
                     "object": "list",
                     "data": [
-                        {"id": "model-a", "created": 10 if self.path == "/v1/models" else 11},
+                        {
+                            "id": "model-a",
+                            "created": 10 if self.path == "/v1/models" else 11,
+                            "name": "Qualification model A",
+                            "meta": {"freetoken": {
+                                "aliases": ["compat/model-a"],
+                                "tier": "qualification", "type": "model",
+                            }},
+                        },
                         {"id": "model-b", "created": 10 if self.path == "/v1/models" else 11},
-                        {"id": "compat/model-a", "created": 10 if self.path == "/v1/models" else 11},
+                        {
+                            "id": "compat/model-a",
+                            "created": 10 if self.path == "/v1/models" else 11,
+                            "name": "Qualification model A",
+                            "meta": {"freetoken": {
+                                "modelID": "model-a", "tier": "qualification",
+                                "type": "alias",
+                            }},
+                        },
                         {"id": "preferred-model", "created": 10 if self.path == "/v1/models" else 11},
                     ],
                 }
@@ -634,6 +650,8 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                         "name": "model-a", "resident": True,
                         "checkEndpoint": "/ready",
                         "useModelName": "model-a",
+                        "displayName": "Qualification model A",
+                        "metadata": {"tier": "qualification", "type": "operator"},
                     },
                     {
                         "name": "model-b", "resident": False,
@@ -691,6 +709,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["routingProfileListed"] is True
     assert observation["configuredReadinessTargetVerified"] is True
     assert observation["configuredUpstreamModelNameVerified"] is True
+    assert observation["configuredModelMetadataVerified"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
@@ -937,6 +956,10 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert catalog.get("model-a").check_endpoint == "/ready"
     assert catalog.get("model-a").proxy == "http://127.0.0.1:${PORT}"
     assert catalog.get("model-a").use_model_name == "model-a"
+    assert catalog.get("model-a").display_name == "Qualification model A"
+    assert catalog.get("model-a").metadata() == {
+        "tier": "qualification", "type": "operator",
+    }
     assert catalog.get("compat/model-a").name == "model-a"
     assert "model-a" in catalog.get("model-a").args
     assert catalog.get("model-b").model == "second.gguf"

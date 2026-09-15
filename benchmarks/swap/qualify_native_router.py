@@ -543,6 +543,10 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     ) if isinstance(routing_profiles, list) else None
     resident = [item.get("name") for item in routed_rows if item.get("resident")]
     routed_a = next((item for item in routed_rows if item.get("name") == "model-a"), None)
+    listed_a = next((item for item in model_rows if item.get("id") == "model-a"), None)
+    listed_alias_a = next(
+        (item for item in model_rows if item.get("id") == "compat/model-a"), None
+    )
     if (
         not {"model-a", "model-b", "compat/model-a", "preferred-model"}.issubset(aliases)
         or routed_names != profile_names
@@ -558,6 +562,18 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         or not isinstance(routed_a, dict)
         or routed_a.get("checkEndpoint") != "/ready"
         or routed_a.get("useModelName") != "model-a"
+        or routed_a.get("displayName") != "Qualification model A"
+        or routed_a.get("metadata") != {"tier": "qualification", "type": "operator"}
+        or not isinstance(listed_a, dict)
+        or listed_a.get("name") != "Qualification model A"
+        or listed_a.get("meta", {}).get("freetoken") != {
+            "aliases": ["compat/model-a"], "tier": "qualification", "type": "model",
+        }
+        or not isinstance(listed_alias_a, dict)
+        or listed_alias_a.get("name") != "Qualification model A"
+        or listed_alias_a.get("meta", {}).get("freetoken") != {
+            "modelID": "model-a", "tier": "qualification", "type": "alias",
+        }
         or not isinstance(namespaced_stats, dict)
         or b"freetoken_swap_admissions_total" not in metrics_raw
     ):
@@ -596,6 +612,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "routingProfileListed": True,
         "configuredReadinessTargetVerified": True,
         "configuredUpstreamModelNameVerified": True,
+        "configuredModelMetadataVerified": True,
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
         "namespacedUpstreamVerified": True,
@@ -1005,10 +1022,16 @@ def native_catalog_text(
         if persistent_a and alias == "model-a":
             profile_lines.append('group = "resident"')
         if alias == "model-a":
+            profile_lines.append('name = "Qualification model A"')
             profile_lines.append('aliases = ["compat/model-a"]')
         profile_lines.extend((
             "args = " + json.dumps(common_args).replace("${MODEL_ID}", alias), ""
         ))
+        if alias == "model-a":
+            profile_lines.extend((
+                "[models.model-a.metadata]", 'tier = "qualification"',
+                'type = "operator"', "",
+            ))
         catalog.extend(profile_lines)
     if invalid_model is not None:
         catalog.extend((

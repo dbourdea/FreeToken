@@ -92,6 +92,35 @@ context = 32768
     }
 
 
+def test_catalog_validates_model_display_name_and_json_metadata(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.coding]
+model = "coding.gguf"
+name = "  Coding Model  "
+description = "   "
+
+[models.coding.metadata]
+tier = "stable"
+tags = ["local", "text"]
+
+[models.coding.metadata.nested]
+enabled = true
+""",
+        encoding="utf-8",
+    )
+
+    profile = ModelCatalog.load(str(path)).get("coding")
+
+    assert profile.display_name == "Coding Model"
+    assert profile.description is None
+    assert profile.metadata() == {
+        "nested": {"enabled": True}, "tags": ["local", "text"], "tier": "stable",
+    }
+    assert profile.public()["displayName"] == "Coding Model"
+    assert profile.public()["metadata"] == profile.metadata()
+
+
 def test_catalog_validates_request_fields_and_creates_variant_aliases(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(
@@ -220,6 +249,10 @@ model = "two.gguf"
     ("[models.bad]\nmodel = 'm'\nport = -1\n", "0 through 65535"),
     ("[models.bad]\nmodel = 'm'\nuse_model_name = ''\n", "non-empty trimmed"),
     ("[models.bad]\nmodel = 'm'\nuse_model_name = ' bad'\n", "non-empty trimmed"),
+    (
+        "[models.bad]\nmodel = 'm'\n[models.bad.metadata]\ncreated = 2026-09-14\n",
+        "JSON-compatible",
+    ),
 ])
 def test_catalog_rejects_ambiguous_or_shell_style_profiles(tmp_path, content, message):
     path = tmp_path / "models.toml"

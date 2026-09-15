@@ -1428,6 +1428,12 @@ def test_model_list_renders_capability_metadata_for_canonical_and_alias():
                 (),
                 aliases=("compat-id",),
                 capabilities=ModelCapabilities(("text",), ("text",), True, 32768),
+                display_name=" Canonical Model ",
+                description=" Public description ",
+                metadata_json=(
+                    '{"architecture":"operator","context_window":1,"custom":"remain",'
+                    '"type":"operator"}'
+                ),
             )
         },
         settings=RouterSettings(include_aliases_in_list=True),
@@ -1442,6 +1448,8 @@ def test_model_list_renders_capability_metadata_for_canonical_and_alias():
 
     assert [record["id"] for record in data] == ["canonical", "compat-id"]
     for record in data:
+        assert record["name"] == "Canonical Model"
+        assert record["description"] == "Public description"
         assert record["architecture"] == {
             "input_modalities": ["text"],
             "output_modalities": ["text"],
@@ -1451,7 +1459,18 @@ def test_model_list_renders_capability_metadata_for_canonical_and_alias():
         assert record["supported_parameters"] == ["tools", "tool_choice"]
         assert record["context_length"] == 32768
         assert record["context_window"] == 32768
-        assert record["meta"] == {"n_ctx": 32768}
+    assert data[0]["meta"] == {
+        "n_ctx": 32768,
+        "freetoken": {
+            "aliases": ["compat-id"], "custom": "remain", "type": "model",
+        },
+    }
+    assert data[1]["meta"] == {
+        "n_ctx": 32768,
+        "freetoken": {
+            "custom": "remain", "modelID": "canonical", "type": "alias",
+        },
+    }
     assert "private.gguf" not in str(data)
 
 
@@ -1468,8 +1487,9 @@ def test_model_list_omits_empty_capability_metadata():
 
     assert not {
         "architecture", "capabilities", "supported_parameters", "context_length",
-        "context_window", "meta",
+        "context_window",
     }.intersection(record)
+    assert record["meta"] == {"freetoken": {"type": "model"}}
 
 
 def test_openai_model_list_reports_canonical_and_alias_loaded_while_activating():

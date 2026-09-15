@@ -47,6 +47,7 @@ model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
 port = 1922
 args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
 description = "GMKtek EVO-X2 candidate coding profile"
+name = "Qwen coder"
 aliases = ["qwen-coder-compatible"]
 concurrency_limit = 2
 ready_timeout_s = 300
@@ -54,6 +55,10 @@ check_endpoint = "/ready"
 proxy = "http://127.0.0.1:${PORT}"
 use_model_name = "qwen-coder"
 send_loading_state = false
+
+[models.qwen-coder.metadata]
+tier = "candidate"
+family = "qwen"
 
 [models.qwen-coder.capabilities]
 in = ["text"]
@@ -115,7 +120,11 @@ Model lifecycle entries accept allowlisted `model`, `port`, `args`, `description
 `unlisted`, readiness, TTL/unload, priority, group, and safe JSON request-filter
 fields. Optional `use_model_name` gives the same profile a distinct model name
 for outbound JSON requests without changing its configured or requested routing
-identity. A nested `capabilities` table may declare `in`/`out`
+identity. Optional `name` and JSON-compatible `metadata` provide display-only
+model-list information; canonical and listed alternate IDs share those values.
+Router-owned `type`, `aliases`, and `modelID` metadata wins over conflicting
+operator keys, and declared capabilities own their rendered architecture,
+capability, parameter, and context fields. A nested `capabilities` table may declare `in`/`out`
 text modalities, `tools`, and a nonnegative `context` length for compatible
 model-list clients. This metadata does not enable model behavior: operators
 must advertise tools only when the model and chat template actually support

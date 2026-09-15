@@ -213,6 +213,11 @@ class ModelProfile:
     check_endpoint: str = DEFAULT_CHECK_ENDPOINT
     proxy: str = DEFAULT_PROXY
     use_model_name: str | None = None
+    display_name: str | None = None
+    metadata_json: str = "{}"
+
+    def metadata(self) -> dict[str, Any]:
+        return json.loads(self.metadata_json)
 
     def proxy_base_url(self, port: int) -> str:
         """Resolve the validated loopback template to this owned child port."""
@@ -229,6 +234,8 @@ class ModelProfile:
     def public(self) -> dict[str, Any]:
         doc = self.request()
         doc["name"] = self.name
+        if self.display_name:
+            doc["displayName"] = self.display_name
         if self.description:
             doc["description"] = self.description
         doc["readyTimeoutS"] = self.ready_timeout_s
@@ -265,6 +272,9 @@ class ModelProfile:
             doc["proxy"] = self.proxy
         if self.use_model_name is not None:
             doc["useModelName"] = self.use_model_name
+        metadata = self.metadata()
+        if metadata:
+            doc["metadata"] = metadata
         return doc
 
 
@@ -574,7 +584,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
         "concurrency_limit", "send_loading_state", "capabilities", "set_fields",
-        "set_fields_by_id", "check_endpoint", "proxy", "use_model_name",
+        "set_fields_by_id", "check_endpoint", "proxy", "use_model_name", "name", "metadata",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -602,9 +612,13 @@ def _profile(name: str, value: object) -> ModelProfile:
     # daemon-wide fixed default for backwards-compatible catalogs.
     if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535):
         raise CatalogError(f"models.{name}.port must be an integer from 0 through 65535")
-    description = value.get("description")
-    if description is not None and (not isinstance(description, str) or "\x00" in description):
-        raise CatalogError(f"models.{name}.description must be a string without NUL")
+    description = _public_text(
+        value.get("description"), f"models.{name}.description"
+    )
+    display_name = _public_text(value.get("name"), f"models.{name}.name")
+    metadata_json = _metadata_json(
+        value.get("metadata", {}), f"models.{name}.metadata"
+    )
     ready_timeout_s = _finite_seconds(value.get("ready_timeout_s", 120), f"models.{name}.ready_timeout_s", minimum=1, maximum=900)
     ttl_s = value.get("ttl_s")
     if ttl_s is not None:
@@ -676,7 +690,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         ttl_s, unload_timeout_s, priority, group,
         tuple(".".join(path) for path in normalized_drop_fields), tuple(aliases), unlisted,
         concurrency_limit, send_loading_state, capabilities, set_fields, set_fields_by_id,
-        check_endpoint, proxy, use_model_name,
+        check_endpoint, proxy, use_model_name, display_name, metadata_json,
     )
 
 
@@ -725,6 +739,25 @@ def _upstream_model_name(value: object, field: str) -> str | None:
             f"{field} must be a non-empty trimmed string without control characters"
         )
     return value
+
+
+def _metadata_json(value: object, field: str) -> str:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise CatalogError(f"{field} must be a table with string keys")
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogError(f"{field} must be JSON-compatible") from exc
+
+
+def _public_text(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or "\x00" in value:
+        raise CatalogError(f"{field} must be a string without NUL")
+    return value.strip() or None
 
 
 def _request_field_path(value: object, field: str) -> tuple[str, ...]:
@@ -877,15 +910,7 @@ def _selector(name: str, value: object) -> ModelSelector:
     unlisted = value.get("unlisted", False)
     if not isinstance(unlisted, bool):
         raise CatalogError(f"{field}.unlisted must be a boolean")
-    metadata = value.get("metadata", {})
-    if not isinstance(metadata, dict) or not all(isinstance(key, str) for key in metadata):
-        raise CatalogError(f"{field}.metadata must be a table with string keys")
-    try:
-        metadata_json = json.dumps(
-            metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
-        )
-    except (TypeError, ValueError) as exc:
-        raise CatalogError(f"{field}.metadata must be JSON-compatible") from exc
+    metadata_json = _metadata_json(value.get("metadata", {}), f"{field}.metadata")
     return ModelSelector(
         name,
         strategy,
