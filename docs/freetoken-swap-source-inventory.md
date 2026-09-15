@@ -150,7 +150,7 @@ tests, and UI tests. Native deterministic coverage lives in `tests/daemon`:
 | --- | --- |
 | Catalog validation, routing, HTTP/auth/SSE, filters, profiles/selectors, loading state, cancellation, TTL, reload, metrics/logs, process/accounting and startup hooks | **Native deterministic evidence present.** |
 | Disposable actual-child process, process-group cleanup, re-adoption and routed SSE on Linux | **Native hosted-Linux evidence present** at the exact PR lineage recorded in the parity matrix. |
-| Combined-tree/current engine compatibility | Required at final head; prior evidence does not substitute for the final audit. |
+| Combined-tree/current engine compatibility | A clean synthetic tree at the recorded current swap/AMD heads passed 376 daemon/privacy/benchmark/reproducibility tests (7 Windows skips) and 21 model tests. Current-engine and protected restoration evidence remain required. |
 | GMKtek EVO-X2 direct/warm/cold/A-B-A/concurrency/cancellation/failure/rollback/re-adoption/reload/TTL/auth/metrics/logs/restoration | **Live evidence missing; maintenance authorization required.** |
 | Bounded activity/stat and opt-in capture APIs | **Native deterministic implementation and tests present.** Body-free rows survive app reconstruction; captures remain memory-only by policy. UI fetches captures only on explicit selection. |
 | Periodic performance history | **Native deterministic implementation and tests present.** One-hour eviction, filtering, privacy, auth, disabled behavior, probe failure isolation, and sampler generation cleanup are covered. |

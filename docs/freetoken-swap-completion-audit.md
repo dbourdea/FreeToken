@@ -68,6 +68,15 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   qualification.
 - No current-branch maintenance-window benchmark artifact has been published.
   Raw paths, prompts, responses, logs, and host data must remain private.
+- Current isolated combined-tree CPU verification used swap head
+  `da4b8df7ddb191651a095e3266b8360b5b13307d` and draft AMD compatibility
+  head `c0534c6f38162cb2ddfd0193cd9bf1031613dde1`. Git produced the clean
+  synthetic tree `7d46740d9562abee5f7afa3d522ff25614cc6b2c` without checking out or
+  changing either branch. On Windows, 376 daemon/privacy/benchmark-contract/
+  reproducibility tests passed with 7 expected Linux skips, and all 21
+  grouped-output, SSM, and GGUF configuration tests passed in a disposable
+  Python 3.13 / torch 2.13 CPU environment. This proves source compatibility
+  only; no protected service, model, GPU, or runtime was inspected or changed.
 
 ## Requirement evidence and gaps
 
@@ -82,10 +91,10 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Rollback protections | Launch/readiness recovery, newer lifecycle intent, accounting preservation, and current-branch hosted Linux real-child rollback/process-group cleanup passed; historical invalid-GGUF evidence is retained separately | Current-engine real-model recovery execution remains required |
 | Client cancellation | Native opaque router request IDs, atomic duplicate-ID rejection before admission/upstream work, disconnect-aware admission, queued/connecting/active request list, explicit cancel endpoint across every owned phase, orphan socket close, lease release, and cancellation metrics. Failed, disconnected, or cancelled admission and failed upstream connection release ownership safely. | Deterministic HTTP tested; current native same-instance GPU verification required |
 | Authentication and observability | Bearer, Basic-password, and `X-Api-Key` inference authentication with precedence and local termination; separate `X-FT-Token` lifecycle control; catalog-key-protected `/models` compatibility alias; configured aliases and profiles; Prometheus metrics; bounded router-log SSE; exact-origin qualification credentials | Deterministic HTTP tested; current native GMKtek control-plane execution required |
-| Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, 21 combined-tree model tests | Qualified only for documented models and bounded workloads |
+| Model compatibility | Mixed-format Qwen/GDN repair, tokenizer checks, exact-model contracts, prior live completion evidence, and 21 current isolated combined-tree model tests | Source-compatible at the recorded heads; current-engine real-model qualification remains required |
 | Production protection | Isolated test paths, explicit maintenance gate, exact operator-supplied hostname required before artifacts or service inspection, historical restore/completion checks, no interruption during combined-tree checks | Maintained and fail-closed; no current protected workload was touched |
 | Privacy | Generic GMKtek EVO-X2 label, sanitized public metadata and examples, privacy regressions, regenerated reviewed PDF | Current publication changes sanitized; historical copies not erased |
-| FreeToken-only publication | Public GitHub recheck on 2026-09-14: draft PR 1 targets `main` from `feat/freetoken-swap`, and its public PR ref matched the branch head at recheck; draft PR 2 targets `amd-rocm-gfx1151` from `fix/qwen36-swap-compat` | Submitted, draft, not merged |
+| FreeToken-only publication | Public GitHub recheck on 2026-09-15: draft PR 1 targets `main` from `feat/freetoken-swap`, and its public PR ref matched the branch head at recheck; draft PR 2 targets `amd-rocm-gfx1151` from `fix/qwen36-swap-compat` | Submitted, draft, not merged |
 
 The PRs target different base branches: PR 1 targets `main`; PR 2 targets
 `amd-rocm-gfx1151`. Their current draft state and branch relationships were

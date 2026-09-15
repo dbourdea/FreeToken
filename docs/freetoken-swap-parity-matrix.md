@@ -84,6 +84,14 @@ This closes the current-branch
 disposable Linux process gate only; it does not qualify the current FreeToken
 engine, GPU models, or the GMKtek maintenance matrix.
 
+Git also produced clean synthetic combined tree
+`7d46740d9562abee5f7afa3d522ff25614cc6b2c` from swap head `da4b8df7` and
+draft AMD compatibility head `c0534c6f`. In an isolated Windows export, 376
+daemon/privacy/benchmark-contract/reproducibility tests passed with 7 expected
+Linux skips, followed by 21/21 grouped-output, SSM, and GGUF configuration
+tests in a disposable CPU torch environment. This is source-tree compatibility
+evidence only; it is not current-engine, GPU-model, or restoration proof.
+
 ## Architecture gate
 
 The target is one FreeToken-owned router and lifecycle supervisor. It must not
