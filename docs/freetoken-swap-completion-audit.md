@@ -35,16 +35,17 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 310 daemon
+- Local deterministic verification on the current Windows checkout: 313 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `53b1c6c0b2c64c9e3bae58868d16d229cb32a244` (Actions run `34927293691`)
-  reported 317 passed with zero failures, errors, or skips. This includes the
+  `a3fc0ddbf6c929164aa925d50c2270c1ca90c318` (Actions run `34933392153`)
+  reported 320 passed with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
   listing coverage, model display/metadata collision precedence, ordered
-  upstream-model/request-filter, per-profile upstream-timeout, and generated-alias coverage, and
+  upstream-model/request-filter, per-profile upstream-timeout, startup
+  preload/profile, and generated-alias coverage, and
   pin/warm selector and runtime routing-profile parsing, routing, listing,
   metadata, management-isolation, reload-reset, safe readiness/proxy-target,
   and qualifier gates.
@@ -61,7 +62,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented and reverified locally |
-| Model catalog and lifecycle controls | Validated TOML catalog, collision-safe slash-namespaced and colon-variant alternate IDs, ordered upstream-model/strip/hard/soft/by-ID JSON filters with protected routing identity, runtime pin profiles, pin/warm virtual selectors with listing metadata, unlisted model entries, safe configured readiness paths and manager-owned loopback proxy prefixes, authenticated profile endpoints, native process manager, longest-prefix direct-upstream resolution, and exact explicit/dynamic/omitted-default-port re-adoption. Spillover is rejected as incompatible with one-resident capacity. | Implemented and CPU/HTTP tested; profile/selector/readiness-target/upstream-model live canaries remain required |
+| Model catalog and lifecycle controls | Validated TOML catalog, collision-safe slash-namespaced and colon-variant alternate IDs, ordered upstream-model/strip/hard/soft/by-ID JSON filters with protected routing identity, runtime and startup pin profiles, singleton native startup preload, pin/warm virtual selectors with listing metadata, unlisted model entries, safe configured readiness paths and manager-owned loopback proxy prefixes, authenticated profile endpoints, native process manager, longest-prefix direct-upstream resolution, and exact explicit/dynamic/omitted-default-port re-adoption. Spillover is rejected as incompatible with one-resident capacity. | Implemented and CPU/HTTP tested; profile/selector/readiness-target/upstream-model/startup live canaries remain required |
 | Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware default health checks, safe profile-configured readiness paths, exact owned-port proxy targets with optional path prefixes, ordinary and SSE completions, side-effect-free sanitized browser preflight, authenticated model-list CORS, exact `/models` listing alias, public model entries with atomic loaded/activating/unloaded status, collision-safe display/JSON metadata, and declarative text/tool/context capability metadata matching the pinned listing fields | CPU/HTTP tested; current native real-engine evidence required |
 | Streaming cold-load feedback | Global/per-profile safe configuration; atomic post-concurrency cold admission; reasoning and queue-position SSE; upstream continuation; in-band terminal errors; strict warm/route/stream bypass; explicit cancellation and disconnect cleanup | Deterministic HTTP and hosted Linux disposable-child gates passed; current GMKtek native execution required |
