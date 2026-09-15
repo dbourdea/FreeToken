@@ -268,6 +268,81 @@ def test_catalog_accepts_colon_variant_model_ids(tmp_path):
     assert ModelCatalog.load(str(path)).get("coding:high").name == "coding:high"
 
 
+def test_catalog_validates_pin_and_warm_selectors(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.a]
+model = "a.gguf"
+aliases = ["a:variant"]
+[models.b]
+model = "b.gguf"
+
+[selectors.public]
+strategy = "pin"
+targets = ["a:variant", "b"]
+name = "Public Model"
+description = "Stable local model"
+[selectors.public.metadata]
+tier = "stable"
+type = "operator-value"
+
+[selectors.available]
+strategy = "warm"
+targets = ["a", "b"]
+
+[selectors.hidden]
+strategy = "pin"
+targets = ["a"]
+unlisted = true
+""",
+        encoding="utf-8",
+    )
+
+    catalog = ModelCatalog.load(str(path))
+
+    assert catalog.selector("public").targets == ("a:variant", "b")
+    assert catalog.selector("available").strategy == "warm"
+    assert catalog.public_selectors() == [
+        {"name": "available", "strategy": "warm", "targets": ["a", "b"]},
+        {"name": "hidden", "strategy": "pin", "targets": ["a"], "unlisted": True},
+        {
+            "name": "public", "strategy": "pin", "targets": ["a:variant", "b"],
+            "displayName": "Public Model", "description": "Stable local model",
+            "metadata": {"tier": "stable", "type": "operator-value"},
+        },
+    ]
+    assert catalog.listed_model_ids() == ("a", "b", "available", "public")
+
+
+@pytest.mark.parametrize("content,message", [
+    (
+        '[selectors.bad]\nstrategy = "spillover"\ntargets = ["a"]\n',
+        "requires multi-resident or peer capacity",
+    ),
+    ('[selectors.bad]\nstrategy = "random"\ntargets = ["a"]\n', "pin or warm"),
+    ('[selectors.bad]\nstrategy = "pin"\ntargets = []\n', "1 to 64"),
+    (
+        '[selectors.bad]\nstrategy = "pin"\ntargets = ["a"]\n'
+        '[selectors.bad.metadata]\ncreated = 2026-09-14\n',
+        "JSON-compatible",
+    ),
+    ('[selectors.bad]\nstrategy = "pin"\ntargets = ["missing"]\n', "not a configured"),
+    ('[selectors.a]\nstrategy = "pin"\ntargets = ["a"]\n', "conflicts"),
+    (
+        '[selectors.first]\nstrategy = "pin"\ntargets = ["second"]\n'
+        '[selectors.second]\nstrategy = "warm"\ntargets = ["a"]\n',
+        "cannot reference another selector",
+    ),
+])
+def test_catalog_rejects_unsupported_or_ambiguous_selectors(
+    tmp_path, content, message
+):
+    path = tmp_path / "models.toml"
+    path.write_text('[models.a]\nmodel = "a.gguf"\n' + content, encoding="utf-8")
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
 def test_catalog_supports_namespaced_model_ids_and_longest_upstream_prefix(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(

@@ -68,6 +68,15 @@ context = 4096
 [models.qwen-chat]
 model = "/models/Qwen3.5-27B-Q4_K_M.gguf"
 args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
+
+[selectors.preferred-chat]
+strategy = "warm"
+targets = ["qwen-coder-compatible", "qwen-chat"]
+name = "Preferred chat model"
+description = "Reuse a ready target, otherwise start the first target"
+
+[selectors.preferred-chat.metadata]
+tier = "stable"
 ```
 
 ```bash
@@ -104,6 +113,21 @@ fields are owned by the supervisor and are part of its conflict and re-adoption
 identity. The model files and catalog remain local operational configuration,
 not repository content.
 
+Selectors are inference-only virtual model IDs. `pin` always resolves to its
+first ordered target. `warm` resolves to the first readiness-gated resident
+target, then the first target already activating, and otherwise falls back to
+the first target. Resolution rewrites the request's top-level `model` to the
+selected canonical or alternate target before that target's ordered request
+filters run. Selector IDs appear in `/v1/models` unless `unlisted = true`;
+their loaded status follows only the first target for `pin` and any target for
+`warm`. Optional JSON-compatible selector `metadata` is nested under
+`meta.freetoken`, while router-owned `type`, `strategy`, and `targets` keys
+cannot be overridden. Targets must be configured profiles or aliases, selector
+chaining is rejected, and `/upstream/{model-id}` plus named unload remain
+concrete profile/alias controls. The `spillover` strategy requires concurrent
+multi-resident or peer capacity and is therefore rejected under FreeToken's
+explicit one-resident policy rather than emulated inaccurately.
+
 `drop_fields` removes configured dot-delimited object paths. `set_fields`
 forces JSON-compatible values; a quoted key ending in `?` sets the value only
 when that path is absent, so explicit `null`, zero, and false remain client
@@ -111,8 +135,9 @@ choices. `set_fields_by_id` runs last and can override global assignments for a
 canonical or alternate requested ID. Its table names automatically become
 aliases of the same resident model, subject to the normal collision checks.
 Filters run in `drop_fields`, `set_fields`, then `set_fields_by_id` order and
-never alter the protected top-level `model` selector. They apply after the
-router acquires the exact profile snapshot, including to JSON direct-upstream
+cannot directly configure the protected top-level `model` field. For a
+selector request, the router first replaces that field with the resolved
+target; filters then apply to the exact acquired target snapshot, including to JSON direct-upstream
 requests; non-JSON direct bodies and profiles with no filters remain byte-exact.
 An active profile cannot have its filter policy changed by catalog reload.
 There is no expression evaluator or lifecycle shell-hook language.

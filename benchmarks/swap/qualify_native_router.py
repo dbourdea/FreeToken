@@ -494,7 +494,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     )
     resident = [item.get("name") for item in routed_rows if item.get("resident")]
     if (
-        not {"model-a", "model-b", "compat/model-a"}.issubset(aliases)
+        not {"model-a", "model-b", "compat/model-a", "preferred-model"}.issubset(aliases)
         or routed_names != profile_names
         or not {"model-a", "model-b"}.issubset(routed_names)
         or resident != ["model-a"]
@@ -532,6 +532,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "unauthenticatedControlRejected": True,
         "unauthenticatedInferenceRejected": True,
         "aliasCount": len(aliases),
+        "selectorListed": "preferred-model" in aliases,
         "profileCount": len(profile_names),
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
@@ -539,6 +540,30 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "apiKeyFormsVerified": ["bearer", "basic", "x-api-key"],
         "metricsAvailable": True,
         "routerLogSseAvailable": True,
+        "passed": True,
+    }
+
+
+def selector_canary(base: str, artifacts: Path) -> dict:
+    """Prove a warm virtual ID reuses the resident target without a swap."""
+    _, before = request_json(base + "/router/status")
+    prior_activations = before.get("activations")
+    if before.get("activeProfile") != "model-a" or not isinstance(prior_activations, int):
+        raise RuntimeError("warm selector canary requires resident model-a")
+    raw, completion = canary(base, "preferred-model", direct=False)
+    _, after = request_json(base + "/router/status")
+    if (
+        completion.get("passed") is not True
+        or after.get("activeProfile") != "model-a"
+        or after.get("activeRequests") != 0
+        or after.get("activations") != prior_activations
+    ):
+        raise RuntimeError("warm selector did not reuse the resident target")
+    (artifacts / "warm-selector.sse").write_bytes(raw)
+    return {
+        "strategy": "warm",
+        "resolvedProfile": "model-a",
+        "activationDelta": 0,
         "passed": True,
     }
 
@@ -847,6 +872,11 @@ def native_catalog_text(
     ]
     if api_key is not None:
         catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]
+    catalog.extend((
+        "[selectors.preferred-model]", 'strategy = "warm"',
+        'targets = ["model-b", "model-a"]', 'name = "Preferred local model"',
+        'description = "Reuses a ready target before the ordered cold fallback"', "",
+    ))
     if persistent_a:
         catalog.extend((
             "[router.groups.resident]", 'members = ["model-a"]', "swap = false",
@@ -960,6 +990,7 @@ def main() -> int:
                 loaded["router"], alias="model-a", prior_activations=0, expected_delta=1
             )
             result["controlPlane"] = control_plane_canary(base, artifacts)
+            result["selector"] = selector_canary(base, artifacts)
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
             (artifacts / "direct-a.load.json").write_bytes(loaded_raw)
@@ -1068,6 +1099,7 @@ def main() -> int:
                 and result.get("persistentCapacity", {}).get("passed") is True
                 and result.get("conflictingRequest", {}).get("passed") is True
                 and result.get("controlPlane", {}).get("passed") is True
+                and result.get("selector", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

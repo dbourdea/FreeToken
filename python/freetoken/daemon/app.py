@@ -374,12 +374,21 @@ def build_app(
         name: str,
         cancellation: threading.Event | None = None,
         on_reserved: Callable[[bool, int], None] | None = None,
+        *,
+        apply_loading_policy: bool = False,
     ):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
         loop = asyncio.get_running_loop()
         cancellation = cancellation or threading.Event()
         future = loop.run_in_executor(
-            lifecycle_pool, router.acquire, name, cancellation, on_reserved
+            lifecycle_pool,
+            functools.partial(
+                router.acquire,
+                name,
+                cancellation,
+                on_reserved,
+                apply_loading_policy=apply_loading_policy,
+            ),
         )
         shielded = asyncio.shield(future)
         try:
@@ -574,16 +583,28 @@ def build_app(
                 "cancelled": False,
             }
 
-        def filtered_body(profile) -> bytes:
+        def filtered_body(route_lease) -> bytes:
             if not apply_request_filters:
                 return body
+            profile = route_lease.profile
+            target_model = route_lease.model_id or model
             return filter_request_body(
                 body,
                 profile.drop_fields,
                 profile.set_fields,
                 profile.set_fields_by_id,
-                requested_model=model,
+                requested_model=target_model,
+                rewrite_model=(
+                    target_model if route_lease.selector_id is not None else None
+                ),
             )
+
+        def lease_event_identity(route_lease) -> dict[str, str]:
+            identity = {"profile": route_lease.profile.name}
+            if route_lease.selector_id is not None:
+                identity["selector"] = route_lease.selector_id
+                identity["target"] = route_lease.model_id
+            return identity
 
         def loading_frame(text: str) -> bytes:
             payload = {"choices": [{"delta": {"reasoning_content": text}}]}
@@ -667,7 +688,7 @@ def build_app(
                         status_code=409,
                     )
 
-                outbound_body = filtered_body(lease.profile)
+                outbound_body = filtered_body(lease)
 
                 upstream = await connect_upstream(
                     port=lease.port,
@@ -692,7 +713,9 @@ def build_app(
                         status_code=409,
                     )
 
-                router_event("admitted", profile=lease.profile.name, route=safe_route)
+                router_event(
+                    "admitted", **lease_event_identity(lease), route=safe_route
+                )
                 iterator = iter(upstream.chunks())
 
                 def next_chunk():
@@ -765,7 +788,7 @@ def build_app(
                     lease.release()
                     router_event(
                         "request_finished",
-                        profile=lease.profile.name,
+                        **lease_event_identity(lease),
                         route=safe_route,
                         status=upstream.status if upstream is not None else 200,
                         cancelled=cancelled,
@@ -773,7 +796,7 @@ def build_app(
                     )
 
         loading_eligible = False
-        if request.url.path == "/v1/chat/completions" and router.loading_feedback_enabled(model):
+        if request.url.path == "/v1/chat/completions":
             try:
                 request_doc = json.loads(body)
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -791,7 +814,12 @@ def build_app(
                 loop.call_soon_threadsafe(reserved.set)
 
             acquisition = asyncio.create_task(
-                acquire_route(model, admission_cancellation, on_reserved)
+                acquire_route(
+                    model,
+                    admission_cancellation,
+                    on_reserved,
+                    apply_loading_policy=True,
+                )
             )
             reservation_wait = asyncio.create_task(reserved.wait())
             try:
@@ -900,7 +928,7 @@ def build_app(
                 }},
             )
         try:
-            outbound_body = filtered_body(lease.profile)
+            outbound_body = filtered_body(lease)
         except RequestModelError as exc:
             lease.release()
             with inflight_lock:
@@ -956,7 +984,7 @@ def build_app(
                     "type": "request_cancelled",
                 }},
             )
-        router_event("admitted", profile=lease.profile.name, route=safe_route)
+        router_event("admitted", **lease_event_identity(lease), route=safe_route)
 
         def stream_response():
             first_byte_at = None
@@ -984,7 +1012,7 @@ def build_app(
                 lease.release()
                 router_event(
                     "request_finished",
-                    profile=lease.profile.name,
+                    **lease_event_identity(lease),
                     route=safe_route,
                     status=upstream.status,
                     cancelled=cancelled,
@@ -1004,7 +1032,8 @@ def build_app(
         body = await request.body()
         try:
             model = request_model(body)
-            router.catalog.get(model)
+            if not router.catalog.has_routable_id(model):
+                raise CatalogError(f"unknown model profile {model!r}")
         except RequestModelError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except CatalogError as exc:
@@ -1061,19 +1090,40 @@ def build_app(
         created = int(time.time())
         data = []
         for model_id in catalog_snapshot.listed_model_ids():
-            profile = catalog_snapshot.get(model_id)
+            selector = catalog_snapshot.selector(model_id)
+            profile = None if selector is not None else catalog_snapshot.get(model_id)
+            if selector is None:
+                loaded = profile.name in loaded_profiles
+            else:
+                targets = selector.targets[:1] if selector.strategy == "pin" else selector.targets
+                loaded = any(
+                    catalog_snapshot.get(target).name in loaded_profiles for target in targets
+                )
             record = {
                 "id": model_id,
                 "object": "model",
                 "created": created,
                 "owned_by": "freetoken",
                 "status": {
-                    "value": "loaded" if profile.name in loaded_profiles else "unloaded"
+                    "value": "loaded" if loaded else "unloaded"
                 },
             }
-            if profile.description:
+            if selector is not None:
+                if selector.display_name:
+                    record["name"] = selector.display_name
+                if selector.description:
+                    record["description"] = selector.description
+                selector_metadata = selector.metadata()
+                selector_metadata.update({
+                    "type": "selector",
+                    "strategy": selector.strategy,
+                    "targets": list(selector.targets),
+                })
+                record["meta"] = {"freetoken": selector_metadata}
+            elif profile.description:
                 record["description"] = profile.description
-            record.update(profile.capabilities.model_listing_fields())
+            if profile is not None:
+                record.update(profile.capabilities.model_listing_fields())
             data.append(record)
         response = JSONResponse(content={
             "object": "list",
@@ -1143,11 +1193,19 @@ def build_app(
             )
             profile["activeRequests"] = route_state["activeRequests"] if profile["resident"] else 0
             data.append(profile)
-        return {"data": data, "capacity": route_state["capacity"]}
+        return {
+            "data": data,
+            "selectors": router.catalog.public_selectors(),
+            "capacity": route_state["capacity"],
+        }
 
     @app.get("/router/profiles", dependencies=auth)
     async def router_profiles():
-        return {"data": router.catalog.public(), "activeProfile": router.status()["activeProfile"]}
+        return {
+            "data": router.catalog.public(),
+            "selectors": router.catalog.public_selectors(),
+            "activeProfile": router.status()["activeProfile"],
+        }
 
     @app.get("/router/hardware", dependencies=auth)
     async def router_hardware():

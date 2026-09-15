@@ -66,6 +66,7 @@ def filter_request_body(
     set_fields_by_id: tuple[tuple[str, tuple[RequestField, ...]], ...] = (),
     *,
     requested_model: str | None = None,
+    rewrite_model: str | None = None,
 ) -> bytes:
     """Apply safe configured JSON-field transformations in pinned order.
 
@@ -74,7 +75,7 @@ def filter_request_body(
     language, so a catalog cannot execute code in the daemon.
     """
     by_id = dict(set_fields_by_id).get(requested_model, ())
-    if not drop_fields and not set_fields and not by_id:
+    if rewrite_model is None and not drop_fields and not set_fields and not by_id:
         return body
     try:
         doc = json.loads(body)
@@ -82,6 +83,8 @@ def filter_request_body(
         raise RequestModelError("request body must be valid JSON") from exc
     if not isinstance(doc, dict):
         raise RequestModelError("request body must be a JSON object")
+    if rewrite_model is not None:
+        doc["model"] = rewrite_model
     for field in drop_fields:
         path = tuple(field.split("."))
         parent = _path_parent(doc, path, create=False)

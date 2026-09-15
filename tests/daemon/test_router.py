@@ -17,6 +17,7 @@ from freetoken.daemon.catalog import (
     ModelCapabilities,
     ModelCatalog,
     ModelProfile,
+    ModelSelector,
     RequestField,
     RouterSettings,
     RoutingGroup,
@@ -900,6 +901,207 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
     ]
     assert calls[0]["body"] == b'{"model":"compat-id","max_tokens":1}'
     assert router.status()["activeProfile"] is None
+
+
+def test_pin_and_warm_selectors_resolve_against_one_resident_slot():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={
+            "pinned": ModelSelector("pinned", "pin", ("a", "b")),
+            "warm": ModelSelector("warm", "warm", ("a", "b")),
+        },
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router.acquire("b").release()
+
+    warm = router.acquire("warm")
+    assert (warm.profile.name, warm.model_id, warm.selector_id) == ("b", "b", "warm")
+    warm.release()
+
+    pinned = router.acquire("pinned")
+    assert (pinned.profile.name, pinned.model_id, pinned.selector_id) == (
+        "a", "a", "pinned",
+    )
+    pinned.release()
+    assert manager.calls == [("start", "b.gguf"), ("switch", "a.gguf")]
+
+
+def test_warm_selector_cold_fallback_uses_first_target():
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={"warm": ModelSelector("warm", "warm", ("a", "b"))},
+    )
+    router = RoutingCoordinator(Manager(), catalog_doc, object(), ready_fn=ready)
+    lease = router.acquire("warm")
+    assert (lease.profile.name, lease.model_id) == ("a", "a")
+    lease.release()
+
+
+@pytest.mark.parametrize("target_setting,global_setting,expected", [
+    (False, True, False),
+    (True, False, True),
+])
+def test_selector_reservation_uses_atomically_resolved_target_loading_policy(
+    target_setting, global_setting, expected
+):
+    catalog_doc = ModelCatalog(
+        {"a": ModelProfile("a", "a.gguf", (), send_loading_state=target_setting)},
+        settings=RouterSettings(send_loading_state=global_setting),
+        selectors={"public": ModelSelector("public", "pin", ("a",))},
+    )
+    router = RoutingCoordinator(Manager(), catalog_doc, object(), ready_fn=ready)
+    reserved = []
+
+    lease = router.acquire(
+        "public",
+        on_reserved=lambda loading, position: reserved.append((loading, position)),
+        apply_loading_policy=True,
+    )
+    lease.release()
+
+    assert reserved == [(expected, 1)]
+
+
+def test_warm_selector_joins_the_first_starting_target():
+    manager = Manager()
+    activation_started = threading.Event()
+    finish_activation = threading.Event()
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={"warm": ModelSelector("warm", "warm", ("a", "b"))},
+    )
+
+    def blocking_ready(manager, probe, *, pid, port, timeout_s):
+        activation_started.set()
+        assert finish_activation.wait(2)
+        return {"ready": True, "health": {"status": "ok"}}
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=blocking_ready)
+    leases = []
+    first = threading.Thread(target=lambda: leases.append(router.acquire("b")))
+    second = threading.Thread(target=lambda: leases.append(router.acquire("warm")))
+    first.start()
+    assert activation_started.wait(1)
+    second.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        time.sleep(0.01)
+    assert router.status()["queuedRequests"] == 1
+    finish_activation.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive() and not second.is_alive()
+    selector_lease = next(lease for lease in leases if lease.selector_id == "warm")
+    assert (selector_lease.profile.name, selector_lease.model_id) == ("b", "b")
+    assert manager.calls == [("start", "b.gguf")]
+    for lease in leases:
+        lease.release()
+
+
+def test_selector_rewrites_before_target_alias_filters_and_is_not_an_upstream_id(
+    monkeypatch
+):
+    alias_fields = (("a:high", (
+        RequestField(("temperature",), "0.1"),
+    )),)
+    catalog_doc = ModelCatalog(
+        {"a": ModelProfile(
+            "a", "private.gguf", (), aliases=("a:high",),
+            set_fields_by_id=alias_fields,
+        )},
+        selectors={
+            "public": ModelSelector(
+                "public", "pin", ("a:high",), "Public Model", "Stable target"
+            ),
+        },
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    seen = {}
+    router_ring = LogRing()
+
+    def upstream(**kwargs):
+        seen.update(kwargs)
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            router_ring=router_ring,
+        )
+        client = TestClient(app)
+        response = client.post(
+            "/v1/chat/completions", json={"model": "public", "messages": []}
+        )
+        direct = client.post(
+            "/upstream/public/v1/chat/completions",
+            json={"model": "public", "messages": []},
+        )
+
+    assert response.status_code == 200
+    assert json.loads(seen["body"])["model"] == "a:high"
+    assert json.loads(seen["body"])["temperature"] == 0.1
+    assert direct.status_code == 404
+    events = [json.loads(item["text"]) for item in router_ring.since(0)[0]]
+    admitted = next(event for event in events if event["event"] == "admitted")
+    assert admitted["profile"] == "a"
+    assert admitted["selector"] == "public"
+    assert admitted["target"] == "a:high"
+
+
+def test_selector_model_listing_uses_strategy_specific_loaded_status():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={
+            "pin": ModelSelector(
+                "pin", "pin", ("a", "b"), "Pinned", "First only",
+                metadata_json='{"tier":"stable","type":"operator-value"}',
+            ),
+            "warm": ModelSelector("warm", "warm", ("a", "b")),
+            "hidden": ModelSelector("hidden", "pin", ("b",), unlisted=True),
+        },
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router.acquire("b").release()
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        records = {item["id"]: item for item in client.get("/v1/models").json()["data"]}
+        management = client.get("/router/profiles").json()
+
+    assert "hidden" not in records
+    assert records["pin"]["status"]["value"] == "unloaded"
+    assert records["warm"]["status"]["value"] == "loaded"
+    assert records["pin"]["name"] == "Pinned"
+    assert records["pin"]["description"] == "First only"
+    assert records["pin"]["meta"] == {"freetoken": {
+        "tier": "stable", "type": "selector", "strategy": "pin",
+        "targets": ["a", "b"],
+    }}
+    assert {item["name"] for item in management["selectors"]} == {
+        "pin", "warm", "hidden",
+    }
 
 
 def test_model_list_renders_capability_metadata_for_canonical_and_alias():

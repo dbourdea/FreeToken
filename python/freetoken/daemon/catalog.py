@@ -127,6 +127,39 @@ def _request_fields_public(fields: tuple[RequestField, ...]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class ModelSelector:
+    """A per-request virtual model resolved to one concrete local profile."""
+
+    name: str
+    strategy: str
+    targets: tuple[str, ...]
+    display_name: str | None = None
+    description: str | None = None
+    unlisted: bool = False
+    metadata_json: str = "{}"
+
+    def metadata(self) -> dict[str, Any]:
+        return json.loads(self.metadata_json)
+
+    def public(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "name": self.name,
+            "strategy": self.strategy,
+            "targets": list(self.targets),
+        }
+        if self.display_name:
+            doc["displayName"] = self.display_name
+        if self.description:
+            doc["description"] = self.description
+        if self.unlisted:
+            doc["unlisted"] = True
+        metadata = self.metadata()
+        if metadata:
+            doc["metadata"] = metadata
+        return doc
+
+
+@dataclass(frozen=True)
 class ModelProfile:
     name: str
     model: str
@@ -192,8 +225,14 @@ class ModelProfile:
 
 
 class ModelCatalog:
-    def __init__(self, profiles: dict[str, ModelProfile], settings: RouterSettings | None = None,
-                 *, path: str | None = None):
+    def __init__(
+        self,
+        profiles: dict[str, ModelProfile],
+        settings: RouterSettings | None = None,
+        *,
+        selectors: dict[str, ModelSelector] | None = None,
+        path: str | None = None,
+    ):
         self._profiles = dict(profiles)
         aliases: dict[str, str] = {}
         canonical = set(self._profiles)
@@ -212,6 +251,27 @@ class ModelCatalog:
                     )
                 aliases[alias] = name
         self._aliases = aliases
+        self._selectors = dict(selectors or {})
+        occupied = canonical | set(aliases)
+        for name, selector in self._selectors.items():
+            _model_id(name)
+            if name != selector.name:
+                raise CatalogError(
+                    f"selector key {name!r} must match selector name {selector.name!r}"
+                )
+            if name in occupied:
+                raise CatalogError(f"selector {name!r} conflicts with a model ID or alias")
+            for target in selector.targets:
+                if target in self._selectors:
+                    raise CatalogError(
+                        f"selector {name!r} target {target!r} cannot reference another selector"
+                    )
+                try:
+                    self.get(target)
+                except CatalogError as exc:
+                    raise CatalogError(
+                        f"selector {name!r} target {target!r} is not a configured model or alias"
+                    ) from exc
         self.settings = settings or RouterSettings()
         self.path = path
 
@@ -232,7 +292,19 @@ class ModelCatalog:
         profiles: dict[str, ModelProfile] = {}
         for name, value in models.items():
             profiles[_model_id(name)] = _profile(_model_id(name), value)
-        return cls(profiles, _router_settings(raw.get("router", {}), profiles), path=path)
+        raw_selectors = raw.get("selectors", {})
+        if not isinstance(raw_selectors, dict):
+            raise CatalogError("selectors must be a table")
+        selectors = {
+            _model_id(name): _selector(_model_id(name), value)
+            for name, value in raw_selectors.items()
+        }
+        return cls(
+            profiles,
+            _router_settings(raw.get("router", {}), profiles),
+            selectors=selectors,
+            path=path,
+        )
 
     def get(self, name: str) -> ModelProfile:
         try:
@@ -243,9 +315,18 @@ class ModelCatalog:
     def public(self) -> list[dict[str, Any]]:
         return [self._profiles[name].public() for name in sorted(self._profiles)]
 
+    def public_selectors(self) -> list[dict[str, Any]]:
+        return [self._selectors[name].public() for name in sorted(self._selectors)]
+
     def profiles(self) -> tuple[ModelProfile, ...]:
         """Return immutable profile values for internal identity matching."""
         return tuple(self._profiles[name] for name in sorted(self._profiles))
+
+    def selector(self, name: str) -> ModelSelector | None:
+        return self._selectors.get(name)
+
+    def has_routable_id(self, name: str) -> bool:
+        return name in self._selectors or name in self._profiles or name in self._aliases
 
     def listed_model_ids(self) -> tuple[str, ...]:
         """Return the OpenAI-visible IDs without exposing hidden canonical profiles."""
@@ -257,6 +338,9 @@ class ModelCatalog:
             result.append(name)
             if self.settings.include_aliases_in_list:
                 result.extend(profile.aliases)
+        result.extend(
+            name for name in sorted(self._selectors) if not self._selectors[name].unlisted
+        )
         return tuple(result)
 
     def resolve_upstream_path(self, path: str) -> tuple[str, ModelProfile, str]:
@@ -596,3 +680,57 @@ def _capabilities(name: str, value: object) -> ModelCapabilities:
     ):
         raise CatalogError(f"{field}.context must be a nonnegative integer")
     return ModelCapabilities(modalities("in"), modalities("out"), tools, context)
+
+
+def _selector(name: str, value: object) -> ModelSelector:
+    field = f"selectors.{name}"
+    if not isinstance(value, dict):
+        raise CatalogError(f"{field} must be a table")
+    unknown = sorted(
+        set(value) - {"strategy", "targets", "name", "description", "unlisted", "metadata"}
+    )
+    if unknown:
+        raise CatalogError(f"{field}: unsupported keys: {', '.join(unknown)}")
+    strategy = value.get("strategy")
+    if strategy == "spillover":
+        raise CatalogError(
+            f"{field}.strategy spillover requires multi-resident or peer capacity and is unsupported"
+        )
+    if strategy not in {"pin", "warm"}:
+        raise CatalogError(f"{field}.strategy must be pin or warm")
+    targets = value.get("targets")
+    if (
+        not isinstance(targets, list)
+        or not targets
+        or len(targets) > 64
+        or not all(_valid_model_id(target) for target in targets)
+    ):
+        raise CatalogError(f"{field}.targets must contain 1 to 64 valid model IDs")
+    display_name = value.get("name")
+    description = value.get("description")
+    for key, candidate in (("name", display_name), ("description", description)):
+        if candidate is not None and (
+            not isinstance(candidate, str) or "\x00" in candidate
+        ):
+            raise CatalogError(f"{field}.{key} must be a string without NUL")
+    unlisted = value.get("unlisted", False)
+    if not isinstance(unlisted, bool):
+        raise CatalogError(f"{field}.unlisted must be a boolean")
+    metadata = value.get("metadata", {})
+    if not isinstance(metadata, dict) or not all(isinstance(key, str) for key in metadata):
+        raise CatalogError(f"{field}.metadata must be a table with string keys")
+    try:
+        metadata_json = json.dumps(
+            metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogError(f"{field}.metadata must be JSON-compatible") from exc
+    return ModelSelector(
+        name,
+        strategy,
+        tuple(targets),
+        display_name or None,
+        description or None,
+        unlisted,
+        metadata_json,
+    )

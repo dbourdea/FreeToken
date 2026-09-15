@@ -55,6 +55,8 @@ class RouteLease:
     profile: ModelProfile
     port: int
     pid: int | None
+    model_id: str | None = None
+    selector_id: str | None = None
     _released: bool = field(default=False, init=False, repr=False)
 
     def release(self) -> None:
@@ -153,6 +155,8 @@ class RoutingCoordinator:
         name: str,
         cancellation: threading.Event | None = None,
         on_reserved: Callable[[bool, int], None] | None = None,
+        *,
+        apply_loading_policy: bool = False,
     ) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
         queued_at = time.monotonic()
@@ -162,7 +166,7 @@ class RoutingCoordinator:
                     "router_shutting_down", "router shutdown is in progress", status_code=503
                 )
             try:
-                profile = self._catalog.get(name)
+                model_id, profile, selector_id = self._resolve_request_locked(name)
             except CatalogError as exc:
                 raise RoutingError("unknown_model", str(exc), status_code=404) from exc
             if cancellation is not None and cancellation.is_set():
@@ -178,7 +182,13 @@ class RoutingCoordinator:
             if on_reserved is not None:
                 try:
                     position = sorted(self._pending).index(ticket) + 1
-                    on_reserved(not self._active_profile_ready_locked(profile), position)
+                    loading_enabled = (
+                        profile.send_loading_state
+                        if profile.send_loading_state is not None
+                        else self._catalog.settings.send_loading_state
+                    )
+                    cold = not self._active_profile_ready_locked(profile)
+                    on_reserved(loading_enabled and cold if apply_loading_policy else cold, position)
                 except BaseException:
                     self._remove_pending_locked(ticket, cancellation)
                     self._drop_concurrency_reservation_locked(profile)
@@ -223,7 +233,14 @@ class RoutingCoordinator:
                     self._last_queue_wait_ms = round((time.monotonic() - queued_at) * 1000, 3)
                     state = self._manager.status()
                     self._cond.notify_all()
-                    return RouteLease(self, profile, port, state.get("pid"))
+                    return RouteLease(
+                        self,
+                        profile,
+                        port,
+                        state.get("pid"),
+                        model_id=model_id,
+                        selector_id=selector_id,
+                    )
                 if self._leases:
                     self._cond.wait()
                     continue
@@ -268,7 +285,14 @@ class RoutingCoordinator:
             self._last_queue_wait_ms = round((activated_at - queued_at) * 1000, 3)
             self._last_activation_ms = round((time.monotonic() - activated_at) * 1000, 3)
             self._cond.notify_all()
-        return RouteLease(self, profile, port, pid)
+        return RouteLease(
+            self,
+            profile,
+            port,
+            pid,
+            model_id=model_id,
+            selector_id=selector_id,
+        )
 
     def cancel_acquire(self, cancellation: threading.Event) -> None:
         """Atomically retire queued ownership, then wake its admission worker."""
@@ -294,7 +318,7 @@ class RoutingCoordinator:
         """Resolve the per-profile loading setting over the global default atomically."""
         with self._cond:
             try:
-                profile = self._catalog.get(name)
+                _, profile, _ = self._resolve_request_locked(name)
             except CatalogError:
                 # Admission owns the authoritative unknown-model response. A
                 # concurrent catalog replacement must not leak an exception
@@ -303,6 +327,24 @@ class RoutingCoordinator:
             if profile.send_loading_state is not None:
                 return profile.send_loading_state
             return self._catalog.settings.send_loading_state
+
+    def _resolve_request_locked(
+        self, name: str
+    ) -> tuple[str, ModelProfile, str | None]:
+        selector = self._catalog.selector(name)
+        if selector is None:
+            return name, self._catalog.get(name), None
+        if selector.strategy == "warm":
+            for target in selector.targets:
+                profile = self._catalog.get(target)
+                if self._active_profile_ready_locked(profile):
+                    return target, profile, selector.name
+            for target in selector.targets:
+                profile = self._catalog.get(target)
+                if self._activating_name == profile.name:
+                    return target, profile, selector.name
+        target = selector.targets[0]
+        return target, self._catalog.get(target), selector.name
 
     def begin_manual_lifecycle(self, *, preempt_manual: bool = False) -> object:
         """Reserve the lifecycle barrier for one legacy engine operation."""
