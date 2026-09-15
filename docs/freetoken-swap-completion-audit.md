@@ -35,13 +35,13 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification at `38c245791962dec36b37615bd2eff2d0aafcccf5`
-  on the current Windows checkout: 328 daemon
+- Local deterministic verification at `493aecdbf7863b4a6eb3afb5b1e593810c77d680`
+  on the current Windows checkout: 336 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `38c245791962dec36b37615bd2eff2d0aafcccf5` (Actions run `34935908864`)
-  reported 335 passed with zero failures, errors, or skips. This includes the
+  `493aecdbf7863b4a6eb3afb5b1e593810c77d680` (Actions run `34937281674`)
+  reported 343 tests with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
   listing coverage, model display/metadata collision precedence, ordered
@@ -54,7 +54,10 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   It also covers bounded body-free activity, authenticated aggregate and
   capture retrieval APIs, capture-disabled defaults, serialized-byte and
   per-response bounds, credential-header redaction, binary fidelity, eviction,
-  and exact cold-loading downstream SSE capture.
+  and exact cold-loading downstream SSE capture. Body-free activity recovery,
+  bounded corruption handling, atomic compaction, path-free persistence health,
+  memory-only capture restart behavior, hashed non-credential session grouping,
+  and explicit-on-click UI capture retrieval are also covered.
   It also executes the
   disposable process-group, readiness rollback,
   re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
