@@ -53,8 +53,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             length = int(self.headers.get("Content-Length", "0"))
             request = json.loads(self.rfile.read(length) or b"{}")
-            body = ('data: {"model":"%s","echo":%s}\\n\\n'
-                    'data: [DONE]\\n\\n') % (model, json.dumps(request.get("model")))
+            body = ('data: {"model":"%s","echo":%s}\n\n'
+                    'data: [DONE]\n\n') % (model, json.dumps(request.get("model")))
             data = body.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
