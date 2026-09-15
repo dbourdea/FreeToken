@@ -56,6 +56,8 @@ dependencies = [
     # correctly from PyPI alone; uv additionally pins the index below.
     "torch>=2.11,<2.12",
     "tqdm>=4.66,<5",
+    # What: add tomli for Python versions earlier than 3.11; why: those interpreters lack tomllib, so the daemon needs this fallback to parse TOML model catalogs.
+    "tomli>=2.0,<3; python_version < '3.11'",
     "transformers>=5.5,<6",
     "triton==3.6.0; platform_system == 'Linux'",
     "uvicorn>=0.30,<1",
