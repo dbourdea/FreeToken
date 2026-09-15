@@ -78,10 +78,13 @@ jobs:
               for old, new in (("%", "%25"), ("\r", "%0D"), ("\n", "%0A")):
                   message = message.replace(old, new)
               failures.append((test_id, message))
-          if not failures:
-              print("::error title=daemon Linux suite::pytest failed without a JUnit failure record")
-          for test_id, message in failures[:10]:
-              print(f"::error title={test_id}::{message}")
           if os.environ["OUTCOME"] != "success":
+              if not failures:
+                  print(
+                      "::error title=daemon Linux suite::"
+                      "pytest failed without a JUnit failure record"
+                  )
+              for test_id, message in failures[:10]:
+                  print(f"::error title={test_id}::{message}")
               sys.exit(1)
           PY
