@@ -9,17 +9,18 @@ import signal
 import subprocess
 import sys
 
-from qualify import canary, http, wait_health
+from qualify import canary, http, require_expected_hostname, wait_health
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source", "daemon-source", "python", "model", "extensions-dir",
-                 "protected-service", "protected-url", "artifacts"):
+                 "protected-service", "protected-url", "artifacts", "expected-hostname"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--allow-maintenance", action="store_true", required=True)
     parser.add_argument("--port", type=int, default=1963)
     args = parser.parse_args()
+    require_expected_hostname(args.expected_hostname)
     sys.path.insert(0, str(Path(args.daemon_source) / "python"))
     from fastapi.testclient import TestClient
     from freetoken.daemon.app import build_app

@@ -9,12 +9,28 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+
+def require_expected_hostname(expected: str, *, actual: str | None = None) -> str:
+    """Fail closed unless the operator names this exact maintenance host.
+
+    The mismatch deliberately omits both values so a copied error cannot publish
+    a private machine name. The approved public hardware label is documented
+    separately and is not assumed to equal the operating-system hostname.
+    """
+    actual = socket.gethostname() if actual is None else actual
+    if not expected or "\x00" in expected or actual != expected:
+        raise RuntimeError(
+            "qualification host does not match the operator-supplied expected hostname"
+        )
+    return actual
 
 
 def http(url, body=None, timeout=30):
@@ -120,7 +136,7 @@ def cancellation_canary(url, model, *, seconds=30):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("source", "python", "llama-swap", "model-a", "model-b", "artifacts", "protected-service", "protected-url"):
+    for name in ("source", "python", "llama-swap", "model-a", "model-b", "artifacts", "protected-service", "protected-url", "expected-hostname"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--allow-maintenance", action="store_true", required=True)
     parser.add_argument("--port", type=int, default=1960)
@@ -128,6 +144,7 @@ def main():
     parser.add_argument("--extended", action="store_true", help="Also test concurrent requests and idle eviction")
     parser.add_argument("--cancellation", action="store_true", help="Also qualify live SSE disconnect and recovery")
     args = parser.parse_args()
+    require_expected_hostname(args.expected_hostname)
     artifacts = Path(args.artifacts)
     artifacts.mkdir(parents=True, exist_ok=False)
     status = {"trials": [], "restored": False}

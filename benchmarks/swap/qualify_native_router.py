@@ -28,6 +28,16 @@ _NATIVE_AUTH_BASE: str | None = None
 _NATIVE_API_KEY: str | None = None
 
 
+def require_expected_hostname(expected: str, *, actual: str | None = None) -> str:
+    """Require an exact operator-supplied host without disclosing either name."""
+    actual = socket.gethostname() if actual is None else actual
+    if not expected or "\x00" in expected or actual != expected:
+        raise RuntimeError(
+            "qualification host does not match the operator-supplied expected hostname"
+        )
+    return actual
+
+
 def configure_native_auth(base: str, api_key: str) -> None:
     """Scope private router credentials to the exact temporary daemon origin."""
     global _NATIVE_AUTH_BASE, _NATIVE_API_KEY
@@ -862,6 +872,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in (
         "source", "python", "model-a", "model-b", "artifacts", "protected-service", "protected-url",
+        "expected-hostname",
     ):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--allow-maintenance", action="store_true", required=True)
@@ -869,6 +880,7 @@ def main() -> int:
     args = parser.parse_args()
     if not sys.platform.startswith("linux"):
         raise SystemExit("native maintenance qualification requires Linux process-group semantics")
+    require_expected_hostname(args.expected_hostname)
 
     artifacts = Path(args.artifacts)
     artifacts.mkdir(parents=True, exist_ok=False)

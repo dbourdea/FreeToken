@@ -37,6 +37,58 @@ def stats(active, *, instance="same", completed=3):
     return {"instance_id": instance, "requests": {"active": active, "completed": completed}}
 
 
+@pytest.mark.parametrize("expected", ["", "other-host", "approved-host\x00suffix"])
+def test_maintenance_qualifiers_require_exact_hostname_without_disclosure(
+    qualifier, native_router_qualifier, expected
+):
+    for module in (qualifier, native_router_qualifier):
+        with pytest.raises(RuntimeError, match="operator-supplied expected hostname") as exc:
+            module.require_expected_hostname(expected, actual="approved-host")
+        assert "approved-host" not in str(exc.value)
+        assert expected not in str(exc.value) or expected == ""
+
+    assert qualifier.require_expected_hostname(
+        "approved-host", actual="approved-host"
+    ) == "approved-host"
+    assert native_router_qualifier.require_expected_hostname(
+        "approved-host", actual="approved-host"
+    ) == "approved-host"
+
+
+def test_maintenance_entrypoints_check_hostname_before_side_effects(
+    qualifier, native_router_qualifier, monkeypatch, tmp_path
+):
+    cases = (
+        (
+            qualifier,
+            [
+                "--source", "source", "--python", "python", "--llama-swap", "llama-swap",
+                "--model-a", "a", "--model-b", "b",
+            ],
+        ),
+        (
+            native_router_qualifier,
+            [
+                "--source", "source", "--python", "python",
+                "--model-a", "a", "--model-b", "b",
+            ],
+        ),
+    )
+    monkeypatch.setattr(native_router_qualifier.sys, "platform", "linux")
+    for index, (module, specific) in enumerate(cases):
+        artifacts = tmp_path / f"must-not-exist-{index}"
+        argv = [
+            "qualifier", *specific, "--artifacts", str(artifacts),
+            "--protected-service", "protected", "--protected-url", "http://protected",
+            "--expected-hostname", "expected-host", "--allow-maintenance",
+        ]
+        monkeypatch.setattr(module.sys, "argv", argv)
+        monkeypatch.setattr(module.socket, "gethostname", lambda: "different-host")
+        with pytest.raises(RuntimeError, match="operator-supplied expected hostname"):
+            module.main()
+        assert not artifacts.exists()
+
+
 @pytest.mark.parametrize("outcome", ["abort", "restart", "completion", "already-done", "timeout"])
 def test_cancellation_requires_terminal_abort_without_restart(qualifier, monkeypatch, outcome):
     stream = io.BytesIO(b'data: {"choices":[{"delta":{"content":"1"}}]}\n\n')

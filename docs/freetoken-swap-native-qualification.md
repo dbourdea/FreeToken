@@ -108,9 +108,11 @@ It also saves the authenticated-local `/router/hardware` process and memory
 snapshot for every comparison privately; the published result must remain a
 sanitized aggregate.
 
-The harness requires `--allow-maintenance`, a new empty `--artifacts`
-directory, two known-good model paths, and the protected service's private
-restore endpoint. It first verifies the protected baseline, prebuilds kernels,
+The harness requires `--allow-maintenance`, the exact operating-system hostname
+in `--expected-hostname`, a new empty `--artifacts` directory, two known-good
+model paths, and the protected service's private restore endpoint. A hostname
+mismatch fails before artifact creation, service inspection, or maintenance and
+does not disclose either hostname. It then verifies the protected baseline, prebuilds kernels,
 stops the protected service only after the native daemon is reachable, and
 always attempts daemon cleanup and protected-workload restoration. Do not run
 it on Windows or substitute a direct engine URL for the routed cases. Publish

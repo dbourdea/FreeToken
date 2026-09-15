@@ -84,17 +84,17 @@ comparison reference until native request routing reaches the acceptance gates.
 
 ## Remaining acceptance sequence
 
-1. Execute the current Linux real-process tests, including dynamic-port cleanup,
-   rollback, accounting, and router-bound re-adoption.
-2. In an approved GMKtek EVO-X2 maintenance window, run the private native
+1. In an approved GMKtek EVO-X2 maintenance window, run the private native
    qualification harness through direct, warm, cold, alternating, cancellation,
    same-model concurrency, conflicting-model drain, failed-switch recovery,
    daemon re-adoption, reload-conflict, persistent-capacity, TTL, unauthenticated
-   rejection, and authenticated management/metrics/router-log gates.
-3. Restore and health-check the protected workload, retain raw evidence privately,
+   rejection, and authenticated management/metrics/router-log gates. Supply the
+   exact operating-system hostname explicitly; the harness fails before artifacts
+   or service inspection if it does not match.
+2. Restore and health-check the protected workload, retain raw evidence privately,
    and publish only sanitized aggregate observations in the final audit.
-4. Re-run deterministic and combined-tree compatibility suites at the final PR
-   head and keep the PR draft until all applicable evidence is linked.
+3. Re-run deterministic, hosted Linux, and combined-tree compatibility suites at
+   the final PR head and keep the PR draft until all applicable evidence is linked.
 
 Every row moves to Native only after deterministic tests and relevant live
 evidence are linked here. No endpoint name alone establishes parity.
