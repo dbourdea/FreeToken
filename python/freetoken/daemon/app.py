@@ -1037,6 +1037,7 @@ def build_app(
             }
             if profile.description:
                 record["description"] = profile.description
+            record.update(profile.capabilities.model_listing_fields())
             data.append(record)
         response = JSONResponse(content={
             "object": "list",

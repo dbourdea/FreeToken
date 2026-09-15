@@ -4,7 +4,7 @@ import pytest
 from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 
-from freetoken.daemon.catalog import CatalogError, ModelCatalog
+from freetoken.daemon.catalog import CatalogError, ModelCapabilities, ModelCatalog
 from freetoken.daemon.app import build_app
 from freetoken.daemon import client as daemon_client
 from freetoken.daemon.logring import LogRing
@@ -25,6 +25,52 @@ def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
         "name": "qwen-coder", "model": "/models/qwen.gguf", "port": 1922,
         "args": ["--max-seq-len-override", "32768"], "description": "coding profile", "readyTimeoutS": 120.0,
     }]
+
+
+def test_catalog_validates_and_exposes_supported_listing_capabilities(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.coding]
+model = "coding.gguf"
+
+[models.coding.capabilities]
+in = ["text"]
+out = ["text"]
+tools = true
+context = 32768
+""",
+        encoding="utf-8",
+    )
+
+    profile = ModelCatalog.load(str(path)).get("coding")
+
+    assert profile.capabilities == ModelCapabilities(("text",), ("text",), True, 32768)
+    assert profile.public()["capabilities"] == {
+        "in": ["text"], "out": ["text"], "tools": True, "context": 32768,
+    }
+
+
+@pytest.mark.parametrize("declaration,message", [
+    ('in = ["image"]', "unsupported modalities: image"),
+    ('out = ["audio"]', "unsupported modalities: audio"),
+    ('out = ["video"]', "unsupported modalities: video"),
+    ('in = ["text", "text"]', "must not contain duplicates"),
+    ("tools = 1", "tools must be a boolean"),
+    ("context = -1", "context must be a nonnegative integer"),
+    ("context = true", "context must be a nonnegative integer"),
+    ("reranker = true", "unsupported keys: reranker"),
+])
+def test_catalog_rejects_unsupported_or_malformed_capabilities(
+    tmp_path, declaration, message
+):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[models.coding]\nmodel = "coding.gguf"\n'
+        f'[models.coding.capabilities]\n{declaration}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
 
 
 @pytest.mark.parametrize("content, message", [

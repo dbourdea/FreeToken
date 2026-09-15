@@ -52,6 +52,56 @@ class RouterSettings:
 
 
 @dataclass(frozen=True)
+class ModelCapabilities:
+    """Validated model-list metadata; it never enables inference behavior."""
+
+    input_modalities: tuple[str, ...] = ()
+    output_modalities: tuple[str, ...] = ()
+    tools: bool = False
+    context: int = 0
+
+    def empty(self) -> bool:
+        return not (
+            self.input_modalities or self.output_modalities or self.tools or self.context
+        )
+
+    def public(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {}
+        if self.input_modalities:
+            doc["in"] = list(self.input_modalities)
+        if self.output_modalities:
+            doc["out"] = list(self.output_modalities)
+        if self.tools:
+            doc["tools"] = True
+        if self.context:
+            doc["context"] = self.context
+        return doc
+
+    def model_listing_fields(self) -> dict[str, Any]:
+        """Render the applicable pinned llama-swap model-list contract."""
+        doc: dict[str, Any] = {}
+        if self.input_modalities or self.output_modalities:
+            architecture: dict[str, Any] = {}
+            if self.input_modalities:
+                architecture["input_modalities"] = list(self.input_modalities)
+            if self.output_modalities:
+                architecture["output_modalities"] = list(self.output_modalities)
+            if self.input_modalities and self.output_modalities:
+                architecture["modality"] = (
+                    f"{'+'.join(self.input_modalities)}->{'+'.join(self.output_modalities)}"
+                )
+            doc["architecture"] = architecture
+        if self.tools:
+            doc["capabilities"] = {"function_calling": True}
+            doc["supported_parameters"] = ["tools", "tool_choice"]
+        if self.context:
+            doc["context_length"] = self.context
+            doc["context_window"] = self.context
+            doc["meta"] = {"n_ctx": self.context}
+        return doc
+
+
+@dataclass(frozen=True)
 class ModelProfile:
     name: str
     model: str
@@ -68,6 +118,7 @@ class ModelProfile:
     unlisted: bool = False
     concurrency_limit: int = 0
     send_loading_state: bool | None = None
+    capabilities: ModelCapabilities = ModelCapabilities()
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -101,6 +152,8 @@ class ModelProfile:
             doc["concurrencyLimit"] = self.concurrency_limit
         if self.send_loading_state is not None:
             doc["sendLoadingState"] = self.send_loading_state
+        if not self.capabilities.empty():
+            doc["capabilities"] = self.capabilities.public()
         return doc
 
 
@@ -324,7 +377,7 @@ def _profile(name: str, value: object) -> ModelProfile:
     allowed = {
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
-        "concurrency_limit", "send_loading_state",
+        "concurrency_limit", "send_loading_state", "capabilities",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -397,8 +450,43 @@ def _profile(name: str, value: object) -> ModelProfile:
     send_loading_state = value.get("send_loading_state")
     if send_loading_state is not None and not isinstance(send_loading_state, bool):
         raise CatalogError(f"models.{name}.send_loading_state must be a boolean")
+    capabilities = _capabilities(name, value.get("capabilities", {}))
     return ModelProfile(
         name, model, tuple(raw_args), port, description, ready_timeout_s,
         ttl_s, unload_timeout_s, priority, group, tuple(drop_fields), tuple(aliases), unlisted,
-        concurrency_limit, send_loading_state,
+        concurrency_limit, send_loading_state, capabilities,
     )
+
+
+def _capabilities(name: str, value: object) -> ModelCapabilities:
+    field = f"models.{name}.capabilities"
+    if not isinstance(value, dict):
+        raise CatalogError(f"{field} must be a table")
+    unknown = sorted(set(value) - {"in", "out", "tools", "context"})
+    if unknown:
+        raise CatalogError(f"{field}: unsupported keys: {', '.join(unknown)}")
+
+    def modalities(key: str) -> tuple[str, ...]:
+        raw = value.get(key, [])
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            raise CatalogError(f"{field}.{key} must be an array of supported modalities")
+        if len(set(raw)) != len(raw):
+            raise CatalogError(f"{field}.{key} must not contain duplicates")
+        unsupported = sorted(set(raw) - {"text"})
+        if unsupported:
+            raise CatalogError(
+                f"{field}.{key} contains unsupported modalities: {', '.join(unsupported)}"
+            )
+        return tuple(raw)
+
+    tools = value.get("tools", False)
+    if not isinstance(tools, bool):
+        raise CatalogError(f"{field}.tools must be a boolean")
+    context = value.get("context", 0)
+    if (
+        not isinstance(context, int)
+        or isinstance(context, bool)
+        or context < 0
+    ):
+        raise CatalogError(f"{field}.context must be a nonnegative integer")
+    return ModelCapabilities(modalities("in"), modalities("out"), tools, context)

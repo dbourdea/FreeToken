@@ -13,7 +13,13 @@ import pytest
 import httpx
 from fastapi.testclient import TestClient
 
-from freetoken.daemon.catalog import ModelCatalog, ModelProfile, RouterSettings, RoutingGroup
+from freetoken.daemon.catalog import (
+    ModelCapabilities,
+    ModelCatalog,
+    ModelProfile,
+    RouterSettings,
+    RoutingGroup,
+)
 from freetoken.daemon.app import build_app
 from freetoken.daemon.inference_proxy import (
     UpstreamResponse,
@@ -893,6 +899,60 @@ def test_alias_routes_to_canonical_residency_and_model_list_respects_visibility(
     ]
     assert calls[0]["body"] == b'{"model":"compat-id","max_tokens":1}'
     assert router.status()["activeProfile"] is None
+
+
+def test_model_list_renders_capability_metadata_for_canonical_and_alias():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {
+            "canonical": ModelProfile(
+                "canonical",
+                "private.gguf",
+                (),
+                aliases=("compat-id",),
+                capabilities=ModelCapabilities(("text",), ("text",), True, 32768),
+            )
+        },
+        settings=RouterSettings(include_aliases_in_list=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        data = TestClient(app).get("/v1/models").json()["data"]
+
+    assert [record["id"] for record in data] == ["canonical", "compat-id"]
+    for record in data:
+        assert record["architecture"] == {
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "modality": "text->text",
+        }
+        assert record["capabilities"] == {"function_calling": True}
+        assert record["supported_parameters"] == ["tools", "tool_choice"]
+        assert record["context_length"] == 32768
+        assert record["context_window"] == 32768
+        assert record["meta"] == {"n_ctx": 32768}
+    assert "private.gguf" not in str(data)
+
+
+def test_model_list_omits_empty_capability_metadata():
+    manager = Manager()
+    catalog_doc = ModelCatalog({"plain": ModelProfile("plain", "private.gguf", ())})
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        record = TestClient(app).get("/v1/models").json()["data"][0]
+
+    assert not {
+        "architecture", "capabilities", "supported_parameters", "context_length",
+        "context_window", "meta",
+    }.intersection(record)
 
 
 def test_openai_model_list_reports_canonical_and_alias_loaded_while_activating():
