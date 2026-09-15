@@ -35,13 +35,13 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification at `493aecdbf7863b4a6eb3afb5b1e593810c77d680`
-  on the current Windows checkout: 336 daemon
+- Local deterministic verification at `174bda1c09cd9eb144b1c9f80fa767e1aeca7d16`
+  on the current Windows checkout: 344 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `493aecdbf7863b4a6eb3afb5b1e593810c77d680` (Actions run `34937281674`)
-  reported 343 tests with zero failures, errors, or skips. This includes the
+  `174bda1c09cd9eb144b1c9f80fa767e1aeca7d16` (Actions run `34938927860`)
+  reported 351 tests with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
   listing coverage, model display/metadata collision precedence, ordered
@@ -58,6 +58,9 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   bounded corruption handling, atomic compaction, path-free persistence health,
   memory-only capture restart behavior, hashed non-credential session grouping,
   and explicit-on-click UI capture retrieval are also covered.
+  The bounded periodic-performance tests cover one-hour eviction, strict
+  RFC3339 filtering, authentication, disabled 503 behavior, generic probe
+  failure health, reload generation cleanup, and path/PID omission.
   It also executes the
   disposable process-group, readiness rollback,
   re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
