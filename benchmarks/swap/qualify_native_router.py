@@ -55,10 +55,19 @@ def _native_headers(url: str) -> dict[str, str]:
     return {}
 
 
-def request_json(url: str, body: dict | None = None, *, timeout: float = 30) -> tuple[bytes, dict]:
+def request_json(
+    url: str,
+    body: dict | None = None,
+    *,
+    timeout: float = 30,
+    method: str | None = None,
+) -> tuple[bytes, dict]:
     data = None if body is None else json.dumps(body).encode("utf-8")
     request = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json", **_native_headers(url)}
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", **_native_headers(url)},
+        method=method,
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         raw = response.read()
@@ -472,6 +481,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     alias_rows = models_alias.get("data")
     routed_rows = routed.get("data")
     profile_rows = profiles.get("data")
+    routing_profiles = profiles.get("routingProfiles")
     if not all(
         isinstance(rows, list) and all(isinstance(item, dict) for item in rows)
         for rows in (model_rows, alias_rows, routed_rows, profile_rows)
@@ -492,6 +502,13 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     profile_names = sorted(
         item["name"] for item in profile_rows if isinstance(item.get("name"), str)
     )
+    coding_profile = next(
+        (
+            item for item in routing_profiles
+            if isinstance(item, dict) and item.get("name") == "coding"
+        ),
+        None,
+    ) if isinstance(routing_profiles, list) else None
     resident = [item.get("name") for item in routed_rows if item.get("resident")]
     if (
         not {"model-a", "model-b", "compat/model-a", "preferred-model"}.issubset(aliases)
@@ -499,6 +516,12 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         or not {"model-a", "model-b"}.issubset(routed_names)
         or resident != ["model-a"]
         or profiles.get("activeProfile") != "model-a"
+        or profiles.get("activeRoutingProfile") is not None
+        or not isinstance(routing_profiles, list)
+        or not isinstance(coding_profile, dict)
+        or coding_profile.get("pins") != {
+            "disabled-model": None, "profile-model": "preferred-model",
+        }
         or not isinstance(namespaced_stats, dict)
         or b"freetoken_swap_admissions_total" not in metrics_raw
     ):
@@ -534,6 +557,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "aliasCount": len(aliases),
         "selectorListed": "preferred-model" in aliases,
         "profileCount": len(profile_names),
+        "routingProfileListed": True,
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
         "namespacedUpstreamVerified": True,
@@ -562,6 +586,54 @@ def selector_canary(base: str, artifacts: Path) -> dict:
     (artifacts / "warm-selector.sse").write_bytes(raw)
     return {
         "strategy": "warm",
+        "resolvedProfile": "model-a",
+        "activationDelta": 0,
+        "passed": True,
+    }
+
+
+def routing_profile_canary(base: str, artifacts: Path) -> dict:
+    """Prove an active profile pin composes through a warm selector, then clear it."""
+    _, before = request_json(base + "/router/status")
+    prior_activations = before.get("activations")
+    if before.get("activeProfile") != "model-a" or not isinstance(prior_activations, int):
+        raise RuntimeError("routing profile canary requires resident model-a")
+    raw = b""
+    listed_raw = b""
+    try:
+        _, activated = request_json(
+            base + "/router/profiles/active", {"name": "coding"}, method="PUT"
+        )
+        if activated != {"active": "coding"}:
+            raise RuntimeError("routing profile activation was not acknowledged")
+        listed_raw, listed = request_json(base + "/v1/models", timeout=10)
+        listed_ids = {
+            item.get("id") for item in listed.get("data", []) if isinstance(item, dict)
+        }
+        if "profile-model" not in listed_ids or "disabled-model" in listed_ids:
+            raise RuntimeError("active routing profile model listing is inconsistent")
+        raw, completion = canary(base, "profile-model", direct=False)
+        _, after = request_json(base + "/router/status")
+        if (
+            completion.get("passed") is not True
+            or after.get("activeRoutingProfile") != "coding"
+            or after.get("activeProfile") != "model-a"
+            or after.get("activeRequests") != 0
+            or after.get("activations") != prior_activations
+        ):
+            raise RuntimeError("routing profile pin did not reuse the resident selector target")
+    finally:
+        _, cleared = request_json(
+            base + "/router/profiles/active", {"name": None}, method="PUT"
+        )
+        if cleared != {"active": None}:
+            raise RuntimeError("routing profile was not cleared after its canary")
+    (artifacts / "routing-profile.sse").write_bytes(raw)
+    (artifacts / "routing-profile-models.json").write_bytes(listed_raw)
+    return {
+        "profileActivated": True,
+        "profileCleared": True,
+        "selectorComposed": True,
         "resolvedProfile": "model-a",
         "activationDelta": 0,
         "passed": True,
@@ -876,6 +948,9 @@ def native_catalog_text(
         "[selectors.preferred-model]", 'strategy = "warm"',
         'targets = ["model-b", "model-a"]', 'name = "Preferred local model"',
         'description = "Reuses a ready target before the ordered cold fallback"', "",
+        "[profiles.coding]", 'description = "Qualification routing profile"',
+        "[profiles.coding.pins]", 'profile-model = "preferred-model"',
+        'disabled-model = ""', "",
     ))
     if persistent_a:
         catalog.extend((
@@ -991,6 +1066,7 @@ def main() -> int:
             )
             result["controlPlane"] = control_plane_canary(base, artifacts)
             result["selector"] = selector_canary(base, artifacts)
+            result["routingProfile"] = routing_profile_canary(base, artifacts)
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)
             (artifacts / "direct-a.sse").write_bytes(direct_raw)
             (artifacts / "direct-a.load.json").write_bytes(loaded_raw)
@@ -1100,6 +1176,7 @@ def main() -> int:
                 and result.get("conflictingRequest", {}).get("passed") is True
                 and result.get("controlPlane", {}).get("passed") is True
                 and result.get("selector", {}).get("passed") is True
+                and result.get("routingProfile", {}).get("passed") is True
             )
     except BaseException as exc:
         result["error"] = repr(exc)

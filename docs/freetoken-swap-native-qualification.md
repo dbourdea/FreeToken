@@ -44,6 +44,7 @@ model alias, elapsed time, first-byte time, final duration, usage-derived comple
 | Cold A | First request to alias A | Ready engine, valid ordinary completion, router activation increments |
 | Warm A | Repeat alias A | Same engine PID, no activation increment, completion succeeds |
 | Warm selector | Request the temporary warm selector while A is resident | Request is rewritten to A, completion succeeds, and activation remains unchanged |
+| Runtime profile | Activate the temporary profile, request its pin through the warm selector, then clear it | Virtual pin is listed only while active, disabled pin stays omitted, completion uses resident A with zero activation, and the profile is cleared before later trials |
 | Cold B | Request alias B after A is idle | A receives durable stop receipt, B becomes ready, completion succeeds |
 | A to B to A | Three routed requests | Each expected alias returns, no overlapping owned children, every replacement is ready |
 | SSE | Stream an alias request | First event and terminal event arrive, final lease count is zero |
@@ -69,7 +70,7 @@ listing equivalence plus Bearer, Basic-password, and `X-Api-Key`, then
 authenticates alias, selector, model, profile,
 Prometheus, and bounded router-log SSE checks. Their raw responses and the key-bearing
 catalog remain private. The harness then records private raw artifacts for: a direct request to the
-router-owned engine port, a warm-selector correctness canary, a warm routed request, a cold routed swap to the
+router-owned engine port, warm-selector and runtime-profile composition canaries, a warm routed request, a cold routed swap to the
 other model, and an alternating routed swap back. It requires streamed OpenAI usage,
 then records first-byte time, final duration, completion tokens, and usage-derived
 decode tokens/second at the client. Before the comparison sequence it also opens a

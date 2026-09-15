@@ -160,6 +160,30 @@ class ModelSelector:
 
 
 @dataclass(frozen=True)
+class RoutingProfile:
+    """A runtime-selectable set of client model-ID replacements."""
+
+    name: str
+    pins: tuple[tuple[str, str | None], ...]
+    description: str | None = None
+
+    def replacement(self, model_id: str) -> tuple[bool, str | None]:
+        for pin, target in self.pins:
+            if pin == model_id:
+                return True, target
+        return False, None
+
+    def public(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "name": self.name,
+            "pins": {pin: target for pin, target in self.pins},
+        }
+        if self.description:
+            doc["description"] = self.description
+        return doc
+
+
+@dataclass(frozen=True)
 class ModelProfile:
     name: str
     model: str
@@ -231,6 +255,7 @@ class ModelCatalog:
         settings: RouterSettings | None = None,
         *,
         selectors: dict[str, ModelSelector] | None = None,
+        routing_profiles: dict[str, RoutingProfile] | None = None,
         path: str | None = None,
     ):
         self._profiles = dict(profiles)
@@ -272,6 +297,21 @@ class ModelCatalog:
                     raise CatalogError(
                         f"selector {name!r} target {target!r} is not a configured model or alias"
                     ) from exc
+        self._routing_profiles = dict(routing_profiles or {})
+        for name, routing_profile in self._routing_profiles.items():
+            _simple_name(name, "profile name")
+            if name != routing_profile.name:
+                raise CatalogError(
+                    f"routing profile key {name!r} must match profile name {routing_profile.name!r}"
+                )
+            if not routing_profile.pins:
+                raise CatalogError(f"profiles.{name}.pins must contain at least one entry")
+            for pin, target in routing_profile.pins:
+                _model_id(pin)
+                if target is not None and not self.has_routable_id(target):
+                    raise CatalogError(
+                        f"profiles.{name}.pins.{pin} references unknown model {target!r}"
+                    )
         self.settings = settings or RouterSettings()
         self.path = path
 
@@ -299,10 +339,20 @@ class ModelCatalog:
             _model_id(name): _selector(_model_id(name), value)
             for name, value in raw_selectors.items()
         }
+        raw_profiles = raw.get("profiles", {})
+        if not isinstance(raw_profiles, dict):
+            raise CatalogError("profiles must be a table")
+        routing_profiles = {
+            _simple_name(name, "profile name"): _routing_profile(
+                _simple_name(name, "profile name"), value
+            )
+            for name, value in raw_profiles.items()
+        }
         return cls(
             profiles,
             _router_settings(raw.get("router", {}), profiles),
             selectors=selectors,
+            routing_profiles=routing_profiles,
             path=path,
         )
 
@@ -318,12 +368,20 @@ class ModelCatalog:
     def public_selectors(self) -> list[dict[str, Any]]:
         return [self._selectors[name].public() for name in sorted(self._selectors)]
 
+    def public_routing_profiles(self) -> list[dict[str, Any]]:
+        return [
+            self._routing_profiles[name].public() for name in sorted(self._routing_profiles)
+        ]
+
     def profiles(self) -> tuple[ModelProfile, ...]:
         """Return immutable profile values for internal identity matching."""
         return tuple(self._profiles[name] for name in sorted(self._profiles))
 
     def selector(self, name: str) -> ModelSelector | None:
         return self._selectors.get(name)
+
+    def routing_profile(self, name: str) -> RoutingProfile | None:
+        return self._routing_profiles.get(name)
 
     def has_routable_id(self, name: str) -> bool:
         return name in self._selectors or name in self._profiles or name in self._aliases
@@ -680,6 +738,31 @@ def _capabilities(name: str, value: object) -> ModelCapabilities:
     ):
         raise CatalogError(f"{field}.context must be a nonnegative integer")
     return ModelCapabilities(modalities("in"), modalities("out"), tools, context)
+
+
+def _routing_profile(name: str, value: object) -> RoutingProfile:
+    field = f"profiles.{name}"
+    if not isinstance(value, dict):
+        raise CatalogError(f"{field} must be a table with description and pins")
+    unknown = sorted(set(value) - {"description", "pins"})
+    if unknown:
+        raise CatalogError(f"{field}: unsupported keys: {', '.join(unknown)}")
+    description = value.get("description")
+    if description is not None and (
+        not isinstance(description, str) or "\x00" in description
+    ):
+        raise CatalogError(f"{field}.description must be a string without NUL")
+    raw_pins = value.get("pins")
+    if not isinstance(raw_pins, dict) or not raw_pins:
+        raise CatalogError(f"{field}.pins must contain at least one entry")
+    pins: list[tuple[str, str | None]] = []
+    for raw_pin, raw_target in raw_pins.items():
+        pin = _model_id(raw_pin)
+        if not isinstance(raw_target, str):
+            raise CatalogError(f"{field}.pins.{pin} must be a model ID or empty string")
+        target = _model_id(raw_target) if raw_target else None
+        pins.append((pin, target))
+    return RoutingProfile(name, tuple(sorted(pins)), description or None)
 
 
 def _selector(name: str, value: object) -> ModelSelector:

@@ -57,6 +57,8 @@ class RouteLease:
     pid: int | None
     model_id: str | None = None
     selector_id: str | None = None
+    routing_profile_id: str | None = None
+    pin_id: str | None = None
     _released: bool = field(default=False, init=False, repr=False)
 
     def release(self) -> None:
@@ -100,6 +102,7 @@ class RoutingCoordinator:
         self._reservations = 0
         self._profile_reservations: dict[str, int] = {}
         self._active_name: str | None = None
+        self._active_routing_profile: str | None = None
         self._activating_name: str | None = None
         self._activating_port: int | None = None
         self._switching = False
@@ -157,6 +160,7 @@ class RoutingCoordinator:
         on_reserved: Callable[[bool, int], None] | None = None,
         *,
         apply_loading_policy: bool = False,
+        apply_routing_profile: bool = True,
     ) -> RouteLease:
         """Return a lease only after *name* has a health-verified engine."""
         queued_at = time.monotonic()
@@ -166,7 +170,11 @@ class RoutingCoordinator:
                     "router_shutting_down", "router shutdown is in progress", status_code=503
                 )
             try:
-                model_id, profile, selector_id = self._resolve_request_locked(name)
+                model_id, profile, selector_id, routing_profile_id, pin_id = (
+                    self._resolve_request_locked(
+                        name, apply_routing_profile=apply_routing_profile
+                    )
+                )
             except CatalogError as exc:
                 raise RoutingError("unknown_model", str(exc), status_code=404) from exc
             if cancellation is not None and cancellation.is_set():
@@ -240,6 +248,8 @@ class RoutingCoordinator:
                         state.get("pid"),
                         model_id=model_id,
                         selector_id=selector_id,
+                        routing_profile_id=routing_profile_id,
+                        pin_id=pin_id,
                     )
                 if self._leases:
                     self._cond.wait()
@@ -292,6 +302,8 @@ class RoutingCoordinator:
             pid,
             model_id=model_id,
             selector_id=selector_id,
+            routing_profile_id=routing_profile_id,
+            pin_id=pin_id,
         )
 
     def cancel_acquire(self, cancellation: threading.Event) -> None:
@@ -318,7 +330,7 @@ class RoutingCoordinator:
         """Resolve the per-profile loading setting over the global default atomically."""
         with self._cond:
             try:
-                _, profile, _ = self._resolve_request_locked(name)
+                _, profile, _, _, _ = self._resolve_request_locked(name)
             except CatalogError:
                 # Admission owns the authoritative unknown-model response. A
                 # concurrent catalog replacement must not leak an exception
@@ -329,22 +341,82 @@ class RoutingCoordinator:
             return self._catalog.settings.send_loading_state
 
     def _resolve_request_locked(
-        self, name: str
-    ) -> tuple[str, ModelProfile, str | None]:
+        self, name: str, *, apply_routing_profile: bool = True
+    ) -> tuple[str, ModelProfile, str | None, str | None, str | None]:
+        routing_profile_id = None
+        pin_id = None
+        if apply_routing_profile and self._active_routing_profile is not None:
+            routing_profile = self._catalog.routing_profile(self._active_routing_profile)
+            if routing_profile is not None:
+                pinned, target = routing_profile.replacement(name)
+                if pinned:
+                    routing_profile_id = routing_profile.name
+                    pin_id = name
+                    if target is None:
+                        raise CatalogError(
+                            f"model ID {name!r} is disabled by routing profile {routing_profile.name!r}"
+                        )
+                    name = target
         selector = self._catalog.selector(name)
         if selector is None:
-            return name, self._catalog.get(name), None
+            return name, self._catalog.get(name), None, routing_profile_id, pin_id
         if selector.strategy == "warm":
             for target in selector.targets:
                 profile = self._catalog.get(target)
                 if self._active_profile_ready_locked(profile):
-                    return target, profile, selector.name
+                    return target, profile, selector.name, routing_profile_id, pin_id
             for target in selector.targets:
                 profile = self._catalog.get(target)
                 if self._activating_name == profile.name:
-                    return target, profile, selector.name
+                    return target, profile, selector.name, routing_profile_id, pin_id
         target = selector.targets[0]
-        return target, self._catalog.get(target), selector.name
+        return target, self._catalog.get(target), selector.name, routing_profile_id, pin_id
+
+    def has_routable_id(self, name: str) -> bool:
+        """Whether *name* resolves under the current runtime profile snapshot."""
+        with self._cond:
+            try:
+                self._resolve_request_locked(name)
+            except CatalogError:
+                return False
+            return True
+
+    def set_active_routing_profile(self, name: str | None) -> str | None:
+        """Atomically activate one pin map, or clear runtime pinning with ``None``."""
+        with self._cond:
+            if name is not None and self._catalog.routing_profile(name) is None:
+                raise RoutingError(
+                    "unknown_profile", f"routing profile {name!r} not found", status_code=404
+                )
+            self._active_routing_profile = name
+            self._cond.notify_all()
+            return self._active_routing_profile
+
+    def resolve_upstream_path(
+        self, path: str
+    ) -> tuple[str, str, ModelProfile, str]:
+        """Apply the active profile's longest pin before concrete upstream lookup."""
+        with self._cond:
+            normalized = path.strip("/")
+            source_id = None
+            rewritten = normalized
+            if self._active_routing_profile is not None:
+                routing_profile = self._catalog.routing_profile(self._active_routing_profile)
+                if routing_profile is not None:
+                    for pin, target in routing_profile.pins:
+                        if normalized == pin or normalized.startswith(pin + "/"):
+                            if source_id is None or len(pin) > len(source_id):
+                                source_id = pin
+                                if target is None:
+                                    rewritten = ""
+                                else:
+                                    rewritten = target + normalized[len(pin):]
+            if source_id is not None and not rewritten:
+                raise CatalogError(
+                    f"upstream model ID {source_id!r} is disabled by the active routing profile"
+                )
+            routed_id, profile, remaining = self._catalog.resolve_upstream_path(rewritten)
+            return source_id or routed_id, routed_id, profile, remaining
 
     def begin_manual_lifecycle(self, *, preempt_manual: bool = False) -> object:
         """Reserve the lifecycle barrier for one legacy engine operation."""
@@ -396,43 +468,52 @@ class RoutingCoordinator:
 
     def status(self) -> dict:
         with self._cond:
-            group = self._catalog.group_for(self._active_name) if self._active_name else None
-            active_identity_matches = self._active_matches_engine_locked()
-            return {
-                "activeProfile": self._active_name,
-                "activatingProfile": self._activating_name,
-                "activeGroup": group.name if group else None,
-                "residentProfiles": [self._active_name] if active_identity_matches else [],
-                "activeIdentityMatchesEngine": active_identity_matches,
-                "persistent": bool(active_identity_matches and group and group.persistent),
-                "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
-                "activeRequests": self._leases,
-                "reservedRequests": self._reservations,
-                "shuttingDown": self._shutdown_requested,
-                "switching": self._switching,
-                "queuedRequests": len(self._pending),
-                "idleEvictionScheduled": self._idle_timer is not None,
-                "evictions": self._evictions,
-                "admissions": self._admissions,
-                "activations": self._activations,
-                "activationFailures": self._activation_failures,
-                "cancellations": self._cancellations,
-                "terminalStreams": self._terminal_streams,
-                "lastTtftMs": self._last_ttft_ms,
-                "lastDurationMs": self._last_duration_ms,
-                "lastActivationMs": self._last_activation_ms,
-                "lastQueueWaitMs": self._last_queue_wait_ms,
-                "lastResponseBytes": self._last_response_bytes,
-                "lastProxyBytesPerSecond": self._last_proxy_bytes_per_second,
-                "scheduler": self._catalog.settings.scheduler,
-                "globalConcurrencyLimit": self._catalog.settings.global_concurrency_limit,
-                "defaultProfileConcurrencyLimit": DEFAULT_PROFILE_CONCURRENCY_LIMIT,
-            }
+            return self._status_locked()
+
+    def _status_locked(self) -> dict:
+        group = self._catalog.group_for(self._active_name) if self._active_name else None
+        active_identity_matches = self._active_matches_engine_locked()
+        return {
+            "activeProfile": self._active_name,
+            "activeRoutingProfile": self._active_routing_profile,
+            "activatingProfile": self._activating_name,
+            "activeGroup": group.name if group else None,
+            "residentProfiles": [self._active_name] if active_identity_matches else [],
+            "activeIdentityMatchesEngine": active_identity_matches,
+            "persistent": bool(active_identity_matches and group and group.persistent),
+            "capacity": {"maxResidentModels": 1, "availableResidentSlots": 0 if self._active_name else 1},
+            "activeRequests": self._leases,
+            "reservedRequests": self._reservations,
+            "shuttingDown": self._shutdown_requested,
+            "switching": self._switching,
+            "queuedRequests": len(self._pending),
+            "idleEvictionScheduled": self._idle_timer is not None,
+            "evictions": self._evictions,
+            "admissions": self._admissions,
+            "activations": self._activations,
+            "activationFailures": self._activation_failures,
+            "cancellations": self._cancellations,
+            "terminalStreams": self._terminal_streams,
+            "lastTtftMs": self._last_ttft_ms,
+            "lastDurationMs": self._last_duration_ms,
+            "lastActivationMs": self._last_activation_ms,
+            "lastQueueWaitMs": self._last_queue_wait_ms,
+            "lastResponseBytes": self._last_response_bytes,
+            "lastProxyBytesPerSecond": self._last_proxy_bytes_per_second,
+            "scheduler": self._catalog.settings.scheduler,
+            "globalConcurrencyLimit": self._catalog.settings.global_concurrency_limit,
+            "defaultProfileConcurrencyLimit": DEFAULT_PROFILE_CONCURRENCY_LIMIT,
+        }
 
     @property
     def catalog(self) -> ModelCatalog:
         with self._cond:
             return self._catalog
+
+    def control_plane_snapshot(self) -> tuple[ModelCatalog, dict]:
+        """Return one catalog and routing-state snapshot for control responses."""
+        with self._cond:
+            return self._catalog, self._status_locked()
 
     def model_listing_snapshot(self) -> tuple[ModelCatalog, frozenset[str]]:
         """Return one atomic public-catalog and loaded/starting identity snapshot."""
@@ -445,6 +526,20 @@ class RoutingCoordinator:
                 if self._engine_matches(profile, self._activating_port):
                     loaded.add(self._activating_name)
             return self._catalog, frozenset(loaded)
+
+    def public_model_listing_snapshot(
+        self,
+    ) -> tuple[ModelCatalog, frozenset[str], str | None]:
+        """Include the active runtime pin map in the same catalog/residency snapshot."""
+        with self._cond:
+            loaded: set[str] = set()
+            if self._active_name is not None and self._active_matches_engine_locked():
+                loaded.add(self._active_name)
+            if self._activating_name is not None and self._activating_port is not None:
+                profile = self._catalog.get(self._activating_name)
+                if self._engine_matches(profile, self._activating_port):
+                    loaded.add(self._activating_name)
+            return self._catalog, frozenset(loaded), self._active_routing_profile
 
     def active_matches_engine(self) -> bool:
         """Whether the manager still owns the exact resident routed profile.
@@ -543,6 +638,10 @@ class RoutingCoordinator:
                         status_code=409,
                     )
             self._catalog = catalog
+            # Match the pinned runtime contract: config reload starts with no
+            # active routing profile rather than silently carrying pin state
+            # into a potentially different profile definition.
+            self._active_routing_profile = None
             self._cond.notify_all()
 
     def prometheus(self) -> str:

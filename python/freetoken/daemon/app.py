@@ -126,6 +126,10 @@ class ProfileBody(BaseModel):
     force: bool = False
 
 
+class RoutingProfileSelectionBody(BaseModel):
+    name: str | None
+
+
 class RouterUnloadBody(BaseModel):
     name: str | None = None
 
@@ -376,6 +380,7 @@ def build_app(
         on_reserved: Callable[[bool, int], None] | None = None,
         *,
         apply_loading_policy: bool = False,
+        apply_routing_profile: bool = True,
     ):
         """Keep executor-side admission owned if its HTTP task is cancelled."""
         loop = asyncio.get_running_loop()
@@ -388,6 +393,7 @@ def build_app(
                 cancellation,
                 on_reserved,
                 apply_loading_policy=apply_loading_policy,
+                apply_routing_profile=apply_routing_profile,
             ),
         )
         shielded = asyncio.shield(future)
@@ -595,7 +601,10 @@ def build_app(
                 profile.set_fields_by_id,
                 requested_model=target_model,
                 rewrite_model=(
-                    target_model if route_lease.selector_id is not None else None
+                    target_model
+                    if route_lease.selector_id is not None
+                    or route_lease.routing_profile_id is not None
+                    else None
                 ),
             )
 
@@ -604,6 +613,10 @@ def build_app(
             if route_lease.selector_id is not None:
                 identity["selector"] = route_lease.selector_id
                 identity["target"] = route_lease.model_id
+            if route_lease.routing_profile_id is not None:
+                identity["routingProfile"] = route_lease.routing_profile_id
+                identity["pin"] = route_lease.pin_id
+                identity.setdefault("target", route_lease.model_id)
             return identity
 
         def loading_frame(text: str) -> bytes:
@@ -1032,7 +1045,7 @@ def build_app(
         body = await request.body()
         try:
             model = request_model(body)
-            if not router.catalog.has_routable_id(model):
+            if not router.has_routable_id(model):
                 raise CatalogError(f"unknown model profile {model!r}")
         except RequestModelError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1086,7 +1099,9 @@ def build_app(
     @app.get("/v1/models", dependencies=[Depends(require_router_key)])
     async def openai_model_list(request: Request):
         """OpenAI-compatible public metadata without exposing local model paths."""
-        catalog_snapshot, loaded_profiles = router.model_listing_snapshot()
+        catalog_snapshot, loaded_profiles, active_routing_profile = (
+            router.public_model_listing_snapshot()
+        )
         created = int(time.time())
         data = []
         for model_id in catalog_snapshot.listed_model_ids():
@@ -1125,6 +1140,22 @@ def build_app(
             if profile is not None:
                 record.update(profile.capabilities.model_listing_fields())
             data.append(record)
+        routing_profile = (
+            catalog_snapshot.routing_profile(active_routing_profile)
+            if active_routing_profile is not None else None
+        )
+        if routing_profile is not None:
+            for pin, target in routing_profile.pins:
+                if target is None or catalog_snapshot.has_routable_id(pin):
+                    continue
+                data.append({
+                    "id": pin,
+                    "object": "model",
+                    "created": created,
+                    "owned_by": "freetoken",
+                    "status": {"value": "unloaded"},
+                    "meta": {"freetoken": {"type": "profile"}},
+                })
         response = JSONResponse(content={
             "object": "list",
             "data": data,
@@ -1140,7 +1171,9 @@ def build_app(
     )
     async def upstream_proxy(request: Request, upstream_path: str):
         try:
-            model, _, remaining_path = router.catalog.resolve_upstream_path(upstream_path)
+            source_model, model, _, remaining_path = router.resolve_upstream_path(
+                upstream_path
+            )
         except CatalogError as exc:
             return JSONResponse(
                 status_code=404,
@@ -1154,7 +1187,7 @@ def build_app(
             raise HTTPException(status_code=403, detail="upstream prepare-stop is daemon-managed")
         raw_path = request.scope.get("raw_path")
         escaped_path = (
-            _escaped_path_suffix(raw_path, f"/upstream/{model}")
+            _escaped_path_suffix(raw_path, f"/upstream/{source_model}")
             if isinstance(raw_path, bytes) else None
         )
         if escaped_path is None:
@@ -1180,12 +1213,12 @@ def build_app(
     @app.get("/router/models", dependencies=auth)
     async def router_models():
         """Configured profiles annotated with the sole engine's live residency."""
-        route_state = router.status()
+        catalog_snapshot, route_state = router.control_plane_snapshot()
         engine = manager.status()
         active = route_state["activeProfile"]
         active_identity_matches = route_state["activeIdentityMatchesEngine"]
         data = []
-        for profile in router.catalog.public():
+        for profile in catalog_snapshot.public():
             profile = dict(profile)
             profile["configured"] = True
             profile["resident"] = (
@@ -1195,17 +1228,34 @@ def build_app(
             data.append(profile)
         return {
             "data": data,
-            "selectors": router.catalog.public_selectors(),
+            "selectors": catalog_snapshot.public_selectors(),
+            "routingProfiles": catalog_snapshot.public_routing_profiles(),
+            "activeRoutingProfile": route_state["activeRoutingProfile"],
             "capacity": route_state["capacity"],
         }
 
     @app.get("/router/profiles", dependencies=auth)
     async def router_profiles():
+        catalog_snapshot, route_state = router.control_plane_snapshot()
         return {
-            "data": router.catalog.public(),
-            "selectors": router.catalog.public_selectors(),
-            "activeProfile": router.status()["activeProfile"],
+            "data": catalog_snapshot.public(),
+            "selectors": catalog_snapshot.public_selectors(),
+            "routingProfiles": catalog_snapshot.public_routing_profiles(),
+            "activeRoutingProfile": route_state["activeRoutingProfile"],
+            "activeProfile": route_state["activeProfile"],
         }
+
+    @app.put("/router/profiles/active", dependencies=auth)
+    async def set_active_routing_profile(body: RoutingProfileSelectionBody):
+        try:
+            active = router.set_active_routing_profile(body.name)
+        except RoutingError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": {"message": str(exc), "type": exc.code}},
+            )
+        router_event("routing_profile_changed", routingProfile=active)
+        return {"active": active}
 
     @app.get("/router/hardware", dependencies=auth)
     async def router_hardware():
@@ -1278,7 +1328,7 @@ def build_app(
         afterwards permits the configured idle-TTL policy to apply normally.
         """
         try:
-            lease = await acquire_route(body.name)
+            lease = await acquire_route(body.name, apply_routing_profile=False)
         except RoutingError as exc:
             router_event("management_load_failed", profile=body.name, code=exc.code)
             content = {"error": {"message": str(exc), "type": exc.code}}

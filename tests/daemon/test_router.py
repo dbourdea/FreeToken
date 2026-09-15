@@ -14,6 +14,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from freetoken.daemon.catalog import (
+    CatalogError,
     ModelCapabilities,
     ModelCatalog,
     ModelProfile,
@@ -21,6 +22,7 @@ from freetoken.daemon.catalog import (
     RequestField,
     RouterSettings,
     RoutingGroup,
+    RoutingProfile,
 )
 from freetoken.daemon.app import build_app
 from freetoken.daemon.inference_proxy import (
@@ -1102,6 +1104,217 @@ def test_selector_model_listing_uses_strategy_specific_loaded_status():
     assert {item["name"] for item in management["selectors"]} == {
         "pin", "warm", "hidden",
     }
+
+
+def test_runtime_profile_pins_compose_before_warm_selectors_and_can_shadow_models():
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={"warm": ModelSelector("warm", "warm", ("a", "b"))},
+        routing_profiles={"coding": RoutingProfile(
+            "coding", (("a", "b"), ("disabled", None), ("public", "warm"))
+        )},
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router.acquire("b").release()
+    assert router.set_active_routing_profile("coding") == "coding"
+
+    selected = router.acquire("public")
+    assert (
+        selected.profile.name,
+        selected.model_id,
+        selected.selector_id,
+        selected.routing_profile_id,
+        selected.pin_id,
+    ) == ("b", "b", "warm", "coding", "public")
+    selected.release()
+    shadowed = router.acquire("a")
+    assert (shadowed.profile.name, shadowed.model_id, shadowed.pin_id) == ("b", "b", "a")
+    shadowed.release()
+    with pytest.raises(RoutingError, match="disabled by routing profile") as disabled:
+        router.acquire("disabled")
+    assert disabled.value.code == "unknown_model"
+    assert router.has_routable_id("disabled") is False
+    assert manager.calls == [("start", "b.gguf")]
+
+    assert router.set_active_routing_profile(None) is None
+    with pytest.raises(RoutingError) as missing:
+        router.acquire("public")
+    assert missing.value.code == "unknown_model"
+    with pytest.raises(RoutingError) as unknown_profile:
+        router.set_active_routing_profile("missing")
+    assert unknown_profile.value.code == "unknown_profile"
+
+
+def test_runtime_profile_http_rewrites_before_alias_filters_and_lists_virtual_pins(
+    monkeypatch
+):
+    catalog_doc = ModelCatalog(
+        {"a": ModelProfile(
+            "a", "private.gguf", (), aliases=("a:high",),
+            set_fields_by_id=(("a:high", (RequestField(("temperature",), "0.1"),)),),
+        )},
+        routing_profiles={"coding": RoutingProfile(
+            "coding",
+            (("disabled", None), ("public", "a:high")),
+            "Coding mode",
+        )},
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    seen = []
+    ring = LogRing()
+
+    def upstream(**kwargs):
+        seen.append(kwargs)
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+            router_ring=ring,
+        )
+        client = TestClient(app)
+        initial = client.get("/router/profiles").json()
+        activated = client.put("/router/profiles/active", json={"name": "coding"})
+        routed = client.post(
+            "/v1/chat/completions", json={"model": "public", "messages": []}
+        )
+        direct = client.post(
+            "/upstream/public/custom%2Fpart?opaque=a%2Fb",
+            content=b'{"model":"public"}',
+            headers={"Content-Type": "application/json"},
+        )
+        listed = {item["id"]: item for item in client.get("/v1/models").json()["data"]}
+        disabled = client.post("/v1/chat/completions", json={"model": "disabled"})
+        cleared = client.put("/router/profiles/active", json={"name": None})
+        missing = client.put("/router/profiles/active", json={"name": "missing"})
+
+    assert initial["activeRoutingProfile"] is None
+    assert initial["routingProfiles"] == [{
+        "name": "coding", "description": "Coding mode",
+        "pins": {"disabled": None, "public": "a:high"},
+    }]
+    assert activated.json() == {"active": "coding"}
+    assert routed.status_code == direct.status_code == 200
+    assert json.loads(seen[0]["body"]) == {
+        "model": "a:high", "messages": [], "temperature": 0.1,
+    }
+    assert seen[1]["path_and_query"] == "/custom%2Fpart?opaque=a%2Fb"
+    assert json.loads(seen[1]["body"]) == {"model": "public", "temperature": 0.1}
+    assert listed["public"]["status"]["value"] == "unloaded"
+    assert listed["public"]["meta"] == {"freetoken": {"type": "profile"}}
+    assert "disabled" not in listed
+    assert disabled.status_code == 404
+    assert cleared.json() == {"active": None}
+    assert missing.status_code == 404
+    events = [json.loads(item["text"]) for item in ring.since(0)[0]]
+    admitted = next(event for event in events if event["event"] == "admitted")
+    assert admitted["routingProfile"] == "coding"
+    assert admitted["pin"] == "public"
+    assert admitted["target"] == "a:high"
+
+
+def test_runtime_profile_direct_upstream_uses_longest_pin_and_rejects_selector_target():
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        selectors={"virtual": ModelSelector("virtual", "pin", ("a",))},
+        routing_profiles={"coding": RoutingProfile(
+            "coding", (("author", "a"), ("author/public", "b"), ("select", "virtual"))
+        )},
+    )
+    router = RoutingCoordinator(Manager(), catalog_doc, object(), ready_fn=ready)
+    router.set_active_routing_profile("coding")
+
+    assert router.resolve_upstream_path("author/public/v1/stats")[:2] == (
+        "author/public", "b",
+    )
+    assert router.resolve_upstream_path("author/public/v1/stats")[3] == "/v1/stats"
+    with pytest.raises(CatalogError, match="configured model ID"):
+        router.resolve_upstream_path("select/v1/stats")
+
+
+def test_catalog_reload_clears_active_runtime_profile():
+    profile = RoutingProfile("coding", (("public", "a"),))
+    current = ModelCatalog(
+        {"a": ModelProfile("a", "a.gguf", ())}, routing_profiles={"coding": profile}
+    )
+    router = RoutingCoordinator(Manager(), current, object(), ready_fn=ready)
+    router.set_active_routing_profile("coding")
+
+    router.replace_catalog(ModelCatalog(
+        {"a": ModelProfile("a", "a.gguf", ())}, routing_profiles={"coding": profile}
+    ))
+
+    catalog_snapshot, route_state = router.control_plane_snapshot()
+    assert catalog_snapshot.routing_profile("coding") == profile
+    assert route_state["activeRoutingProfile"] is None
+    assert router.has_routable_id("public") is False
+
+
+def test_management_load_ignores_active_routing_profile_pin():
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        routing_profiles={"coding": RoutingProfile("coding", (("a", "b"),))},
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    router.set_active_routing_profile("coding")
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        loaded = TestClient(app).post("/router/load", json={"name": "a"})
+
+    assert loaded.status_code == 200
+    assert loaded.json()["profile"] == "a"
+    assert manager.calls == [("start", "a.gguf")]
+
+
+def test_queued_request_keeps_its_atomic_routing_profile_snapshot():
+    catalog_doc = ModelCatalog(
+        {
+            "a": ModelProfile("a", "a.gguf", ()),
+            "b": ModelProfile("b", "b.gguf", ()),
+        },
+        routing_profiles={"coding": RoutingProfile("coding", (("public", "a"),))},
+    )
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    active = router.acquire("b")
+    router.set_active_routing_profile("coding")
+    leases = []
+    waiting = threading.Thread(target=lambda: leases.append(router.acquire("public")))
+    waiting.start()
+    for _ in range(100):
+        if router.status()["queuedRequests"] == 1:
+            break
+        time.sleep(0.01)
+    assert router.status()["queuedRequests"] == 1
+
+    router.set_active_routing_profile(None)
+    active.release()
+    waiting.join(2)
+
+    assert not waiting.is_alive()
+    lease = leases.pop()
+    assert (lease.profile.name, lease.routing_profile_id, lease.pin_id) == (
+        "a", "coding", "public",
+    )
+    lease.release()
+    assert manager.calls == [("start", "b.gguf"), ("switch", "a.gguf")]
 
 
 def test_model_list_renders_capability_metadata_for_canonical_and_alias():

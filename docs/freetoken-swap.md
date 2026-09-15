@@ -77,19 +77,38 @@ description = "Reuse a ready target, otherwise start the first target"
 
 [selectors.preferred-chat.metadata]
 tier = "stable"
+
+[profiles.coding]
+description = "Coding-focused routing mode"
+
+[profiles.coding.pins]
+llm-code = "preferred-chat"
+llm-plan = "qwen-coder:high"
+image-gen = ""
 ```
 
 ```bash
 ft daemon --catalog /etc/freetoken/models.toml
 ft daemon models
+ft daemon routing-profiles
+ft daemon activate-routing-profile coding
+ft daemon clear-routing-profile
 ft daemon start-profile qwen-coder
 ft daemon switch-profile qwen-chat
 ft daemon health
 ```
 
-`GET /router/profiles`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. `GET /models` is instead the pinned public-model-list alias of `GET /v1/models` and uses catalog API-key authentication. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
+`GET /router/profiles`, `PUT /router/profiles/active`,
+`POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit
+control-plane operations. They require `X-FT-Token` whenever the daemon has a
+token configured. The start/switch endpoints select a concrete model lifecycle
+profile; the PUT endpoint activates or clears a runtime routing profile.
+`GET /models` is instead the pinned public-model-list alias of `GET /v1/models`
+and uses catalog API-key authentication. Use `switch-profile --force` only for
+the same recovery case as `ft daemon switch --force`: the final accounting
+receipt may be incomplete when a failed engine cannot be observed.
 
-Profiles accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
+Model lifecycle entries accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
 `unlisted`, readiness, TTL/unload, priority, group, and safe JSON request-filter
 fields. A nested `capabilities` table may declare `in`/`out`
 text modalities, `tools`, and a nonnegative `context` length for compatible
@@ -112,6 +131,18 @@ shell. A profile cannot set `--model` or `--port` in `args`, because those
 fields are owned by the supervisor and are part of its conflict and re-adoption
 identity. The model files and catalog remain local operational configuration,
 not repository content.
+
+Runtime routing profiles are named, atomically selected maps under
+`[profiles.<name>.pins]`. A pin replaces a client model ID before aliases,
+selectors, and target filters; an empty target disables that ID. Pins may
+target a configured canonical ID, alternate ID, or selector, allowing one
+profile switch to change several stable client names together. No routing
+profile is active at startup or after catalog reload. Active non-disabled pins
+that do not shadow configured model/alias/selector IDs appear in the public
+model listing with `meta.freetoken.type = "profile"`; disabled pins are omitted.
+Profile pins also use longest-prefix replacement on `/upstream/` paths, but a
+pin that targets a selector remains invalid there because selectors are not
+direct-upstream IDs. Concrete load/unload management ignores active pin maps.
 
 Selectors are inference-only virtual model IDs. `pin` always resolves to its
 first ordered target. `warm` resolves to the first readiness-gated resident
@@ -203,7 +234,7 @@ reflects its `Origin`. Preflight never authorizes the corresponding request;
 inference and management routes still enforce their configured keys.
 `activeIdentityMatchesEngine` makes a stale or out-of-band child visible rather
 than reporting its configured alias as resident.
-`POST /router/unload`, `/router/reload`, and
+`PUT /router/profiles/active`, `POST /router/unload`, `/router/reload`, and
 `/router/requests/{id}/cancel` control idle eviction, atomic catalog reload,
 and a queued, connecting, or active request. The request list exposes reserved
 IDs from admission through stream completion, so an operator can cancel any

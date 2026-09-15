@@ -48,6 +48,9 @@ ft daemon health                               # proxied serve /health (camelCas
 ft daemon metrics                              # engine-only RAM(PSS)+process GPU-memory footprint
 ft daemon switch OTHER_MODEL                    # stop old + start new
 ft daemon models                                # list freetoken-swap named profiles
+ft daemon routing-profiles                       # list runtime model-ID pin profiles
+ft daemon activate-routing-profile coding        # atomically activate a pin map
+ft daemon clear-routing-profile                  # return to direct model IDs
 ft daemon switch-profile coding                 # atomic switch via the local TOML catalog
 ft daemon stop
 ft daemon shutdown                             # stop the serve and then the control plane
@@ -72,6 +75,7 @@ vectors for `ft serve`, never shell commands.
 | `POST /engine/stop` `{force?:false}` | Close admission, drain/abort, durably enqueue the final-accounting receipt, then `SIGTERM`→grace→`SIGKILL`. A prepare/outbox failure preserves the engine. |
 | `POST /engine/switch` `{model,port,args[],force?:false}` | One serialized stop-accounting-start transaction. |
 | `GET /router/profiles` | Lists local freetoken-swap named lifecycle profiles for authenticated control clients. |
+| `PUT /router/profiles/active` `{name:string\|null}` | Atomically activates or clears a runtime model-ID pin profile. |
 | `POST /engine/start-profile\|switch-profile` `{name,force?:false}` | Starts or atomically replaces the engine using a validated local profile. |
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |

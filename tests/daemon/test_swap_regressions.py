@@ -1,6 +1,7 @@
 """Swap boundary regressions, runnable without the GPU runtime."""
 
 import ast
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -136,6 +137,28 @@ def test_profile_client_reports_legacy_readiness_failure(monkeypatch):
     monkeypatch.setattr(daemon_client, "_request_json", request)
     assert daemon_client.main(["start-profile", "coding"]) == 1
     assert seen["timeout"] == daemon_client.DEFAULT_PROFILE_TIMEOUT
+
+
+@pytest.mark.parametrize("argv,expected_body", [
+    (["activate-routing-profile", "coding"], {"name": "coding"}),
+    (["clear-routing-profile"], {"name": None}),
+])
+def test_routing_profile_client_uses_atomic_selection_endpoint(
+    monkeypatch, capsys, argv, expected_body
+):
+    seen = {}
+
+    def request(method, url, path, **kwargs):
+        seen.update(method=method, url=url, path=path, **kwargs)
+        return {"active": expected_body["name"]}
+
+    monkeypatch.setattr(daemon_client, "_request_json", request)
+
+    assert daemon_client.main(argv) == 0
+    assert seen["method"] == "PUT"
+    assert seen["path"] == "/router/profiles/active"
+    assert seen["body"] == expected_body
+    assert json.loads(capsys.readouterr().out)["active"] == expected_body["name"]
 
 
 def test_fresh_health_does_not_reuse_previous_model_cache():

@@ -25,7 +25,11 @@ DEFAULT_PROFILE_TIMEOUT = 1920.0  # replacement + recovery readiness (2 * 900s),
 
 # Positional verbs that mean "act as a client"; anything else (bare, or a flag like --host) runs
 # the server. Kept in one place so the server dispatcher and this parser agree.
-CLIENT_VERBS = ("self", "status", "health", "metrics", "stats", "models", "start", "stop", "shutdown", "switch", "start-profile", "switch-profile", "logs")
+CLIENT_VERBS = (
+    "self", "status", "health", "metrics", "stats", "models", "routing-profiles",
+    "activate-routing-profile", "clear-routing-profile", "start", "stop", "shutdown",
+    "switch", "start-profile", "switch-profile", "logs",
+)
 
 
 class ClientError(Exception):
@@ -141,6 +145,19 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         "models", parents=[common],
         help="List named freetoken-swap model profiles (GET /router/profiles)",
     )
+    sub.add_parser(
+        "routing-profiles", parents=[common],
+        help="List runtime model-ID pin profiles (GET /router/profiles)",
+    )
+    activate_routing = sub.add_parser(
+        "activate-routing-profile", parents=[common],
+        help="Activate a runtime model-ID pin profile",
+    )
+    activate_routing.add_argument("name", help="Routing profile name")
+    sub.add_parser(
+        "clear-routing-profile", parents=[common],
+        help="Clear the active runtime model-ID pin profile",
+    )
     stop = sub.add_parser("stop", parents=[common], help="Stop the serve (POST /engine/stop)")
     stop.add_argument(
         "--force",
@@ -190,6 +207,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
             "metrics": ("GET", "/engine/metrics", None),
             "stats": ("GET", "/engine/stats", None),
             "models": ("GET", "/router/profiles", None),
+            "routing-profiles": ("GET", "/router/profiles", None),
             "stop": (
                 "POST",
                 "/engine/stop",
@@ -201,7 +219,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
                 {"force": True} if getattr(args, "force", False) else {},
             ),
         }
-        if args.verb in ("start", "switch"):
+        if args.verb == "activate-routing-profile":
+            method, path, body = "PUT", "/router/profiles/active", {"name": args.name}
+        elif args.verb == "clear-routing-profile":
+            method, path, body = "PUT", "/router/profiles/active", {"name": None}
+        elif args.verb in ("start", "switch"):
             body: dict[str, Any] = {"model": args.model, "args": list(args.serve_args)}
             if args.port is not None:
                 body["port"] = args.port

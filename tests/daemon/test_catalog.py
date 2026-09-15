@@ -314,6 +314,56 @@ unlisted = true
     assert catalog.listed_model_ids() == ("a", "b", "available", "public")
 
 
+def test_catalog_validates_runtime_routing_profiles_and_selector_targets(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.a]
+model = "a.gguf"
+aliases = ["a:variant"]
+
+[selectors.available]
+strategy = "warm"
+targets = ["a"]
+
+[profiles.coding]
+description = "Coding mode"
+[profiles.coding.pins]
+public = "available"
+direct = "a:variant"
+disabled = ""
+""",
+        encoding="utf-8",
+    )
+
+    catalog = ModelCatalog.load(str(path))
+
+    profile = catalog.routing_profile("coding")
+    assert profile.replacement("public") == (True, "available")
+    assert profile.replacement("disabled") == (True, None)
+    assert profile.replacement("other") == (False, None)
+    assert catalog.public_routing_profiles() == [{
+        "name": "coding",
+        "description": "Coding mode",
+        "pins": {"direct": "a:variant", "disabled": None, "public": "available"},
+    }]
+
+
+@pytest.mark.parametrize("content,message", [
+    ('[profiles.empty]\npins = {}\n', "must contain at least one"),
+    (
+        '[profiles.bad.pins]\npublic = "missing"\n',
+        "references unknown model",
+    ),
+    ('[profiles.bad.pins]\npublic = 7\n', "model ID or empty string"),
+    ('[profiles."bad/name".pins]\npublic = "a"\n', "profile name"),
+])
+def test_catalog_rejects_invalid_runtime_routing_profiles(tmp_path, content, message):
+    path = tmp_path / "models.toml"
+    path.write_text('[models.a]\nmodel = "a.gguf"\n' + content, encoding="utf-8")
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
 @pytest.mark.parametrize("content,message", [
     (
         '[selectors.bad]\nstrategy = "spillover"\ntargets = ["a"]\n',

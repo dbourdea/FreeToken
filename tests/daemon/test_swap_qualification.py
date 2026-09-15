@@ -635,6 +635,13 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
             elif self.path == "/router/profiles":
                 body = {
                     "activeProfile": "model-a",
+                        "activeRoutingProfile": None,
+                        "routingProfiles": [{
+                            "name": "coding", "pins": {
+                                "disabled-model": None,
+                                "profile-model": "preferred-model",
+                            },
+                        }],
                     "data": [{"name": "model-a"}, {"name": "model-b"}],
                 }
             elif self.path == "/metrics":
@@ -673,6 +680,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["residentProfile"] == "model-a"
     assert observation["modelListAliasVerified"] is True
     assert observation["selectorListed"] is True
+    assert observation["routingProfileListed"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
@@ -725,6 +733,52 @@ def test_native_router_benchmark_proves_warm_selector_reuses_resident_target(
         "activationDelta": 0, "passed": True,
     }
     assert (tmp_path / "warm-selector.sse").read_bytes() == b"data: private\n\n"
+
+
+def test_native_router_benchmark_proves_profile_selector_composition_and_cleanup(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    calls = []
+    statuses = iter((
+        {"activeProfile": "model-a", "activeRequests": 0, "activations": 3},
+        {
+            "activeProfile": "model-a", "activeRoutingProfile": "coding",
+            "activeRequests": 0, "activations": 3,
+        },
+    ))
+
+    def request_json(url, body=None, **kwargs):
+        calls.append((url, body, kwargs))
+        if url.endswith("/router/status"):
+            return b"{}", next(statuses)
+        if url.endswith("/router/profiles/active"):
+            return b"{}", {"active": body["name"]}
+        if url.endswith("/v1/models"):
+            return b'{"data":[]}', {
+                "data": [{"id": "profile-model"}, {"id": "model-a"}],
+            }
+        raise AssertionError(url)
+
+    monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    monkeypatch.setattr(
+        native_router_qualifier, "canary",
+        lambda base, model, direct: (b"data: private-profile\n\n", {
+            "model": model, "passed": True,
+        }),
+    )
+
+    result = native_router_qualifier.routing_profile_canary("http://test", tmp_path)
+
+    assert result == {
+        "profileActivated": True, "profileCleared": True,
+        "selectorComposed": True, "resolvedProfile": "model-a",
+        "activationDelta": 0, "passed": True,
+    }
+    profile_calls = [call for call in calls if call[0].endswith("/router/profiles/active")]
+    assert [call[1] for call in profile_calls] == [{"name": "coding"}, {"name": None}]
+    assert all(call[2]["method"] == "PUT" for call in profile_calls)
+    assert (tmp_path / "routing-profile.sse").read_bytes() == b"data: private-profile\n\n"
+    assert (tmp_path / "routing-profile-models.json").read_bytes() == b'{"data":[]}'
 
 
 def test_native_router_benchmark_captures_private_hardware_observation(
@@ -843,6 +897,10 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert selector is not None
     assert selector.strategy == "warm"
     assert selector.targets == ("model-b", "model-a")
+    routing_profile = catalog.routing_profile("coding")
+    assert routing_profile is not None
+    assert routing_profile.replacement("profile-model") == (True, "preferred-model")
+    assert routing_profile.replacement("disabled-model") == (True, None)
 
 
 @pytest.mark.parametrize(
