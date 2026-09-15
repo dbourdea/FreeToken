@@ -44,6 +44,41 @@ model = "local.gguf"
     assert settings.upstream_no_activation_suffixes == (".wasm", ".map")
 
 
+def test_catalog_validates_bounded_activity_and_capture_settings(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[router]
+activity_max_entries = 25
+capture_buffer_mb = 4
+
+[models.local]
+model = "local.gguf"
+""",
+        encoding="utf-8",
+    )
+
+    settings = ModelCatalog.load(str(path)).settings
+
+    assert settings.activity_max_entries == 25
+    assert settings.capture_buffer_mb == 4
+
+
+@pytest.mark.parametrize("key,value", [
+    ("activity_max_entries", 0),
+    ("activity_max_entries", 100001),
+    ("capture_buffer_mb", -1),
+    ("capture_buffer_mb", 257),
+])
+def test_catalog_rejects_unbounded_activity_or_capture_settings(tmp_path, key, value):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[router]\n{key} = {value}\n\n[models.local]\nmodel = "local.gguf"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match=key):
+        ModelCatalog.load(str(path))
+
+
 @pytest.mark.parametrize("value", [
     '".js"',
     '["js"]',

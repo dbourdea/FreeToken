@@ -24,11 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 from urllib.parse import quote_from_bytes
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .accounting import AccountingOutboxError, AccountingPrepareError
+from .activity import ActivityStore
 from .catalog import CatalogError, ModelCatalog
 from .inference_proxy import (
     RequestModelError,
@@ -285,6 +286,11 @@ def build_app(
     # path: those may carry credentials or prompts.
     router_ring = router_ring or LogRing(capacity=1000)
     app.state.router_ring = router_ring
+    activity_store = ActivityStore(
+        catalog.settings.activity_max_entries,
+        catalog.settings.capture_buffer_mb * 1024 * 1024,
+    )
+    app.state.activity_store = activity_store
     inflight_lock = threading.Lock()
     inflight: dict[str, dict] = {}
     request_reservations: dict[str, dict] = {}
@@ -545,6 +551,10 @@ def build_app(
                 try:
                     replacement = ModelCatalog.load(catalog_path)
                     router.replace_catalog(replacement)
+                    activity_store.reconfigure(
+                        replacement.settings.activity_max_entries,
+                        replacement.settings.capture_buffer_mb * 1024 * 1024,
+                    )
                 except CatalogError:
                     record_watch("invalid_catalog")
                     router_event("catalog_watch_rejected", code="invalid_catalog")
@@ -590,6 +600,7 @@ def build_app(
         # opaque bearer-like value, or tenant identifier.
         safe_route = getattr(request.scope.get("route"), "path", request.method)
         admission_cancellation = threading.Event()
+        capture_limit = activity_store.capture_item_limit
         with inflight_lock:
             if request_id in request_reservations:
                 router_event("request_conflict", profile=model, route=safe_route)
@@ -686,30 +697,43 @@ def build_app(
             cancelled = False
             cancellation_recorded = False
             last_position = None
+            outbound_body = body
+            captured_response = bytearray()
+            capture_overflow = False
+
+            def observed(chunk: bytes) -> bytes:
+                nonlocal capture_overflow
+                if capture_limit and not capture_overflow:
+                    if len(captured_response) + len(chunk) <= capture_limit:
+                        captured_response.extend(chunk)
+                    else:
+                        capture_overflow = True
+                        captured_response.clear()
+                return chunk
             try:
-                yield loading_frame("━━━━━\n")
-                yield loading_frame(f"freetoken-swap loading model: {model}\n")
+                yield observed(loading_frame("━━━━━\n"))
+                yield observed(loading_frame(f"freetoken-swap loading model: {model}\n"))
                 initial_position = reservation_state.get("queuePosition")
                 if isinstance(initial_position, int):
                     last_position = initial_position
-                    yield loading_frame(f"\nQueue position: #{initial_position} ")
+                    yield observed(loading_frame(f"\nQueue position: #{initial_position} "))
                 while not acquisition.done():
                     position = router.queue_position(admission_cancellation)
                     if position is not None and position != last_position:
                         last_position = position
-                        yield loading_frame(f"\nQueue position: #{position} ")
+                        yield observed(loading_frame(f"\nQueue position: #{position} "))
                     done, _ = await asyncio.wait({acquisition}, timeout=0.75)
                     if acquisition in done:
                         lease = acquisition.result()
                     else:
-                        yield loading_frame(".")
+                        yield observed(loading_frame("."))
                 if lease is None:
                     lease = acquisition.result()
 
-                yield loading_frame("\n")
-                yield loading_frame(f"Done! ({time.monotonic() - started:.2f}s)\n")
-                yield loading_frame("━━━━━\n")
-                yield loading_frame(" \n")
+                yield observed(loading_frame("\n"))
+                yield observed(loading_frame(f"Done! ({time.monotonic() - started:.2f}s)\n"))
+                yield observed(loading_frame("━━━━━\n"))
+                yield observed(loading_frame(" \n"))
 
                 with inflight_lock:
                     cancelled_before_connect = request_reservations[request_id]["cancelled"]
@@ -765,7 +789,7 @@ def build_app(
                     if first_byte_at is None:
                         first_byte_at = time.monotonic()
                     byte_count += len(chunk)
-                    yield chunk
+                    yield observed(chunk)
             except asyncio.CancelledError:
                 cancelled = True
                 abandon_loading_acquisition(acquisition)
@@ -777,7 +801,7 @@ def build_app(
                     router_event("admission_failed", profile=model, route=safe_route, code=exc.code)
                 else:
                     router_event("upstream_connect_failed", profile=model, route=safe_route)
-                yield loading_error(exc)
+                yield observed(loading_error(exc))
             finally:
                 ended = time.monotonic()
                 # Starlette may finalize an async response iterator with
@@ -812,8 +836,9 @@ def build_app(
                         inflight.pop(request_id, None)
                     request_reservations.pop(request_id, None)
                 if lease is not None:
+                    ttft_s = (first_byte_at - started) if first_byte_at is not None else None
                     router.record_stream(
-                        ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
+                        ttft_s=ttft_s,
                         duration_s=ended - started,
                         response_bytes=byte_count,
                         completed=not cancelled,
@@ -826,6 +851,22 @@ def build_app(
                         status=upstream.status if upstream is not None else 200,
                         cancelled=cancelled,
                         responseBytes=byte_count,
+                    )
+                    activity_store.record(
+                        model=lease.profile.name,
+                        route=safe_route,
+                        method=request.method,
+                        status=upstream.status if upstream is not None else 200,
+                        started=started,
+                        ttft_s=ttft_s,
+                        response_bytes=byte_count,
+                        cancelled=cancelled,
+                        request_headers=request.headers,
+                        request_body=outbound_body,
+                        response_headers=upstream.headers if upstream is not None else {},
+                        response_body=(
+                            None if upstream is None or capture_overflow else bytes(captured_response)
+                        ),
                     )
 
         loading_eligible = False
@@ -1023,11 +1064,19 @@ def build_app(
         def stream_response():
             first_byte_at = None
             byte_count = 0
+            captured_response = bytearray()
+            capture_overflow = False
             try:
                 for chunk in upstream.chunks():
                     if first_byte_at is None:
                         first_byte_at = time.monotonic()
                     byte_count += len(chunk)
+                    if capture_limit and not capture_overflow:
+                        if len(captured_response) + len(chunk) <= capture_limit:
+                            captured_response.extend(chunk)
+                        else:
+                            capture_overflow = True
+                            captured_response.clear()
                     yield chunk
             finally:
                 ended = time.monotonic()
@@ -1037,8 +1086,9 @@ def build_app(
                     if item.get("upstream") is upstream:
                         inflight.pop(request_id, None)
                     request_reservations.pop(request_id, None)
+                ttft_s = (first_byte_at - started) if first_byte_at is not None else None
                 router.record_stream(
-                    ttft_s=(first_byte_at - started) if first_byte_at is not None else None,
+                    ttft_s=ttft_s,
                     duration_s=ended - started,
                     response_bytes=byte_count,
                     completed=not cancelled,
@@ -1051,6 +1101,20 @@ def build_app(
                     status=upstream.status,
                     cancelled=cancelled,
                     responseBytes=byte_count,
+                )
+                activity_store.record(
+                    model=lease.profile.name,
+                    route=safe_route,
+                    method=request.method,
+                    status=upstream.status,
+                    started=started,
+                    ttft_s=ttft_s,
+                    response_bytes=byte_count,
+                    cancelled=cancelled,
+                    request_headers=request.headers,
+                    request_body=outbound_body,
+                    response_headers=upstream.headers,
+                    response_body=None if capture_overflow else bytes(captured_response),
                 )
 
         headers = response_headers(upstream.headers)
@@ -1365,6 +1429,25 @@ def build_app(
         """Bounded lifecycle/proxy event stream, separate from engine stdout."""
         return _log_stream(request, router_ring, since)
 
+    @app.get("/router/activity", dependencies=auth)
+    async def router_activity(
+        limit: int = Query(default=100, ge=1, le=999),
+        before_id: int | None = Query(default=None, ge=1, alias="beforeId"),
+        model: str | None = None,
+    ):
+        return activity_store.list(limit=limit, before_id=before_id, model=model)
+
+    @app.get("/router/activity/stats", dependencies=auth)
+    async def router_activity_stats(model: str | None = None):
+        return activity_store.stats(model=model)
+
+    @app.get("/router/captures/{capture_id}", dependencies=auth)
+    async def router_capture(capture_id: int):
+        capture = activity_store.capture(capture_id)
+        if capture is None:
+            raise HTTPException(status_code=404, detail="capture not found")
+        return capture
+
     @app.get("/metrics", dependencies=auth)
     async def router_metrics():
         return PlainTextResponse(router.prometheus(), media_type="text/plain; version=0.0.4")
@@ -1411,6 +1494,10 @@ def build_app(
         try:
             replacement = await run(proxy_pool, ModelCatalog.load, catalog_path)
             await run(lifecycle_pool, router.replace_catalog, replacement)
+            activity_store.reconfigure(
+                replacement.settings.activity_max_entries,
+                replacement.settings.capture_buffer_mb * 1024 * 1024,
+            )
         except CatalogError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RoutingError as exc:

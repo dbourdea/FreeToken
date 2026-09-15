@@ -46,6 +46,10 @@ startup_routing_profile = "coding"
 # Matching direct-upstream assets return 409 instead of cold-loading. This
 # suffix-only safe subset defaults to js/json/css/png/gif/jpg/jpeg/ico/txt.
 upstream_no_activation_suffixes = [".js", ".json", ".css", ".png"]
+# Activity metadata is always bounded and body-free. Captures are disabled by
+# default; enabling them retains redacted bodies in memory only.
+activity_max_entries = 1000
+capture_buffer_mb = 0
 
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
@@ -321,9 +325,16 @@ operations.
 catalog values, paths, keys, or machine data; the operator enters a bearer key
 for the current browser session and it calls the authenticated router APIs.
 The UI presents configured/resident models, load/unload/reload controls, router
-status, and the privacy-preserving `GET /router/hardware` memory view. Bounded
-request/response captures remain an applicable but unimplemented diagnostic;
-MCP and Tailcat remain deferred product expansions.
+status, and the privacy-preserving `GET /router/hardware` memory view. Authenticated
+`GET /router/activity`, `/router/activity/stats`, and `/router/captures/{id}`
+provide bounded diagnostics. Activity rows never contain bodies or headers.
+Captures are disabled unless `router.capture_buffer_mb` is positive, live only
+in memory, cap each response at 1 MiB, obey the total serialized-byte budget,
+and redact Authorization, proxy authorization, cookies, `X-Api-Key`,
+`X-FT-Token`, and custom token/secret/API-key header names. Bodies use Base64
+fields for binary fidelity. Restart-durable
+activity history and UI activity/capture views remain unimplemented. MCP and
+Tailcat remain deferred product expansions.
 
 When `router.api_keys` is configured, authentication accepts an
 `Authorization: Bearer` value, an HTTP Basic password, or `X-Api-Key` for

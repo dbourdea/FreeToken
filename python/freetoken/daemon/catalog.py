@@ -65,6 +65,8 @@ class RouterSettings:
     preload_model: str | None = None
     startup_routing_profile: str | None = None
     upstream_no_activation_suffixes: tuple[str, ...] = DEFAULT_UPSTREAM_NO_ACTIVATION_SUFFIXES
+    activity_max_entries: int = 1000
+    capture_buffer_mb: int = 0
 
 
 @dataclass(frozen=True)
@@ -489,6 +491,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         "scheduler", "groups", "include_aliases_in_list", "global_concurrency_limit",
         "send_loading_state", "preload_model", "startup_routing_profile",
         "upstream_no_activation_suffixes",
+        "activity_max_entries", "capture_buffer_mb",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -539,6 +542,14 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         )
     if len(set(upstream_no_activation_suffixes)) != len(upstream_no_activation_suffixes):
         raise CatalogError("router.upstream_no_activation_suffixes must not contain duplicates")
+    activity_max_entries = value.get("activity_max_entries", 1000)
+    if (not isinstance(activity_max_entries, int) or isinstance(activity_max_entries, bool)
+            or not 1 <= activity_max_entries <= 100_000):
+        raise CatalogError("router.activity_max_entries must be an integer from 1 through 100000")
+    capture_buffer_mb = value.get("capture_buffer_mb", 0)
+    if (not isinstance(capture_buffer_mb, int) or isinstance(capture_buffer_mb, bool)
+            or not 0 <= capture_buffer_mb <= 256):
+        raise CatalogError("router.capture_buffer_mb must be an integer from 0 through 256")
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -599,6 +610,8 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         preload_model=preload_model,
         startup_routing_profile=startup_routing_profile,
         upstream_no_activation_suffixes=tuple(upstream_no_activation_suffixes),
+        activity_max_entries=activity_max_entries,
+        capture_buffer_mb=capture_buffer_mb,
     )
 
 

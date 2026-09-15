@@ -656,6 +656,11 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
         assert legacy.content == response.content
         blocked = client.post("/upstream/low/v1/admin/prepare-stop")
         assert blocked.status_code == 403
+        activity = client.get("/router/activity").json()
+        assert activity["count"] == 7
+        assert all(row["hasCapture"] is False for row in activity["data"])
+        assert client.get("/router/activity/stats").json()["count"] == 7
+        assert client.get(f'/router/captures/{activity["data"][0]["id"]}').status_code == 404
     assert manager.calls == [("start", "low.gguf")]
     assert [item["path_and_query"] for item in calls] == [
         "/v1/chat/completions", "/v1/completions", "/v1/responses",
@@ -887,6 +892,50 @@ def test_upstream_static_suffix_refuses_cold_activation_and_allows_exact_residen
 
     assert [call["path_and_query"] for call in calls] == ["/api/status", "/ui/app.js"]
     assert manager.calls == [("start", "exact.gguf")]
+
+
+def test_activity_and_opt_in_capture_apis_are_authenticated_and_redacted(monkeypatch):
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        RouterSettings(api_keys=("secret",), activity_max_entries=2, capture_buffer_mb=1),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+
+    def upstream(**kwargs):
+        return UpstreamResponse(
+            200,
+            {"Content-Type": "application/octet-stream", "Set-Cookie": "private"},
+            BytesIO(b"\xffresult"),
+        )
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        assert client.get("/router/activity").status_code == 401
+        headers = {"Authorization": "Bearer secret", "X-Trace": "visible"}
+        response = client.post(
+            "/v1/chat/completions", content=b'{"model":"low","prompt":"private"}',
+            headers={**headers, "Content-Type": "application/json"},
+        )
+        assert response.content == b"\xffresult"
+
+        page = client.get("/router/activity", headers=headers).json()
+        assert page["count"] == 1
+        row = page["data"][0]
+        assert row["model"] == "low"
+        assert row["route"] == "/v1/chat/completions"
+        assert row["hasCapture"] is True
+        assert client.get("/router/activity/stats", headers=headers).json()["count"] == 1
+        capture = client.get(f'/router/captures/{row["id"]}', headers=headers).json()
+        assert capture["requestHeaders"]["authorization"] == "[REDACTED]"
+        assert capture["responseHeaders"]["Set-Cookie"] == "[REDACTED]"
+        assert base64.b64decode(capture["requestBodyBase64"]) == b'{"model":"low","prompt":"private"}'
+        assert base64.b64decode(capture["responseBodyBase64"]) == b"\xffresult"
 
 
 @pytest.mark.parametrize(
@@ -2284,7 +2333,7 @@ def test_streaming_chat_emits_cold_queue_feedback_then_preserves_upstream_sse(mo
                 set_fields=(RequestField(("temperature",), "0.2"),),
             ),
         },
-        settings=RouterSettings(send_loading_state=True),
+        settings=RouterSettings(send_loading_state=True, capture_buffer_mb=1),
     )
     router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
     active = router.acquire("low")
@@ -2320,6 +2369,10 @@ def test_streaming_chat_emits_cold_queue_feedback_then_preserves_upstream_sse(mo
         active.release()
         thread.join(3)
         assert not thread.is_alive()
+        activity = client.get("/router/activity").json()["data"]
+        assert len(activity) == 1 and activity[0]["hasCapture"] is True
+        capture = client.get(f'/router/captures/{activity[0]["id"]}').json()
+        assert base64.b64decode(capture["responseBodyBase64"]) == responses[0].content
 
     response = responses[0]
     assert response.status_code == 200

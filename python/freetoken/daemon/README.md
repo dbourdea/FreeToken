@@ -81,6 +81,8 @@ path prefixes remain restricted to the exact manager-owned loopback `${PORT}` ta
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
 | `GET /router/logs?since=` | SSE, bounded native router admission/proxy/cancellation events. It is separate from engine stdout and records route templates only—never concrete paths, request bodies, headers, query strings, model paths, or keys. |
+| `GET /router/activity`, `/router/activity/stats` | Authenticated bounded body-free inference history and aggregates. |
+| `GET /router/captures/{id}` | Authenticated opt-in, memory-bounded request/response capture. Credential headers are redacted and binary bodies are Base64. |
 | `/upstream/{model-id}/...` | Guarded direct passthrough with longest-prefix slash-namespaced ID resolution and escaped suffix preservation. Safe configured static suffixes return 409 instead of cold-loading and proxy normally when the exact model is resident. |
 | `GET /engine/metrics` | The serve tree's own `{ramBytes,vramBytes,pids}` footprint only. `ramAvailable`/`vramAvailable` and source fields distinguish a measured zero from an unavailable probe; Linux PSS, NVIDIA NVML/SMI, and AMD SMI process memory are supported. |
 | `GET /engine/health` | Proxied serve `/health` + daemon reachability. |

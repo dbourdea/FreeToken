@@ -15,6 +15,10 @@ upstream_timeout_s = 900
 # Safe static suffixes that return 409 rather than cold-loading through
 # /upstream/{model-id}/...; set [] to disable. No regex is accepted.
 upstream_no_activation_suffixes = [".js", ".json", ".css", ".png", ".gif", ".jpg", ".jpeg", ".ico", ".txt"]
+# Body-free activity rows are always bounded. Captures are sensitive, in-memory,
+# credential-redacted, and opt-in; zero disables request/response retention.
+activity_max_entries = 1000
+capture_buffer_mb = 0
 scheduler = "fifo"
 # Zero disables the global cap. Every profile still has a default cap of 10.
 global_concurrency_limit = 32
