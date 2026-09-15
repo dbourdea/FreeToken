@@ -3645,6 +3645,7 @@ def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_g
     assert "/router/load" in page.text
     assert "/router/hardware" in page.text
     assert "/router/activity?limit=25" in page.text
+    assert "/router/performance" in page.text
     assert "/router/captures/" in page.text
     assert "innerHTML" not in page.text
     assert "Captures may contain prompts and are fetched only when selected" in page.text
@@ -3654,6 +3655,66 @@ def test_router_management_ui_has_no_embedded_operational_data_and_hardware_is_g
         "engine": {"running": False, "pid": 100, "port": None},
         "memory": {"ramBytes": 123, "vramBytes": 456},
     }
+
+
+def test_periodic_performance_api_is_authenticated_filterable_and_private():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "/private/models/low.gguf", ())},
+        settings=RouterSettings(api_keys=("router-test-key",)),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    footprint = {
+        "ramBytes": 123, "vramBytes": 456, "pids": [100],
+        "ramAvailable": True, "vramAvailable": True,
+        "ramSource": "test-pss", "vramSource": "test-gpu",
+    }
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(),
+            footprint_fn=lambda pid: footprint,
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        app.state.performance_monitor.sample_once()
+        client = TestClient(app)
+        headers = {"Authorization": "Bearer router-test-key"}
+        assert client.get("/api/performance").status_code == 401
+        response = client.get("/api/performance", headers=headers)
+        timestamp = response.json()["sys_stats"][0]["timestamp"]
+        filtered = client.get(
+            "/router/performance", params={"after": timestamp}, headers=headers
+        )
+        invalid = client.get(
+            "/api/performance", params={"after": "not-a-time"}, headers=headers
+        )
+    assert response.status_code == 200
+    assert response.json()["gpu_stats"] == []
+    assert response.json()["sys_stats"][0] == {
+        "timestamp": timestamp, "scope": "engine-process-tree",
+        "ram_bytes": 123, "vram_bytes": 456,
+        "ram_available": True, "vram_available": True,
+        "ram_source": "test-pss", "vram_source": "test-gpu",
+    }
+    assert "/private/" not in response.text and "pids" not in response.text
+    assert filtered.json()["sys_stats"] == []
+    assert invalid.status_code == 400
+
+
+def test_disabled_performance_api_matches_pinned_unavailable_contract():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", ())},
+        settings=RouterSettings(performance_disabled=True),
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).get("/api/performance")
+    assert response.status_code == 503
+    assert response.json() == {"enabled": False}
 
 
 def test_catalog_watcher_applies_only_valid_idle_replacements(tmp_path):
@@ -3678,9 +3739,13 @@ def test_catalog_watcher_applies_only_valid_idle_replacements(tmp_path):
             catalog_path=str(path), catalog_watch_interval_s=0.01,
         )
         with TestClient(app) as client:
-            path.write_text("[models.b]\nmodel = 'b.gguf'\n", encoding="utf-8")
+            path.write_text(
+                "[router]\nperformance_disabled = true\n\n[models.b]\nmodel = 'b.gguf'\n",
+                encoding="utf-8",
+            )
             wait_for(client, "reloaded")
             assert [model["name"] for model in client.get("/router/models").json()["data"]] == ["b"]
+            assert app.state.performance_monitor.current()["enabled"] is False
             path.write_text("[models.b]\nmodel = [\n", encoding="utf-8")
             wait_for(client, "invalid_catalog")
             assert [model["name"] for model in client.get("/router/models").json()["data"]] == ["b"]

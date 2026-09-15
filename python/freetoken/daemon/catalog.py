@@ -70,6 +70,8 @@ class RouterSettings:
     activity_max_entries: int = 1000
     capture_buffer_mb: int = 0
     activity_session_headers: tuple[str, ...] = DEFAULT_ACTIVITY_SESSION_HEADERS
+    performance_disabled: bool = False
+    performance_every_s: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -496,6 +498,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         "upstream_no_activation_suffixes",
         "activity_max_entries", "capture_buffer_mb",
         "activity_session_headers",
+        "performance_disabled", "performance_every_s",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -577,6 +580,13 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         for header in normalized_session_headers
     ):
         raise CatalogError("router.activity_session_headers must not name credential headers")
+    performance_disabled = value.get("performance_disabled", False)
+    if not isinstance(performance_disabled, bool):
+        raise CatalogError("router.performance_disabled must be a boolean")
+    performance_every_s = _finite_seconds(
+        value.get("performance_every_s", 5),
+        "router.performance_every_s", minimum=5, maximum=3600,
+    )
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -640,6 +650,8 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         activity_max_entries=activity_max_entries,
         capture_buffer_mb=capture_buffer_mb,
         activity_session_headers=normalized_session_headers,
+        performance_disabled=performance_disabled,
+        performance_every_s=performance_every_s,
     )
 
 

@@ -51,6 +51,8 @@ def test_catalog_validates_bounded_activity_and_capture_settings(tmp_path):
 activity_max_entries = 25
 capture_buffer_mb = 4
 activity_session_headers = ["X-Conversation-ID"]
+performance_disabled = true
+performance_every_s = 30
 
 [models.local]
 model = "local.gguf"
@@ -63,6 +65,8 @@ model = "local.gguf"
     assert settings.activity_max_entries == 25
     assert settings.capture_buffer_mb == 4
     assert settings.activity_session_headers == ("x-conversation-id",)
+    assert settings.performance_disabled is True
+    assert settings.performance_every_s == 30
 
 
 @pytest.mark.parametrize("key,value", [
@@ -70,6 +74,9 @@ model = "local.gguf"
     ("activity_max_entries", 100001),
     ("capture_buffer_mb", -1),
     ("capture_buffer_mb", 257),
+    ("performance_every_s", 4),
+    ("performance_every_s", 3601),
+    ("performance_disabled", 1),
 ])
 def test_catalog_rejects_unbounded_activity_or_capture_settings(tmp_path, key, value):
     path = tmp_path / "models.toml"

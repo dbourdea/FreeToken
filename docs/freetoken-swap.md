@@ -51,6 +51,8 @@ upstream_no_activation_suffixes = [".js", ".json", ".css", ".png"]
 activity_max_entries = 1000
 capture_buffer_mb = 0
 activity_session_headers = ["X-Session-ID", "X-Litellm-Session-Id"]
+performance_disabled = false
+performance_every_s = 5
 
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
@@ -341,6 +343,16 @@ activity and fetches a capture only after an explicit click. Configured session
 headers are validated, may not name credentials, and are stored/displayed only
 as stable 16-character SHA-256 labels; raw identifiers are never retained. MCP
 and Tailcat remain deferred product expansions.
+
+`GET /api/performance` and `/router/performance` expose at most one hour of
+periodic samples at `router.performance_every_s` (minimum five seconds).
+The compatible envelope contains `sys_stats` and `gpu_stats`; native
+`sys_stats` rows are explicitly scoped to the owned engine process tree and
+contain only RAM/VRAM bytes, availability, and probe source. `gpu_stats` is
+empty because FreeToken does not fabricate adapter-wide utilization,
+temperature, power, or fan data from process memory. Strict RFC3339 `after`
+filtering is supported. The history is memory-only, authenticated, bounded,
+and disabled with `router.performance_disabled = true`.
 
 When `router.api_keys` is configured, authentication accepts an
 `Authorization: Bearer` value, an HTTP Basic password, or `X-Api-Key` for

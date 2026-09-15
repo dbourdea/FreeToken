@@ -21,6 +21,9 @@ activity_max_entries = 1000
 capture_buffer_mb = 0
 # Session grouping stores only a stable SHA-256 label, never the raw value.
 activity_session_headers = ["X-Session-ID", "X-Litellm-Session-Id"]
+# Retain at most one hour of owned-process RAM/VRAM samples in memory.
+performance_disabled = false
+performance_every_s = 5
 scheduler = "fifo"
 # Zero disables the global cap. Every profile still has a default cap of 10.
 global_concurrency_limit = 32
