@@ -77,7 +77,7 @@ def running(pid):
         # Zombies have exited even if the host's init has not reaped them yet.
         with open(f"/proc/{pid}/stat") as source:
             return source.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 
