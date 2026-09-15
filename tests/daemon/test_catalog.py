@@ -99,6 +99,7 @@ def test_catalog_validates_model_display_name_and_json_metadata(tmp_path):
 model = "coding.gguf"
 name = "  Coding Model  "
 description = "   "
+upstream_timeout_s = 45
 
 [models.coding.metadata]
 tier = "stable"
@@ -114,11 +115,13 @@ enabled = true
 
     assert profile.display_name == "Coding Model"
     assert profile.description is None
+    assert profile.upstream_timeout_s == 45
     assert profile.metadata() == {
         "nested": {"enabled": True}, "tags": ["local", "text"], "tier": "stable",
     }
     assert profile.public()["displayName"] == "Coding Model"
     assert profile.public()["metadata"] == profile.metadata()
+    assert profile.public()["upstreamTimeoutS"] == 45
 
 
 def test_catalog_validates_request_fields_and_creates_variant_aliases(tmp_path):
@@ -249,6 +252,7 @@ model = "two.gguf"
     ("[models.bad]\nmodel = 'm'\nport = -1\n", "0 through 65535"),
     ("[models.bad]\nmodel = 'm'\nuse_model_name = ''\n", "non-empty trimmed"),
     ("[models.bad]\nmodel = 'm'\nuse_model_name = ' bad'\n", "non-empty trimmed"),
+    ("[models.bad]\nmodel = 'm'\nupstream_timeout_s = 0\n", "upstream_timeout_s"),
     (
         "[models.bad]\nmodel = 'm'\n[models.bad.metadata]\ncreated = 2026-09-14\n",
         "JSON-compatible",

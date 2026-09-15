@@ -562,6 +562,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         or not isinstance(routed_a, dict)
         or routed_a.get("checkEndpoint") != "/ready"
         or routed_a.get("useModelName") != "model-a"
+        or routed_a.get("upstreamTimeoutS") != 659
         or routed_a.get("displayName") != "Qualification model A"
         or routed_a.get("metadata") != {"tier": "qualification", "type": "operator"}
         or not isinstance(listed_a, dict)
@@ -612,6 +613,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "routingProfileListed": True,
         "configuredReadinessTargetVerified": True,
         "configuredUpstreamModelNameVerified": True,
+        "configuredUpstreamTimeoutVerified": True,
         "configuredModelMetadataVerified": True,
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
@@ -1017,6 +1019,7 @@ def native_catalog_text(
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
             'check_endpoint = "/ready"', 'proxy = "http://127.0.0.1:${PORT}"',
             f"use_model_name = {json.dumps(alias)}",
+            "upstream_timeout_s = 659",
             f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
         ]
         if persistent_a and alias == "model-a":

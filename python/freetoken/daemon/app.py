@@ -713,7 +713,7 @@ def build_app(
                     headers=dict(request.headers),
                     body=outbound_body,
                     method=request.method,
-                    timeout_s=router.upstream_timeout_s,
+                    timeout_s=lease.profile.upstream_timeout_s or router.upstream_timeout_s,
                 )
                 with inflight_lock:
                     cancelled_while_connecting = request_reservations[request_id]["cancelled"]
@@ -962,7 +962,7 @@ def build_app(
                 headers=dict(request.headers),
                 body=outbound_body,
                 method=request.method,
-                timeout_s=router.upstream_timeout_s,
+                timeout_s=lease.profile.upstream_timeout_s or router.upstream_timeout_s,
             )
         except asyncio.CancelledError:
             lease.release()

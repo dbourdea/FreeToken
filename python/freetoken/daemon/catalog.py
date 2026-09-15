@@ -215,6 +215,7 @@ class ModelProfile:
     use_model_name: str | None = None
     display_name: str | None = None
     metadata_json: str = "{}"
+    upstream_timeout_s: float | None = None
 
     def metadata(self) -> dict[str, Any]:
         return json.loads(self.metadata_json)
@@ -275,6 +276,8 @@ class ModelProfile:
         metadata = self.metadata()
         if metadata:
             doc["metadata"] = metadata
+        if self.upstream_timeout_s is not None:
+            doc["upstreamTimeoutS"] = self.upstream_timeout_s
         return doc
 
 
@@ -585,6 +588,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
         "concurrency_limit", "send_loading_state", "capabilities", "set_fields",
         "set_fields_by_id", "check_endpoint", "proxy", "use_model_name", "name", "metadata",
+        "upstream_timeout_s",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -619,6 +623,12 @@ def _profile(name: str, value: object) -> ModelProfile:
     metadata_json = _metadata_json(
         value.get("metadata", {}), f"models.{name}.metadata"
     )
+    upstream_timeout_s = value.get("upstream_timeout_s")
+    if upstream_timeout_s is not None:
+        upstream_timeout_s = _finite_seconds(
+            upstream_timeout_s, f"models.{name}.upstream_timeout_s",
+            minimum=1, maximum=7200,
+        )
     ready_timeout_s = _finite_seconds(value.get("ready_timeout_s", 120), f"models.{name}.ready_timeout_s", minimum=1, maximum=900)
     ttl_s = value.get("ttl_s")
     if ttl_s is not None:
@@ -691,6 +701,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         tuple(".".join(path) for path in normalized_drop_fields), tuple(aliases), unlisted,
         concurrency_limit, send_loading_state, capabilities, set_fields, set_fields_by_id,
         check_endpoint, proxy, use_model_name, display_name, metadata_json,
+        upstream_timeout_s,
     )
 
 

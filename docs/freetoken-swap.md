@@ -54,6 +54,7 @@ ready_timeout_s = 300
 check_endpoint = "/ready"
 proxy = "http://127.0.0.1:${PORT}"
 use_model_name = "qwen-coder"
+upstream_timeout_s = 600
 send_loading_state = false
 
 [models.qwen-coder.metadata]
@@ -205,6 +206,13 @@ is mandatory, and other schemes, hosts, explicit ports, credentials, queries,
 fragments, empty path segments, and traversal are rejected. This deliberately
 keeps proxy traffic on the exact manager-owned child rather than creating an
 arbitrary SSRF or split-ownership target.
+
+`models.<name>.upstream_timeout_s` overrides `router.upstream_timeout_s` for
+the acquired profile's fresh loopback HTTP connection and response reads. The
+exact admitted profile snapshot supplies the timeout for both ordinary and SSE
+requests. TLS-handshake and pooled keepalive timeout knobs from the reference
+are inapplicable because native targets are restricted to fresh manager-owned
+plain-HTTP loopback connections.
 
 Each profile admits at most 10 reserved requests by default across its canonical
 and alternate IDs. Set `models.<name>.concurrency_limit` to a positive override.

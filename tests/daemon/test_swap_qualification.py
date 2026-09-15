@@ -650,6 +650,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                         "name": "model-a", "resident": True,
                         "checkEndpoint": "/ready",
                         "useModelName": "model-a",
+                        "upstreamTimeoutS": 659,
                         "displayName": "Qualification model A",
                         "metadata": {"tier": "qualification", "type": "operator"},
                     },
@@ -709,6 +710,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["routingProfileListed"] is True
     assert observation["configuredReadinessTargetVerified"] is True
     assert observation["configuredUpstreamModelNameVerified"] is True
+    assert observation["configuredUpstreamTimeoutVerified"] is True
     assert observation["configuredModelMetadataVerified"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
@@ -956,6 +958,7 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert catalog.get("model-a").check_endpoint == "/ready"
     assert catalog.get("model-a").proxy == "http://127.0.0.1:${PORT}"
     assert catalog.get("model-a").use_model_name == "model-a"
+    assert catalog.get("model-a").upstream_timeout_s == 659
     assert catalog.get("model-a").display_name == "Qualification model A"
     assert catalog.get("model-a").metadata() == {
         "tier": "qualification", "type": "operator",

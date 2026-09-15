@@ -677,6 +677,7 @@ def test_profile_readiness_path_and_proxy_prefix_target_the_owned_child(monkeypa
         port=1922,
         check_endpoint="/ready",
         proxy="http://127.0.0.1:${PORT}/gateway",
+        upstream_timeout_s=37,
     )
     catalog_doc = ModelCatalog({"low": profile})
     readiness_calls = []
@@ -705,6 +706,7 @@ def test_profile_readiness_path_and_proxy_prefix_target_the_owned_child(monkeypa
     assert readiness_calls == [(101, 1922, 120.0, "/ready")]
     assert upstream_calls[0]["base_url"] == "http://127.0.0.1:1922/gateway"
     assert upstream_calls[0]["path_and_query"] == "/v1/chat/completions"
+    assert upstream_calls[0]["timeout_s"] == 37
 
     class Probe:
         def fresh_readiness(self, port, path):
