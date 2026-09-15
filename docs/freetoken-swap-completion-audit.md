@@ -39,11 +39,12 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
-  `89d026c7253b93e512fd2792233a92133c79fb7f` (Actions run `34918087894`)
-  reported 253 passed with zero failures, errors, or skips. This includes the
+  `70fe9f4ad16b46f84c69045f56bdd0f9004a809a` (Actions run `34919447031`)
+  reported 265 passed with zero failures, errors, or skips. This includes the
   fail-closed maintenance-host and measured-memory gates, AMD SMI parsing,
   queued-disconnect ownership regression, and capability-metadata parser and
-  listing coverage. It also executes the
+  listing coverage, plus ordered request-filter and generated-alias coverage.
+  It also executes the
   disposable process-group, readiness rollback,
   re-adoption, dynamic-port, routed SSE, and cleanup tests that Windows skips.
   It is current-branch Linux process evidence, not current-engine or GPU-model
