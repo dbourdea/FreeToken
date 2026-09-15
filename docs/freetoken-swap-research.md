@@ -96,14 +96,12 @@ The additional Linux real-process suite passes both normal SIGTERM and SIGTERM-r
 
 The current native-router Windows daemon suite passes 274 tests with 7 expected Linux-only skips. Coverage exercises replacement launch failure, recovery launch failure, readiness error and timeout, recovery readiness failure, accounting failure preservation, replacement exit and persisted-state cleanup, one-use recovery tickets, automatic canonical, alternate, and pin/warm virtual model-ID routing, selector rewrite/filter ordering and strategy-specific listing status, hidden-profile list policy, exact `/models` public-list alias and separate profile-control authentication, atomic public pre-ownership/unloaded/activating/resident/stale model status without path disclosure, global/per-profile concurrency reservations and immediate rejection, concurrent cold dynamic-target sharing, global/per-profile cold-load feedback after admission with queue reasoning SSE, warm and disabled-path preservation, in-band activation errors, explicit cancellation and disconnect cleanup, sanitized side-effect-free browser preflight and authenticated model-list CORS, Bearer/Basic-password/`X-Api-Key` extraction and anti-bypass precedence with local credential termination, atomic readiness, disconnect-safe shared manual/routed lifecycle exclusion and rollback completion, coordinated HTTP and OS/lifespan daemon shutdown, drain-before-detach including preempted manual transactions, immediate shutdown admission closure under lifecycle-pool contention, queued/connecting/active cancellation ownership, guarded longest-prefix passthrough with escaped path/query preservation, authenticated stateless response-resource compatibility without model admission, race-safe atomic reload and dynamic-port binding, strict filters and namespaced-ID validation, exact explicit/dynamic/omitted-default-port re-adoption, capacity protection, invalidation by newer lifecycle operations, exact-origin qualification credentials, unauthenticated control/inference rejection, authenticated alias/selector/profile/metrics/router-log evidence capture, and privacy-safe exact-host maintenance gating before side effects. These are controlled CPU and loopback-HTTP tests, not new real-model measurements.
 
-The same complete daemon suite passed twice on GitHub-hosted Ubuntu at commit
-`5ee1e2604d077b332e07ff9318c8478eae56d6da`, once for the branch push and once
-for the draft PR synchronization. Those runs execute the actual disposable
+The latest complete daemon suite passed on GitHub-hosted Ubuntu at commit
+`cbf00d6fb29331dec862b99914839c01fff7dcf4`: run `34921346809` reported
+281 passed with no failures, errors, or skips. It executes the actual disposable
 Linux child, process-group escalation, readiness rollback, exact re-adoption,
-dynamic-port reactivation, routed SSE, and cleanup cases skipped on Windows.
-The latest exact-branch hosted run at
-`bf70a04b833016d6ad6e0fd573ea3ab88961113b` reported 234 passed with no
-skips, including fail-closed maintenance-host checks. These runs establish
+dynamic-port reactivation, routed SSE, cleanup cases skipped on Windows, and
+the deterministic pin/warm selector gates. This run establishes
 current-branch Linux process behavior only; current-engine and GMKtek GPU-model
 qualification remain separate gates.
 
