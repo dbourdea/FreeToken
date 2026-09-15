@@ -388,7 +388,8 @@ The opt-in native maintenance harness `benchmarks/swap/qualify_native_router.py`
 generates a private API key scoped only to its temporary daemon origin. Its
 acceptance result requires 401 responses without that key and authenticated
 Bearer, Basic-password, `X-Api-Key`, model/profile inventory, Prometheus metrics,
-and bounded router-log SSE evidence;
+bounded router-log SSE, and authenticated periodic-performance history with a
+positive available owned-process RAM/VRAM sample and no PID/model/path fields;
 the key, catalog, headers, and raw captures are never publication artifacts.
 
 ## Cancellation qualification

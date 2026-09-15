@@ -469,10 +469,41 @@ def validate_routed_trial(router: dict, *, alias: str, prior_activations: int, e
     return activations
 
 
+def valid_periodic_performance(performance: dict) -> bool:
+    rows = performance.get("sys_stats")
+    if (
+        performance.get("enabled") is not True
+        or performance.get("gpu_stats") != []
+        or not isinstance(rows, list)
+        or not 1 <= len(rows) <= 720
+        or not all(
+            isinstance(row, dict)
+            and row.get("scope") == "engine-process-tree"
+            and not any(key in row for key in ("pids", "model", "path", "command"))
+            for row in rows
+        )
+    ):
+        return False
+    latest = rows[-1]
+    return (
+        latest.get("ram_available") is True
+        and latest.get("vram_available") is True
+        and isinstance(latest.get("ram_bytes"), int)
+        and latest["ram_bytes"] > 0
+        and isinstance(latest.get("vram_bytes"), int)
+        and latest["vram_bytes"] > 0
+        and all(
+            isinstance(latest.get(key), str) and latest[key]
+            for key in ("timestamp", "ram_source", "vram_source")
+        )
+    )
+
+
 def control_plane_canary(base: str, artifacts: Path) -> dict:
     """Qualify authenticated management, metrics, and bounded router-log access."""
     unauthorized: dict[str, int] = {}
-    for path in ("/router/status", "/v1/models", "/models"):
+    protected_paths = ("/router/status", "/v1/models", "/models", "/api/performance")
+    for path in protected_paths:
         request = urllib.request.Request(base + path)
         try:
             with urllib.request.urlopen(request, timeout=10):
@@ -482,7 +513,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
             exc.close()
         else:
             raise RuntimeError(f"unauthenticated request unexpectedly succeeded: {path}")
-    if set(unauthorized.values()) != {401}:
+    if unauthorized != {path: 401 for path in protected_paths}:
         raise RuntimeError("native router did not reject unauthenticated control and inference")
 
     if _NATIVE_AUTH_BASE != base.rstrip("/") or _NATIVE_API_KEY is None:
@@ -508,6 +539,16 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     )
     routed_raw, routed = request_json(base + "/router/models", timeout=10)
     profiles_raw, profiles = request_json(base + "/router/profiles", timeout=10)
+    performance_raw = b""
+    performance: dict = {}
+    performance_deadline = time.monotonic() + 15
+    while True:
+        performance_raw, performance = request_json(base + "/api/performance", timeout=10)
+        if valid_periodic_performance(performance):
+            break
+        if time.monotonic() >= performance_deadline:
+            raise RuntimeError("periodic performance lacked a positive owned-process sample")
+        time.sleep(0.25)
     metrics_raw = request_bytes(base + "/metrics", timeout=10)
     model_rows = models.get("data")
     alias_rows = models_alias.get("data")
@@ -600,6 +641,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     (artifacts / "control-v1-models.json").write_bytes(models_raw)
     (artifacts / "control-router-models.json").write_bytes(routed_raw)
     (artifacts / "control-router-profiles.json").write_bytes(profiles_raw)
+    (artifacts / "control-performance.json").write_bytes(performance_raw)
     (artifacts / "control-metrics.prom").write_bytes(metrics_raw)
     (artifacts / "control-router-log.sse").write_bytes(log_frame)
     for name, raw in alternate_auth_raw.items():
@@ -620,6 +662,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "namespacedUpstreamVerified": True,
         "apiKeyFormsVerified": ["bearer", "basic", "x-api-key"],
         "metricsAvailable": True,
+        "periodicPerformanceAvailable": True,
         "routerLogSseAvailable": True,
         "passed": True,
     }
@@ -997,7 +1040,7 @@ def native_catalog_text(
     ]
     catalog = [
         "[router]", "upstream_timeout_s = 660", "include_aliases_in_list = true",
-        "send_loading_state = true", "",
+        "send_loading_state = true", "performance_every_s = 5", "",
     ]
     if api_key is not None:
         catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]

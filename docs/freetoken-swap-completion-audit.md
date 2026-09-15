@@ -138,7 +138,8 @@ router-cancellation, same-model concurrency, conflicting-model queue/drain,
 failed-switch rollback/accounting,
 same-process re-adoption, active-reload-conflict, capacity-safe persistent residency,
 TTL-eviction, unauthenticated 401, authenticated model/profile inventory,
-Prometheus, and bounded router-log results. It must also run Linux real-child tests on
+Prometheus, bounded router-log, and positive available periodic owned-process
+RAM/VRAM results without PID/model/path fields. It must also run Linux real-child tests on
 the current branch, then restore and health-check the protected workload. No
 merge, permanent service activation, or publication of raw artifacts is
 authorized by this audit.

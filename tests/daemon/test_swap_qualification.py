@@ -671,6 +671,21 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                         }],
                     "data": [{"name": "model-a"}, {"name": "model-b"}],
                 }
+            elif self.path == "/api/performance":
+                body = {
+                    "enabled": True,
+                    "sys_stats": [{
+                        "timestamp": "2026-09-15T00:00:00Z",
+                        "scope": "engine-process-tree",
+                        "ram_bytes": 1024,
+                        "vram_bytes": 2048,
+                        "ram_available": True,
+                        "vram_available": True,
+                        "ram_source": "proc-smaps-rollup-pss",
+                        "vram_source": "amd-smi",
+                    }],
+                    "gpu_stats": [],
+                }
             elif self.path == "/metrics":
                 self._send(
                     b"freetoken_swap_admissions_total 1\n",
@@ -714,10 +729,11 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["configuredModelMetadataVerified"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
+    assert observation["periodicPerformanceAvailable"] is True
     assert authorized_paths == [
         "/router/status", "/router/status",
         "/v1/models", "/models", "/upstream/compat/model-a/v1/stats",
-        "/router/models", "/router/profiles", "/metrics",
+        "/router/models", "/router/profiles", "/api/performance", "/metrics",
         "/router/logs?since=0",
     ]
     assert b"management_loaded" in (tmp_path / "control-router-log.sse").read_bytes()
@@ -726,6 +742,30 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     )
     assert (tmp_path / "control-auth-basic.json").is_file()
     assert (tmp_path / "control-auth-x-api-key.json").is_file()
+    assert (tmp_path / "control-performance.json").is_file()
+
+
+def test_native_periodic_performance_gate_rejects_unavailable_or_identifying_rows(
+    native_router_qualifier,
+):
+    valid = {
+        "enabled": True,
+        "sys_stats": [{
+            "timestamp": "2026-09-15T00:00:00Z", "scope": "engine-process-tree",
+            "ram_bytes": 1, "vram_bytes": 2,
+            "ram_available": True, "vram_available": True,
+            "ram_source": "pss", "vram_source": "amd-smi",
+        }],
+        "gpu_stats": [],
+    }
+    assert native_router_qualifier.valid_periodic_performance(valid)
+    for key, value in (
+        ("ram_available", False), ("vram_bytes", 0), ("pids", [123]),
+        ("model", "private"), ("path", "/private"),
+    ):
+        candidate = json.loads(json.dumps(valid))
+        candidate["sys_stats"][-1][key] = value
+        assert not native_router_qualifier.valid_periodic_performance(candidate)
 
 
 def test_native_router_benchmark_validates_warm_and_swap_activation_labels(native_router_qualifier):
