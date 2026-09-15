@@ -510,6 +510,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         None,
     ) if isinstance(routing_profiles, list) else None
     resident = [item.get("name") for item in routed_rows if item.get("resident")]
+    routed_a = next((item for item in routed_rows if item.get("name") == "model-a"), None)
     if (
         not {"model-a", "model-b", "compat/model-a", "preferred-model"}.issubset(aliases)
         or routed_names != profile_names
@@ -522,6 +523,8 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         or coding_profile.get("pins") != {
             "disabled-model": None, "profile-model": "preferred-model",
         }
+        or not isinstance(routed_a, dict)
+        or routed_a.get("checkEndpoint") != "/ready"
         or not isinstance(namespaced_stats, dict)
         or b"freetoken_swap_admissions_total" not in metrics_raw
     ):
@@ -558,6 +561,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "selectorListed": "preferred-model" in aliases,
         "profileCount": len(profile_names),
         "routingProfileListed": True,
+        "configuredReadinessTargetVerified": True,
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
         "namespacedUpstreamVerified": True,
@@ -960,6 +964,7 @@ def native_catalog_text(
     for alias, model in (("model-a", model_a), ("model-b", model_b)):
         profile_lines = [
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
+            'check_endpoint = "/ready"', 'proxy = "http://127.0.0.1:${PORT}"',
             f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
         ]
         if persistent_a and alias == "model-a":
@@ -973,7 +978,8 @@ def native_catalog_text(
     if invalid_model is not None:
         catalog.extend((
             "[models.model-invalid]", f"model = {json.dumps(invalid_model)}", "port = 0",
-            "ready_timeout_s = 15", "ttl_s = 0",
+            "ready_timeout_s = 15", 'check_endpoint = "/ready"',
+            'proxy = "http://127.0.0.1:${PORT}"', "ttl_s = 0",
             "args = " + json.dumps(common_args).replace("${MODEL_ID}", "model-invalid"), "",
         ))
     return "\n".join(catalog)

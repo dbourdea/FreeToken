@@ -705,6 +705,7 @@ def build_app(
 
                 upstream = await connect_upstream(
                     port=lease.port,
+                    base_url=lease.proxy_base_url,
                     path_and_query=path_and_query,
                     headers=dict(request.headers),
                     body=outbound_body,
@@ -953,6 +954,7 @@ def build_app(
         try:
             upstream = await connect_upstream(
                 port=lease.port,
+                base_url=lease.proxy_base_url,
                 path_and_query=path_and_query,
                 headers=dict(request.headers),
                 body=outbound_body,
@@ -1372,7 +1374,12 @@ def build_app(
     def profile_result(name: str, result: dict, port: int):
         profile = router.catalog.get(name)
         readiness = wait_for_ready(
-            manager, probe, pid=result.get("pid"), port=port, timeout_s=profile.ready_timeout_s
+            manager,
+            probe,
+            pid=result.get("pid"),
+            port=port,
+            timeout_s=profile.ready_timeout_s,
+            path=profile.check_endpoint,
         )
 
         content = {**result, "profile": name, "readiness": readiness}

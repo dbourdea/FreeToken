@@ -21,6 +21,13 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in the Python 3.10 p
 
 _SIMPLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SAFE_HTTP_PATH = re.compile(r"^/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?$")
+_PROXY_TEMPLATE = re.compile(
+    r"^http://127\.0\.0\.1:\$\{PORT\}(?P<prefix>/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?)?$"
+)
+
+DEFAULT_CHECK_ENDPOINT = "/health"
+DEFAULT_PROXY = "http://127.0.0.1:${PORT}"
 
 
 class CatalogError(ValueError):
@@ -203,6 +210,12 @@ class ModelProfile:
     capabilities: ModelCapabilities = ModelCapabilities()
     set_fields: tuple[RequestField, ...] = ()
     set_fields_by_id: tuple[tuple[str, tuple[RequestField, ...]], ...] = ()
+    check_endpoint: str = DEFAULT_CHECK_ENDPOINT
+    proxy: str = DEFAULT_PROXY
+
+    def proxy_base_url(self, port: int) -> str:
+        """Resolve the validated loopback template to this owned child port."""
+        return self.proxy.replace("${PORT}", str(port))
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -245,6 +258,10 @@ class ModelProfile:
                 model_id: _request_fields_public(fields)
                 for model_id, fields in self.set_fields_by_id
             }
+        if self.check_endpoint != DEFAULT_CHECK_ENDPOINT:
+            doc["checkEndpoint"] = self.check_endpoint
+        if self.proxy != DEFAULT_PROXY:
+            doc["proxy"] = self.proxy
         return doc
 
 
@@ -554,7 +571,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
         "concurrency_limit", "send_loading_state", "capabilities", "set_fields",
-        "set_fields_by_id",
+        "set_fields_by_id", "check_endpoint", "proxy",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -637,6 +654,13 @@ def _profile(name: str, value: object) -> ModelProfile:
     set_fields_by_id = _request_fields_by_id(
         name, value.get("set_fields_by_id", {})
     )
+    check_endpoint = _check_endpoint(
+        value.get("check_endpoint", DEFAULT_CHECK_ENDPOINT),
+        f"models.{name}.check_endpoint",
+    )
+    proxy = _proxy_template(
+        value.get("proxy", DEFAULT_PROXY), f"models.{name}.proxy"
+    )
     aliases = list(dict.fromkeys([
         *aliases,
         *(model_id for model_id, _ in set_fields_by_id if model_id != name),
@@ -646,7 +670,39 @@ def _profile(name: str, value: object) -> ModelProfile:
         ttl_s, unload_timeout_s, priority, group,
         tuple(".".join(path) for path in normalized_drop_fields), tuple(aliases), unlisted,
         concurrency_limit, send_loading_state, capabilities, set_fields, set_fields_by_id,
+        check_endpoint, proxy,
     )
+
+
+def _check_endpoint(value: object, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > 256
+        or not _SAFE_HTTP_PATH.fullmatch(value)
+        or any(segment in {".", ".."} for segment in value.split("/"))
+    ):
+        raise CatalogError(
+            f"{field} must be an absolute ASCII path without query, fragment, or traversal"
+        )
+    return value
+
+
+def _proxy_template(value: object, field: str) -> str:
+    if not isinstance(value, str) or len(value) > 512:
+        raise CatalogError(f"{field} must be a safe loopback HTTP URL template")
+    match = _PROXY_TEMPLATE.fullmatch(value)
+    if match is None:
+        raise CatalogError(
+            f"{field} must be http://127.0.0.1:${{PORT}} with an optional safe path prefix"
+        )
+    prefix = match.group("prefix") or ""
+    if any(segment in {".", ".."} for segment in prefix.split("/")):
+        raise CatalogError(
+            f"{field} must be http://127.0.0.1:${{PORT}} with an optional safe path prefix"
+        )
+    if prefix == "/":
+        prefix = ""
+    return DEFAULT_PROXY + prefix
 
 
 def _request_field_path(value: object, field: str) -> tuple[str, ...]:

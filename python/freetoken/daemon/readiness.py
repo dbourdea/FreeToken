@@ -20,6 +20,7 @@ def wait_for_ready(
     pid: int | None,
     port: int,
     timeout_s: float,
+    path: str = "/health",
     now: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
@@ -29,13 +30,22 @@ def wait_for_ready(
         state = manager.status()
         if not state.get("running") or (pid is not None and state.get("pid") != pid):
             return {"ready": False, "reason": "superseded", "health": last}
-        last = probe.fresh_health(port)
+        last = (
+            probe.fresh_health(port)
+            if path == "/health"
+            else probe.fresh_readiness(port, path)
+        )
         # Replacement or exit can happen while the HTTP request is in flight.
         state = manager.status()
         if not state.get("running") or (pid is not None and state.get("pid") != pid):
             return {"ready": False, "reason": "superseded", "health": last}
-        if (last.get("reachable") and last.get("status") == "ok"
-                and last.get("maintenance", "serving") == "serving"):
+        if last.get("reachable") and (
+            path != "/health"
+            or (
+                last.get("status") == "ok"
+                and last.get("maintenance", "serving") == "serving"
+            )
+        ):
             return {"ready": True, "health": last}
         if last.get("status") == "error":
             return {"ready": False, "reason": "engine-error", "health": last}

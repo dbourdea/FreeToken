@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .catalog import CatalogError, ModelCatalog, ModelProfile
+from .catalog import DEFAULT_CHECK_ENDPOINT, CatalogError, ModelCatalog, ModelProfile
 from .readiness import wait_for_ready
 from .serve_manager import Conflict, SwitchLaunchError
 
@@ -63,6 +63,10 @@ class RouteLease:
 
     def release(self) -> None:
         self.router.release(self)
+
+    @property
+    def proxy_base_url(self) -> str:
+        return self.profile.proxy_base_url(self.port)
 
 
 class RoutingCoordinator:
@@ -565,13 +569,24 @@ class RoutingCoordinator:
             port = state.get("port")
             if not isinstance(port, int) or port <= 0:
                 return False
-            health = (probe or self._probe).fresh_health(port)
+            profile = self._catalog.get(self._active_name)
+            active_probe = probe or self._probe
+            health = (
+                active_probe.fresh_health(port)
+                if profile.check_endpoint == DEFAULT_CHECK_ENDPOINT
+                else active_probe.fresh_readiness(port, profile.check_endpoint)
+            )
             if self._shutdown_requested or self._switching or not self._active_matches_engine_locked():
                 return False
             return bool(
                 health.get("reachable")
-                and health.get("status") == "ok"
-                and health.get("maintenance", "serving") == "serving"
+                and (
+                    profile.check_endpoint != DEFAULT_CHECK_ENDPOINT
+                    or (
+                        health.get("status") == "ok"
+                        and health.get("maintenance", "serving") == "serving"
+                    )
+                )
             )
 
     @property
@@ -951,13 +966,14 @@ class RoutingCoordinator:
             with self._cond:
                 self._activations += 1
             result = self._manager.start(profile.model, port, list(profile.args))
-        readiness = self._ready_fn(
-            self._manager,
-            self._probe,
-            pid=result.get("pid"),
-            port=port,
-            timeout_s=profile.ready_timeout_s,
-        )
+        readiness_args = {
+            "pid": result.get("pid"),
+            "port": port,
+            "timeout_s": profile.ready_timeout_s,
+        }
+        if profile.check_endpoint != DEFAULT_CHECK_ENDPOINT:
+            readiness_args["path"] = profile.check_endpoint
+        readiness = self._ready_fn(self._manager, self._probe, **readiness_args)
         if readiness.get("ready"):
             return result.get("pid")
         recovery = None

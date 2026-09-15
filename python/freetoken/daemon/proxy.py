@@ -67,6 +67,12 @@ class ServeProbe:
         """Read this generation, never a cached response from a replaced engine."""
         return self._fetch("/health", port)
 
+    def fresh_readiness(self, port: int, path: str) -> dict:
+        """Probe a validated profile path without reusing prior-generation state."""
+        if path == "/health":
+            return self.fresh_health(port)
+        return self._fetch(path, port)
+
     def stats(self, port: int) -> dict:
         return self._cached("stats", "/v1/stats", port)
 
@@ -118,7 +124,12 @@ class ServeProbe:
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
-        return json.loads(raw.decode("utf-8"))
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # A custom readiness endpoint follows HTTP-status semantics. Do
+            # not retain or surface an arbitrary successful response body.
+            return {}
 
     @staticmethod
     def _urlopen_prepare(url: str, timeout: float) -> dict:

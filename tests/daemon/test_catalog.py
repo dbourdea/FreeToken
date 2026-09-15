@@ -27,6 +27,48 @@ def test_catalog_reads_named_profiles_without_shell_interpolation(tmp_path):
     }]
 
 
+def test_catalog_validates_custom_readiness_and_owned_loopback_proxy_targets(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.coding]
+model = "coding.gguf"
+port = 1922
+check_endpoint = "/ready"
+proxy = "http://127.0.0.1:${PORT}/gateway/v1"
+""",
+        encoding="utf-8",
+    )
+
+    profile = ModelCatalog.load(str(path)).get("coding")
+
+    assert profile.check_endpoint == "/ready"
+    assert profile.proxy_base_url(1922) == "http://127.0.0.1:1922/gateway/v1"
+    assert profile.public()["checkEndpoint"] == "/ready"
+    assert profile.public()["proxy"] == "http://127.0.0.1:${PORT}/gateway/v1"
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("check_endpoint", "ready", "absolute ASCII path"),
+    ("check_endpoint", "/../health", "absolute ASCII path"),
+    ("check_endpoint", "/health?token=x", "absolute ASCII path"),
+    ("proxy", "http://127.0.0.1:1922", "127.0.0.1"),
+    ("proxy", "http://localhost:${PORT}", "127.0.0.1"),
+    ("proxy", "https://127.0.0.1:${PORT}", "127.0.0.1"),
+    ("proxy", "http://127.0.0.1:${PORT}/../admin", "127.0.0.1"),
+    ("proxy", "http://127.0.0.1:${PORT}/api?token=x", "127.0.0.1"),
+])
+def test_catalog_rejects_unsafe_readiness_or_proxy_targets(
+    tmp_path, field, value, message
+):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[models.bad]\nmodel = "bad.gguf"\n{field} = "{value}"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
 def test_catalog_validates_and_exposes_supported_listing_capabilities(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(
@@ -463,7 +505,7 @@ def test_readiness_timeout_leaves_the_existing_engine_under_manager_control():
 
 def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_path):
     path = tmp_path / "models.toml"
-    path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\nargs = ['--max-seq-len-override', '32768']\n", encoding="utf-8")
+    path.write_text("[models.coding]\nmodel = '/models/coding.gguf'\nport = 1922\ncheck_endpoint = '/ready'\nargs = ['--max-seq-len-override', '32768']\n", encoding="utf-8")
 
     class Manager:
         def __init__(self):
@@ -487,8 +529,9 @@ def test_profile_api_uses_validated_catalog_and_existing_switch_transaction(tmp_
             return self.switch(*args), None
 
     class Probe:
-        def fresh_health(self, port):
-            return {"reachable": True, "status": "ok", "port": port}
+        def fresh_readiness(self, port, target):
+            assert target == "/ready"
+            return {"reachable": True, "ready": True, "port": port}
 
     manager = Manager()
     with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
@@ -549,6 +592,22 @@ def test_client_models_uses_authenticated_profile_control_route(monkeypatch, cap
         "body": None, "token": "control-secret", "timeout": daemon_client.DEFAULT_TIMEOUT,
     }
     assert '"name": "coding"' in capsys.readouterr().out
+
+
+def test_readiness_supports_a_validated_non_health_endpoint():
+    class Manager:
+        def status(self):
+            return {"running": True, "pid": 44}
+
+    class Probe:
+        def fresh_readiness(self, port, path):
+            assert (port, path) == (1922, "/ready")
+            return {"reachable": True, "ready": True}
+
+    result = wait_for_ready(
+        Manager(), Probe(), pid=44, port=1922, timeout_s=1, path="/ready"
+    )
+    assert result == {"ready": True, "health": {"reachable": True, "ready": True}}
 
 
 def test_router_policy_is_strict_and_public_model_fields_are_safe(tmp_path):

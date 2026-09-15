@@ -8,6 +8,7 @@ bytes and safe HTTP headers to the selected FreeToken engine.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Iterator, Mapping
 from urllib.error import HTTPError
@@ -139,9 +140,22 @@ class UpstreamResponse:
 
 
 def open_upstream(*, port: int, path_and_query: str, headers: Mapping[str, str], body: bytes,
-                  method: str = "POST", timeout_s: float = 900.0) -> UpstreamResponse:
+                  method: str = "POST", timeout_s: float = 900.0,
+                  base_url: str | None = None) -> UpstreamResponse:
+    owned_base = f"http://127.0.0.1:{port}"
+    base_url = base_url or owned_base
+    if (
+        re.fullmatch(
+            rf"http://127\.0\.0\.1:{port}(?:/[A-Za-z0-9._~-]+)*", base_url
+        )
+        is None
+        or any(segment in {".", ".."} for segment in base_url.split("/"))
+    ):
+        raise ValueError("upstream base URL must target the manager-owned loopback port")
+    if not path_and_query.startswith("/"):
+        raise ValueError("upstream path must be absolute")
     request = Request(
-        f"http://127.0.0.1:{port}{path_and_query}",
+        f"{base_url.rstrip('/')}{path_and_query}",
         data=body,
         headers=forward_headers(headers),
         method=method,

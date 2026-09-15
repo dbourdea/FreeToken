@@ -29,9 +29,12 @@ from freetoken.daemon.inference_proxy import (
     UpstreamResponse,
     filter_request_body,
     forward_headers,
+    open_upstream,
     response_headers,
 )
 from freetoken.daemon.logring import LogRing
+from freetoken.daemon.proxy import ServeProbe
+from freetoken.daemon.readiness import wait_for_ready
 from freetoken.daemon.router import RoutingCoordinator, RoutingError
 
 
@@ -663,6 +666,104 @@ def test_all_supported_openai_and_anthropic_requests_use_native_router_and_prese
     assert calls[-1]["body"] == legacy_body
     assert calls[-1]["timeout_s"] == 900.0
     assert router.status()["activeRequests"] == 0
+
+
+def test_profile_readiness_path_and_proxy_prefix_target_the_owned_child(monkeypatch):
+    manager = Manager()
+    profile = ModelProfile(
+        "low",
+        "low.gguf",
+        (),
+        port=1922,
+        check_endpoint="/ready",
+        proxy="http://127.0.0.1:${PORT}/gateway",
+    )
+    catalog_doc = ModelCatalog({"low": profile})
+    readiness_calls = []
+    upstream_calls = []
+
+    def custom_ready(manager, probe, *, pid, port, timeout_s, path):
+        readiness_calls.append((pid, port, timeout_s, path))
+        return {"ready": True, "health": {"reachable": True}}
+
+    def upstream(**kwargs):
+        upstream_calls.append(kwargs)
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{}'))
+
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=custom_ready)
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        response = TestClient(app).post(
+            "/v1/chat/completions", json={"model": "low", "messages": []}
+        )
+
+    assert response.status_code == 200
+    assert readiness_calls == [(101, 1922, 120.0, "/ready")]
+    assert upstream_calls[0]["base_url"] == "http://127.0.0.1:1922/gateway"
+    assert upstream_calls[0]["path_and_query"] == "/v1/chat/completions"
+
+    class Probe:
+        def fresh_readiness(self, port, path):
+            assert (port, path) == (1922, "/ready")
+            return {"reachable": True, "ready": True}
+
+    assert router.is_ready(Probe()) is True
+
+
+def test_custom_readiness_path_accepts_real_http_success_without_json():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.path == "/ready"
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    class RunningManager:
+        def status(self):
+            return {"running": True, "pid": 44}
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        result = wait_for_ready(
+            RunningManager(),
+            ServeProbe(),
+            pid=44,
+            port=server.server_port,
+            timeout_s=1,
+            path="/ready",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)
+
+    assert result == {"ready": True, "health": {"reachable": True}}
+
+
+@pytest.mark.parametrize("base_url", [
+    "http://127.0.0.1:1923",
+    "http://localhost:1922",
+    "http://127.0.0.1:1922/../admin",
+    "http://127.0.0.1:1922/api?token=x",
+])
+def test_upstream_connector_rejects_non_owned_or_unsafe_base_before_network(base_url):
+    with pytest.raises(ValueError, match="manager-owned loopback port"):
+        open_upstream(
+            port=1922,
+            base_url=base_url,
+            path_and_query="/v1/models",
+            headers={},
+            body=b"",
+            method="GET",
+        )
 
 
 def test_stateless_response_resource_routes_preserve_engine_error_without_activation(monkeypatch):
@@ -1840,12 +1941,24 @@ def test_router_reload_refuses_active_scheduling_or_effective_lifecycle_changes(
             groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
         ),
     )
+    changed_transport_targets = ModelCatalog(
+        {"low": ModelProfile(
+            "low", "low.gguf", (), group="g", check_endpoint="/ready",
+            proxy="http://127.0.0.1:${PORT}/gateway",
+        )},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
+    )
     for replacement in (
         changed_priority,
         changed_default_ttl,
         changed_default_unload,
         changed_group_policy,
         changed_request_filter,
+        changed_transport_targets,
     ):
         with pytest.raises(RoutingError, match="cannot redefine") as exc:
             router.replace_catalog(replacement)
@@ -2041,7 +2154,13 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         manager = Manager()
         port = server.server_address[1]
         catalog_doc = ModelCatalog(
-            {"low": ModelProfile("low", "low.gguf", (), port=port)},
+            {"low": ModelProfile(
+                "low",
+                "low.gguf",
+                (),
+                port=port,
+                proxy="http://127.0.0.1:${PORT}/gateway",
+            )},
             settings=RouterSettings(api_keys=("router-test-key",)),
         )
         router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
@@ -2065,7 +2184,7 @@ def test_native_proxy_uses_a_real_loopback_http_upstream_and_preserves_sse_bytes
         assert response.headers["x-engine"] == "loopback"
         assert response.content == b"data: {\"ok\":true}\n\ndata: [DONE]\n\n"
         assert seen == {
-            "path": "/v1/chat/completions",
+            "path": "/gateway/v1/chat/completions",
             "body": payload,
             "authorization": None,
             "daemon_token": None,

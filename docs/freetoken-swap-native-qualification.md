@@ -45,6 +45,7 @@ model alias, elapsed time, first-byte time, final duration, usage-derived comple
 | Warm A | Repeat alias A | Same engine PID, no activation increment, completion succeeds |
 | Warm selector | Request the temporary warm selector while A is resident | Request is rewritten to A, completion succeeds, and activation remains unchanged |
 | Runtime profile | Activate the temporary profile, request its pin through the warm selector, then clear it | Virtual pin is listed only while active, disabled pin stays omitted, completion uses resident A with zero activation, and the profile is cleared before later trials |
+| Configured readiness target | Start and recheck temporary profiles through their configured `/ready` path | Control inventory reports `/ready`; activation and stable daemon readiness succeed without leaving the exact manager-owned port |
 | Cold B | Request alias B after A is idle | A receives durable stop receipt, B becomes ready, completion succeeds |
 | A to B to A | Three routed requests | Each expected alias returns, no overlapping owned children, every replacement is ready |
 | SSE | Stream an alias request | First event and terminal event arrive, final lease count is zero |
@@ -67,7 +68,7 @@ daemon origin; the protected service and direct engine comparison never receive
 it. Before performance trials, it requires unauthenticated `/router/status` and
 `/v1/models` and `/models` requests to return 401, verifies their normalized
 listing equivalence plus Bearer, Basic-password, and `X-Api-Key`, then
-authenticates alias, selector, model, profile,
+authenticates alias, selector, model, profile, configured readiness target,
 Prometheus, and bounded router-log SSE checks. Their raw responses and the key-bearing
 catalog remain private. The harness then records private raw artifacts for: a direct request to the
 router-owned engine port, warm-selector and runtime-profile composition canaries, a warm routed request, a cold routed swap to the

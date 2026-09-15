@@ -629,8 +629,14 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                 body = {"running_requests": 0}
             elif self.path == "/router/models":
                 body = {"data": [
-                    {"name": "model-a", "resident": True},
-                    {"name": "model-b", "resident": False},
+                    {
+                        "name": "model-a", "resident": True,
+                        "checkEndpoint": "/ready",
+                    },
+                    {
+                        "name": "model-b", "resident": False,
+                        "checkEndpoint": "/ready",
+                    },
                 ]}
             elif self.path == "/router/profiles":
                 body = {
@@ -681,6 +687,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["modelListAliasVerified"] is True
     assert observation["selectorListed"] is True
     assert observation["routingProfileListed"] is True
+    assert observation["configuredReadinessTargetVerified"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
@@ -890,6 +897,8 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert catalog.get("model-a").model == "first.gguf"
     assert catalog.get("model-a").port == 0
     assert catalog.get("model-a").ttl_s == 0
+    assert catalog.get("model-a").check_endpoint == "/ready"
+    assert catalog.get("model-a").proxy == "http://127.0.0.1:${PORT}"
     assert catalog.get("compat/model-a").name == "model-a"
     assert "model-a" in catalog.get("model-a").args
     assert catalog.get("model-b").model == "second.gguf"

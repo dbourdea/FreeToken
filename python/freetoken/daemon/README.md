@@ -63,7 +63,8 @@ Target a non-default daemon with `--url http://host:1900` (or `$FREETOKEN_DAEMON
 
 For named model catalogs and the `start-profile` / `switch-profile` controls, see
 [`docs/freetoken-swap.md`](../../../docs/freetoken-swap.md). Catalog profiles are argument
-vectors for `ft serve`, never shell commands.
+vectors for `ft serve`, never shell commands. Optional readiness paths and proxy
+path prefixes remain restricted to the exact manager-owned loopback `${PORT}` target.
 
 ## HTTP API (camelCase JSON, loopback by default)
 

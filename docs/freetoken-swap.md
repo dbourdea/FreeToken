@@ -50,6 +50,8 @@ description = "GMKtek EVO-X2 candidate coding profile"
 aliases = ["qwen-coder-compatible"]
 concurrency_limit = 2
 ready_timeout_s = 300
+check_endpoint = "/ready"
+proxy = "http://127.0.0.1:${PORT}"
 send_loading_state = false
 
 [models.qwen-coder.capabilities]
@@ -179,6 +181,15 @@ target for child identity, readiness, proxying, accounting, and re-adoption;
 an already resident dynamic profile keeps its port until it is unloaded.
 Dynamic binding occurs only when a request reaches the head of admission, so
 simultaneous cold requests for one profile share the single committed target.
+`models.<name>.check_endpoint` selects a safe absolute readiness path and
+defaults to `/health`; the private native qualifier uses `/ready`. A non-health
+endpoint follows pinned HTTP-success semantics while the daemon still checks
+the exact managed PID before and after every probe. `models.<name>.proxy` may
+add a safe path prefix to `http://127.0.0.1:${PORT}`. The `${PORT}` placeholder
+is mandatory, and other schemes, hosts, explicit ports, credentials, queries,
+fragments, empty path segments, and traversal are rejected. This deliberately
+keeps proxy traffic on the exact manager-owned child rather than creating an
+arbitrary SSRF or split-ownership target.
 
 Each profile admits at most 10 reserved requests by default across its canonical
 and alternate IDs. Set `models.<name>.concurrency_limit` to a positive override.
