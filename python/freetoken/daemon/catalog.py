@@ -9,6 +9,7 @@ creates a shell injection path and the daemon remains torch-free.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 from typing import Any
 
@@ -19,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in the Python 3.10 p
 
 
 _SIMPLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_MODEL_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class CatalogError(ValueError):
@@ -102,6 +104,29 @@ class ModelCapabilities:
 
 
 @dataclass(frozen=True)
+class RequestField:
+    """One immutable, validated JSON field assignment."""
+
+    path: tuple[str, ...]
+    value_json: str
+    soft: bool = False
+
+    @property
+    def key(self) -> str:
+        return ".".join(self.path)
+
+    def value(self) -> Any:
+        return json.loads(self.value_json)
+
+
+def _request_fields_public(fields: tuple[RequestField, ...]) -> dict[str, Any]:
+    return {
+        field.key + ("?" if field.soft else ""): field.value()
+        for field in fields
+    }
+
+
+@dataclass(frozen=True)
 class ModelProfile:
     name: str
     model: str
@@ -119,6 +144,8 @@ class ModelProfile:
     concurrency_limit: int = 0
     send_loading_state: bool | None = None
     capabilities: ModelCapabilities = ModelCapabilities()
+    set_fields: tuple[RequestField, ...] = ()
+    set_fields_by_id: tuple[tuple[str, tuple[RequestField, ...]], ...] = ()
 
     def request(self) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self.model, "args": list(self.args)}
@@ -154,6 +181,13 @@ class ModelProfile:
             doc["sendLoadingState"] = self.send_loading_state
         if not self.capabilities.empty():
             doc["capabilities"] = self.capabilities.public()
+        if self.set_fields:
+            doc["setFields"] = _request_fields_public(self.set_fields)
+        if self.set_fields_by_id:
+            doc["setFieldsById"] = {
+                model_id: _request_fields_public(fields)
+                for model_id, fields in self.set_fields_by_id
+            }
         return doc
 
 
@@ -358,14 +392,14 @@ def _valid_model_id(name: object) -> bool:
     return bool(
         isinstance(name, str)
         and len(name) <= 128
-        and all(_SIMPLE_NAME.fullmatch(segment) for segment in name.split("/"))
+        and all(_MODEL_SEGMENT.fullmatch(segment) for segment in name.split("/"))
     )
 
 
 def _model_id(name: object) -> str:
     if not _valid_model_id(name):
         raise CatalogError(
-            "model IDs must be slash-separated [A-Za-z0-9][A-Za-z0-9._-] segments "
+            "model IDs must be slash-separated [A-Za-z0-9][A-Za-z0-9._:-] segments "
             "with at most 128 characters total"
         )
     return name
@@ -377,7 +411,8 @@ def _profile(name: str, value: object) -> ModelProfile:
     allowed = {
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
-        "concurrency_limit", "send_loading_state", "capabilities",
+        "concurrency_limit", "send_loading_state", "capabilities", "set_fields",
+        "set_fields_by_id",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -422,12 +457,17 @@ def _profile(name: str, value: object) -> ModelProfile:
     if group is not None:
         group = _simple_name(group, f"models.{name}.group")
     drop_fields = value.get("drop_fields", [])
-    if (not isinstance(drop_fields, list) or len(drop_fields) > 32
-            or not all(isinstance(field, str) and _SIMPLE_NAME.fullmatch(field) for field in drop_fields)
-            or "model" in drop_fields or len(set(drop_fields)) != len(drop_fields)):
+    if not isinstance(drop_fields, list) or len(drop_fields) > 64:
         raise CatalogError(
-            f"models.{name}.drop_fields must be distinct safe top-level names other than model"
+            f"models.{name}.drop_fields must be at most 64 safe JSON field paths"
         )
+    normalized_drop_fields = tuple(
+        _request_field_path(field, f"models.{name}.drop_fields") for field in drop_fields
+    )
+    if len(set(normalized_drop_fields)) != len(normalized_drop_fields):
+        raise CatalogError(f"models.{name}.drop_fields must not contain duplicates")
+    if ("model",) in normalized_drop_fields:
+        raise CatalogError(f"models.{name}.drop_fields must not remove model")
     aliases = value.get("aliases", [])
     if (
         not isinstance(aliases, list)
@@ -451,11 +491,77 @@ def _profile(name: str, value: object) -> ModelProfile:
     if send_loading_state is not None and not isinstance(send_loading_state, bool):
         raise CatalogError(f"models.{name}.send_loading_state must be a boolean")
     capabilities = _capabilities(name, value.get("capabilities", {}))
+    set_fields = _request_fields(name, "set_fields", value.get("set_fields", {}))
+    set_fields_by_id = _request_fields_by_id(
+        name, value.get("set_fields_by_id", {})
+    )
+    aliases = list(dict.fromkeys([
+        *aliases,
+        *(model_id for model_id, _ in set_fields_by_id if model_id != name),
+    ]))
     return ModelProfile(
         name, model, tuple(raw_args), port, description, ready_timeout_s,
-        ttl_s, unload_timeout_s, priority, group, tuple(drop_fields), tuple(aliases), unlisted,
-        concurrency_limit, send_loading_state, capabilities,
+        ttl_s, unload_timeout_s, priority, group,
+        tuple(".".join(path) for path in normalized_drop_fields), tuple(aliases), unlisted,
+        concurrency_limit, send_loading_state, capabilities, set_fields, set_fields_by_id,
     )
+
+
+def _request_field_path(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, str) or len(value) > 128:
+        raise CatalogError(f"{field} must use safe dot-delimited JSON object paths")
+    path = tuple(value.split("."))
+    if not path or len(path) > 16 or not all(_SIMPLE_NAME.fullmatch(part) for part in path):
+        raise CatalogError(f"{field} must use safe dot-delimited JSON object paths")
+    return path
+
+
+def _request_fields(name: str, key: str, value: object) -> tuple[RequestField, ...]:
+    field = f"models.{name}.{key}"
+    if not isinstance(value, dict) or len(value) > 64:
+        raise CatalogError(f"{field} must be a table with at most 64 JSON field assignments")
+    hard: dict[tuple[str, ...], RequestField] = {}
+    soft: dict[tuple[str, ...], RequestField] = {}
+    for raw_key, raw_value in value.items():
+        is_soft = isinstance(raw_key, str) and raw_key.endswith("?")
+        path = _request_field_path(
+            raw_key[:-1] if is_soft else raw_key,
+            field,
+        )
+        if path == ("model",):
+            raise CatalogError(f"{field} must not set model")
+        try:
+            value_json = json.dumps(
+                raw_value,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise CatalogError(f"{field}.{raw_key} must be JSON-compatible") from exc
+        if len(value_json.encode("utf-8")) > 65_536:
+            raise CatalogError(f"{field}.{raw_key} exceeds the 65536-byte value limit")
+        operation = RequestField(path, value_json, is_soft)
+        (soft if is_soft else hard)[path] = operation
+    for path in set(hard).intersection(soft):
+        soft.pop(path)
+    return tuple(hard[path] for path in sorted(hard)) + tuple(
+        soft[path] for path in sorted(soft)
+    )
+
+
+def _request_fields_by_id(
+    name: str, value: object
+) -> tuple[tuple[str, tuple[RequestField, ...]], ...]:
+    field = f"models.{name}.set_fields_by_id"
+    if not isinstance(value, dict) or len(value) > 64:
+        raise CatalogError(f"{field} must be a table with at most 64 model IDs")
+    result = []
+    for model_id, fields in value.items():
+        model_id = _model_id(model_id)
+        result.append((model_id, _request_fields(name, f"set_fields_by_id.{model_id}", fields)))
+    return tuple(sorted(result))
 
 
 def _capabilities(name: str, value: object) -> ModelCapabilities:

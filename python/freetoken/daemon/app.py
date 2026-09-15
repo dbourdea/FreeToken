@@ -536,7 +536,14 @@ def build_app(
         async def _stop_catalog_watcher() -> None:
             watch_stop.set()
 
-    async def forward_routed(request: Request, model: str, *, path_and_query: str, body: bytes):
+    async def forward_routed(
+        request: Request,
+        model: str,
+        *,
+        path_and_query: str,
+        body: bytes,
+        apply_request_filters: bool = False,
+    ):
         """Select a configured model, then stream the engine response unchanged.
 
         The lease spans the full downstream iterator. If a client disconnects,
@@ -566,6 +573,17 @@ def build_app(
                 "cancellation": admission_cancellation,
                 "cancelled": False,
             }
+
+        def filtered_body(profile) -> bytes:
+            if not apply_request_filters:
+                return body
+            return filter_request_body(
+                body,
+                profile.drop_fields,
+                profile.set_fields,
+                profile.set_fields_by_id,
+                requested_model=model,
+            )
 
         def loading_frame(text: str) -> bytes:
             payload = {"choices": [{"delta": {"reasoning_content": text}}]}
@@ -649,11 +667,13 @@ def build_app(
                         status_code=409,
                     )
 
+                outbound_body = filtered_body(lease.profile)
+
                 upstream = await connect_upstream(
                     port=lease.port,
                     path_and_query=path_and_query,
                     headers=dict(request.headers),
-                    body=body,
+                    body=outbound_body,
                     method=request.method,
                     timeout_s=router.upstream_timeout_s,
                 )
@@ -880,11 +900,21 @@ def build_app(
                 }},
             )
         try:
+            outbound_body = filtered_body(lease.profile)
+        except RequestModelError as exc:
+            lease.release()
+            with inflight_lock:
+                request_reservations.pop(request_id, None)
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": str(exc), "type": "invalid_request"}},
+            )
+        try:
             upstream = await connect_upstream(
                 port=lease.port,
                 path_and_query=path_and_query,
                 headers=dict(request.headers),
-                body=body,
+                body=outbound_body,
                 method=request.method,
                 timeout_s=router.upstream_timeout_s,
             )
@@ -974,7 +1004,7 @@ def build_app(
         body = await request.body()
         try:
             model = request_model(body)
-            body = filter_request_body(body, router.catalog.get(model).drop_fields)
+            router.catalog.get(model)
         except RequestModelError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except CatalogError as exc:
@@ -983,7 +1013,13 @@ def build_app(
                 content={"error": {"message": str(exc), "type": "unknown_model"}},
             )
         suffix = f"?{request.url.query}" if request.url.query else ""
-        return await forward_routed(request, model, path_and_query=request.url.path + suffix, body=body)
+        return await forward_routed(
+            request,
+            model,
+            path_and_query=request.url.path + suffix,
+            body=body,
+            apply_request_filters=True,
+        )
 
     # FreeToken's supported inference surface. All routes use the same native
     # admission and proxy path so an OpenAI or Anthropic client cannot bypass
@@ -1078,7 +1114,13 @@ def build_app(
         raw_query = request.scope.get("query_string", b"")
         suffix = f"?{raw_query.decode('ascii')}" if raw_query else ""
         return await forward_routed(
-            request, model, path_and_query=escaped_path + suffix, body=await request.body()
+            request,
+            model,
+            path_and_query=escaped_path + suffix,
+            body=await request.body(),
+            apply_request_filters="application/json" in request.headers.get(
+                "content-type", ""
+            ).lower(),
         )
 
     @app.get("/router/status", dependencies=auth)

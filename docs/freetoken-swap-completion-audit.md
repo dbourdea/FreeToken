@@ -35,7 +35,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 
 - Read-only comparison reference: `mostlygeek/llama-swap`
   `41ec321b6216d838488b2a7d936274ed227c0c5e`, whose `LICENSE.md` says MIT.
-- Local deterministic verification on the current Windows checkout: 246 daemon
+- Local deterministic verification on the current Windows checkout: 258 daemon
   tests passed and 7 Linux-only tests were skipped. This proves CPU/HTTP
   behavior only; it does not substitute for real-model evidence.
 - GitHub-hosted Ubuntu verification at
@@ -56,7 +56,7 @@ python -m pytest tests/models/test_qwen36_gdn_grouped_output.py \
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Official source, license, and provenance | Read-only llama-swap reference pinned to `41ec321b6216d838488b2a7d936274ed227c0c5e`, MIT license; research report and configuration example | Documented and reverified locally |
-| Model catalog and lifecycle controls | Validated TOML catalog, collision-safe slash-namespaced alternate IDs, unlisted profiles, authenticated profile endpoints, native process manager, longest-prefix direct-upstream resolution, and exact explicit/dynamic/omitted-default-port re-adoption | Implemented and CPU/HTTP tested |
+| Model catalog and lifecycle controls | Validated TOML catalog, collision-safe slash-namespaced and colon-variant alternate IDs, ordered static JSON strip/hard/soft/by-ID filters with protected model routing, unlisted profiles, authenticated profile endpoints, native process manager, longest-prefix direct-upstream resolution, and exact explicit/dynamic/omitted-default-port re-adoption | Implemented and CPU/HTTP tested |
 | Automatic model routing | Native `freetoken-swap` model-ID admission, readiness-gated activation, request-preserving proxying, cancellation, TTL eviction, reload, and deterministic HTTP tests; prior direct llama-swap runs remain comparison evidence only | Implemented and CPU/HTTP tested; current native real-engine qualification remains required |
 | Readiness and API compatibility | Separate `/ready`, uncached generation-aware profile checks, ordinary and SSE completions, side-effect-free sanitized browser preflight, authenticated model-list CORS, exact `/models` listing alias, public model entries with atomic loaded/activating/unloaded status, and declarative text/tool/context capability metadata matching the pinned listing fields | CPU/HTTP tested; current native real-engine evidence required |
 | Streaming cold-load feedback | Global/per-profile safe configuration; atomic post-concurrency cold admission; reasoning and queue-position SSE; upstream continuation; in-band terminal errors; strict warm/route/stream bypass; explicit cancellation and disconnect cleanup | Deterministic HTTP and hosted Linux disposable-child gates passed; current GMKtek native execution required |

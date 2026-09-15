@@ -17,6 +17,7 @@ from freetoken.daemon.catalog import (
     ModelCapabilities,
     ModelCatalog,
     ModelProfile,
+    RequestField,
     RouterSettings,
     RoutingGroup,
 )
@@ -1413,7 +1414,24 @@ def test_router_reload_refuses_active_scheduling_or_effective_lifecycle_changes(
             groups=(RoutingGroup("g", ("low",), swap=False, persistent=True),),
         ),
     )
-    for replacement in (changed_priority, changed_default_ttl, changed_default_unload, changed_group_policy):
+    changed_request_filter = ModelCatalog(
+        {"low": ModelProfile(
+            "low", "low.gguf", (), group="g",
+            set_fields=(RequestField(("temperature",), "0.2"),),
+        )},
+        settings=RouterSettings(
+            default_ttl_s=4,
+            unload_timeout_s=12,
+            groups=(RoutingGroup("g", ("low",), swap=True, persistent=False),),
+        ),
+    )
+    for replacement in (
+        changed_priority,
+        changed_default_ttl,
+        changed_default_unload,
+        changed_group_policy,
+        changed_request_filter,
+    ):
         with pytest.raises(RoutingError, match="cannot redefine") as exc:
             router.replace_catalog(replacement)
         assert exc.value.status_code == 409
@@ -1663,19 +1681,25 @@ def test_streaming_chat_emits_cold_queue_feedback_then_preserves_upstream_sse(mo
     catalog_doc = ModelCatalog(
         {
             "low": ModelProfile("low", "low.gguf", ()),
-            "high": ModelProfile("high", "high.gguf", ()),
+            "high": ModelProfile(
+                "high", "high.gguf", (),
+                set_fields=(RequestField(("temperature",), "0.2"),),
+            ),
         },
         settings=RouterSettings(send_loading_state=True),
     )
     router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
     active = router.acquire("low")
     upstream_body = b'data: {"token":"real"}\n\ndata: [DONE]\n\n'
-    monkeypatch.setattr(
-        "freetoken.daemon.app.open_upstream",
-        lambda **kwargs: UpstreamResponse(
+    seen = {}
+
+    def upstream(**kwargs):
+        seen.update(kwargs)
+        return UpstreamResponse(
             200, {"Content-Type": "text/event-stream"}, BytesIO(upstream_body)
-        ),
-    )
+        )
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
     responses = []
 
     with ThreadPoolExecutor(2) as lifecycle, ThreadPoolExecutor(2) as proxy:
@@ -1707,6 +1731,7 @@ def test_streaming_chat_emits_cold_queue_feedback_then_preserves_upstream_sse(mo
     assert '"reasoning_content":"freetoken-swap loading model: high\\n"' in content
     assert '"reasoning_content":"\\nQueue position: #1 "' in content
     assert response.content.endswith(upstream_body)
+    assert json.loads(seen["body"])["temperature"] == 0.2
     assert router.status()["reservedRequests"] == 0
     assert router.status()["activeRequests"] == 0
     assert router.status()["terminalStreams"] == 1
@@ -2059,6 +2084,123 @@ def test_request_filter_is_explicit_top_level_removal_and_default_is_byte_preser
     raw = b'{"model":"low", "metadata":{"private":true}, "user":"operator"}'
     assert filter_request_body(raw, ()) == raw
     assert filter_request_body(raw, ("metadata", "user")) == b'{"model":"low"}'
+
+
+def test_request_filter_applies_nested_drop_global_and_requested_id_fields_in_order():
+    raw = (
+        b'{"model":"low:high","metadata":{"private":true,"keep":1},'
+        b'"max_tokens":7,"top_p":0.9,"stream":false,"stop":null,'
+        b'"chat_template_kwargs":{"enable_thinking":false}}'
+    )
+    global_fields = (
+        RequestField(("max_tokens",), "1000"),
+        RequestField(("stream",), "true", soft=True),
+        RequestField(("stop",), '"configured"', soft=True),
+        RequestField(("top_p",), "0.2", soft=True),
+        RequestField(("temperature",), "0.5"),
+        RequestField(("chat_template_kwargs", "reasoning_effort"), '"medium"'),
+    )
+    by_id = (("low:high", (
+        RequestField(("max_tokens",), "2000", soft=True),
+        RequestField(("temperature",), "0.1"),
+        RequestField(("chat_template_kwargs", "reasoning_effort"), '"high"'),
+    )),)
+
+    filtered = json.loads(filter_request_body(
+        raw,
+        ("metadata.private", "top_p"),
+        global_fields,
+        by_id,
+        requested_model="low:high",
+    ))
+
+    assert filtered == {
+        "model": "low:high",
+        "metadata": {"keep": 1},
+        "max_tokens": 1000,
+        "stream": False,
+        "stop": None,
+        "top_p": 0.2,
+        "temperature": 0.1,
+        "chat_template_kwargs": {
+            "enable_thinking": False,
+            "reasoning_effort": "high",
+        },
+    }
+
+
+def test_loading_feedback_policy_fails_closed_for_a_removed_model():
+    router = RoutingCoordinator(Manager(), catalog(), object(), ready_fn=ready)
+    assert router.loading_feedback_enabled("missing") is False
+
+
+def test_router_applies_variant_filters_to_inference_and_json_upstream_only(
+    monkeypatch, tmp_path
+):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.low]
+model = "private.gguf"
+drop_fields = ["user"]
+[models.low.set_fields]
+temperature = 0.5
+"max_tokens?" = 100
+[models.low.set_fields_by_id."low:high"]
+temperature = 0.1
+"metadata.variant" = "high"
+""",
+        encoding="utf-8",
+    )
+    catalog_doc = ModelCatalog.load(str(path))
+    manager = Manager()
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    seen = []
+
+    def upstream(**kwargs):
+        seen.append(kwargs["body"])
+        return UpstreamResponse(200, {"Content-Type": "application/json"}, BytesIO(b'{}'))
+
+    monkeypatch.setattr("freetoken.daemon.app.open_upstream", upstream)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        client = TestClient(app)
+        routed = client.post(
+            "/v1/chat/completions",
+            json={"model": "low:high", "max_tokens": 7, "user": "private"},
+        )
+        direct_json = client.post(
+            "/upstream/low:high/custom",
+            content=b'{"model":"low:high","user":"private"}',
+            headers={"Content-Type": "application/json"},
+        )
+        direct_raw = client.post(
+            "/upstream/low:high/custom",
+            content=b"not-json-private-body",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        malformed_json = client.post(
+            "/upstream/low:high/custom",
+            content=b"{",
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert routed.status_code == direct_json.status_code == direct_raw.status_code == 200
+    assert malformed_json.status_code == 400
+    assert malformed_json.json()["error"]["type"] == "invalid_request"
+    assert json.loads(seen[0]) == {
+        "model": "low:high", "max_tokens": 7, "temperature": 0.1,
+        "metadata": {"variant": "high"},
+    }
+    assert json.loads(seen[1]) == {
+        "model": "low:high", "temperature": 0.1, "max_tokens": 100,
+        "metadata": {"variant": "high"},
+    }
+    assert seen[2] == b"not-json-private-body"
+    assert len(seen) == 3
+    assert router.status()["activeRequests"] == 0
 
 
 def test_router_event_log_is_bounded_private_and_protected(monkeypatch):

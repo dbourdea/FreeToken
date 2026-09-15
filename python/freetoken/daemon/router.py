@@ -293,7 +293,13 @@ class RoutingCoordinator:
     def loading_feedback_enabled(self, name: str) -> bool:
         """Resolve the per-profile loading setting over the global default atomically."""
         with self._cond:
-            profile = self._catalog.get(name)
+            try:
+                profile = self._catalog.get(name)
+            except CatalogError:
+                # Admission owns the authoritative unknown-model response. A
+                # concurrent catalog replacement must not leak an exception
+                # from this optional pre-admission presentation policy.
+                return False
             if profile.send_loading_state is not None:
                 return profile.send_loading_state
             return self._catalog.settings.send_loading_state

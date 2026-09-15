@@ -58,6 +58,13 @@ out = ["text"]
 tools = true
 context = 4096
 
+[models.qwen-coder.set_fields]
+"max_tokens?" = 4096
+"chat_template_kwargs.enable_thinking?" = true
+
+[models.qwen-coder.set_fields_by_id."qwen-coder:high"]
+"chat_template_kwargs.reasoning_effort" = "high"
+
 [models.qwen-chat]
 model = "/models/Qwen3.5-27B-Q4_K_M.gguf"
 args = ["--max-seq-len-override", "4096", "--num-tokens", "4096"]
@@ -74,8 +81,8 @@ ft daemon health
 `GET /router/profiles`, `POST /engine/start-profile`, and `POST /engine/switch-profile` expose explicit control-plane operations. They require `X-FT-Token` whenever the daemon has a token configured. `GET /models` is instead the pinned public-model-list alias of `GET /v1/models` and uses catalog API-key authentication. Use `switch-profile --force` only for the same recovery case as `ft daemon switch --force`: the final accounting receipt may be incomplete when a failed engine cannot be observed.
 
 Profiles accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
-`unlisted`, readiness, TTL/unload, priority, group, and safe top-level
-request-filter fields. A nested `capabilities` table may declare `in`/`out`
+`unlisted`, readiness, TTL/unload, priority, group, and safe JSON request-filter
+fields. A nested `capabilities` table may declare `in`/`out`
 text modalities, `tools`, and a nonnegative `context` length for compatible
 model-list clients. This metadata does not enable model behavior: operators
 must advertise tools only when the model and chat template actually support
@@ -83,9 +90,11 @@ them. Unsupported image, audio, video, and reranker claims are rejected rather
 than fabricated. Alternate IDs resolve to the same canonical profile and
 resident process. Alias names must be unique and cannot collide with canonical
 profile names. Canonical and alternate model IDs may use slash-separated safe
-segments such as `organization/model`; empty, traversal-like, and non-ASCII
+segments such as `organization/model` and colon variants such as `model:high`;
+empty, traversal-like, and non-ASCII
 segments are rejected, and the complete ID is limited to 128 characters.
-Group names and request-filter fields remain non-namespaced. An unlisted profile and all its aliases remain routable and
+Group names and each dot-delimited request-field segment retain the narrower
+safe-name grammar. An unlisted profile and all its aliases remain routable and
 manageable but are omitted from `GET /v1/models`. Set
 `router.include_aliases_in_list = true` to list aliases for visible profiles;
 canonical visible IDs are always listed. `args`
@@ -94,6 +103,19 @@ shell. A profile cannot set `--model` or `--port` in `args`, because those
 fields are owned by the supervisor and are part of its conflict and re-adoption
 identity. The model files and catalog remain local operational configuration,
 not repository content.
+
+`drop_fields` removes configured dot-delimited object paths. `set_fields`
+forces JSON-compatible values; a quoted key ending in `?` sets the value only
+when that path is absent, so explicit `null`, zero, and false remain client
+choices. `set_fields_by_id` runs last and can override global assignments for a
+canonical or alternate requested ID. Its table names automatically become
+aliases of the same resident model, subject to the normal collision checks.
+Filters run in `drop_fields`, `set_fields`, then `set_fields_by_id` order and
+never alter the protected top-level `model` selector. They apply after the
+router acquires the exact profile snapshot, including to JSON direct-upstream
+requests; non-JSON direct bodies and profiles with no filters remain byte-exact.
+An active profile cannot have its filter policy changed by catalog reload.
+There is no expression evaluator or lifecycle shell-hook language.
 
 Set `port = 0` to request a kernel-selected loopback port on every cold native
 activation. The daemon records the concrete assigned port and uses that same

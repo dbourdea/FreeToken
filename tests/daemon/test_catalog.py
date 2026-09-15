@@ -50,6 +50,63 @@ context = 32768
     }
 
 
+def test_catalog_validates_request_fields_and_creates_variant_aliases(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.coding]
+model = "coding.gguf"
+drop_fields = ["metadata.private"]
+
+[models.coding.set_fields]
+temperature = 0.2
+"max_tokens?" = 4096
+"chat_template_kwargs.enable_thinking?" = true
+
+[models.coding.set_fields_by_id."coding:high"]
+temperature = 0.1
+"chat_template_kwargs.reasoning_effort" = "high"
+""",
+        encoding="utf-8",
+    )
+
+    catalog = ModelCatalog.load(str(path))
+    profile = catalog.get("coding:high")
+
+    assert profile is catalog.get("coding")
+    assert profile.aliases == ("coding:high",)
+    assert profile.drop_fields == ("metadata.private",)
+    assert profile.public()["setFields"] == {
+        "temperature": 0.2,
+        "chat_template_kwargs.enable_thinking?": True,
+        "max_tokens?": 4096,
+    }
+    assert profile.public()["setFieldsById"] == {
+        "coding:high": {
+            "chat_template_kwargs.reasoning_effort": "high",
+            "temperature": 0.1,
+        }
+    }
+
+
+def test_catalog_hard_request_field_wins_over_soft_spelling(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.coding]
+model = "coding.gguf"
+[models.coding.set_fields]
+max_tokens = 1000
+"max_tokens?" = 2000
+""",
+        encoding="utf-8",
+    )
+
+    fields = ModelCatalog.load(str(path)).get("coding").set_fields
+
+    assert [(field.key, field.value(), field.soft) for field in fields] == [
+        ("max_tokens", 1000, False)
+    ]
+
+
 @pytest.mark.parametrize("declaration,message", [
     ('in = ["image"]', "unsupported modalities: image"),
     ('out = ["audio"]', "unsupported modalities: audio"),
@@ -70,6 +127,44 @@ def test_catalog_rejects_unsupported_or_malformed_capabilities(
         encoding="utf-8",
     )
     with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
+@pytest.mark.parametrize("declaration,message", [
+    ('[models.coding.set_fields]\nmodel = "other"', "must not set model"),
+    ('[models.coding.set_fields]\n"model?" = "other"', "must not set model"),
+    ('[models.coding.set_fields]\n"bad..path" = 1', "safe dot-delimited"),
+    ('[models.coding.set_fields]\nstarted = 2026-09-14', "JSON-compatible"),
+    (
+        '[models.coding.set_fields_by_id."bad//alias"]\ntemperature = 1',
+        "slash-separated",
+    ),
+])
+def test_catalog_rejects_unsafe_request_field_configuration(
+    tmp_path, declaration, message
+):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        f'[models.coding]\nmodel = "coding.gguf"\n{declaration}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
+def test_filter_generated_alias_cannot_collide_with_another_profile(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[models.one]
+model = "one.gguf"
+[models.one.set_fields_by_id.two]
+temperature = 0.1
+[models.two]
+model = "two.gguf"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError, match="conflicts with a configured profile"):
         ModelCatalog.load(str(path))
 
 
@@ -163,6 +258,14 @@ def test_catalog_rejects_unsafe_namespaced_model_ids(tmp_path, model_id):
     )
     with pytest.raises(CatalogError, match="slash-separated"):
         ModelCatalog.load(str(path))
+
+
+def test_catalog_accepts_colon_variant_model_ids(tmp_path):
+    path = tmp_path / "models.toml"
+    path.write_text(
+        '[models."coding:high"]\nmodel = "coding.gguf"\n', encoding="utf-8"
+    )
+    assert ModelCatalog.load(str(path)).get("coding:high").name == "coding:high"
 
 
 def test_catalog_supports_namespaced_model_ids_and_longest_upstream_prefix(tmp_path):
