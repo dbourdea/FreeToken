@@ -489,6 +489,22 @@ def build_app(
             ts=wall_now(),
         )
 
+    if catalog.settings.startup_routing_profile is not None:
+        router.set_active_routing_profile(catalog.settings.startup_routing_profile)
+
+    if catalog.settings.preload_model is not None:
+
+        @app.on_event("startup")
+        async def _preload_model() -> None:
+            name = catalog.settings.preload_model
+            try:
+                lease = await acquire_route(name, apply_routing_profile=False)
+            except BaseException as exc:
+                router_event("startup_preload_failed", profile=name, code=type(exc).__name__)
+                return
+            lease.release()
+            router_event("startup_preloaded", profile=lease.profile.name)
+
     def record_watch(result: str) -> None:
         with watch_lock:
             watch_state["lastResult"] = result

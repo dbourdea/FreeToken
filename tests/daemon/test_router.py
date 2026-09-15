@@ -2861,6 +2861,32 @@ def test_router_management_load_uses_native_admission_and_authentication():
     assert manager.calls == [("start", "low.gguf")]
 
 
+def test_startup_profile_and_preload_use_native_routing_lifespan():
+    manager = Manager()
+    catalog_doc = ModelCatalog(
+        {"low": ModelProfile("low", "low.gguf", (), aliases=("compat-low",))},
+        settings=RouterSettings(
+            preload_model="compat-low", startup_routing_profile="coding",
+        ),
+        routing_profiles={
+            "coding": RoutingProfile("coding", (("public", "low"),)),
+        },
+    )
+    router = RoutingCoordinator(manager, catalog_doc, object(), ready_fn=ready)
+    with ThreadPoolExecutor(1) as lifecycle, ThreadPoolExecutor(1) as proxy:
+        app = build_app(
+            manager=manager, ring=LogRing(), probe=object(), footprint_fn=lambda pid: {},
+            lifecycle_pool=lifecycle, proxy_pool=proxy, catalog=catalog_doc, router=router,
+        )
+        with TestClient(app) as client:
+            status = client.get("/router/status").json()
+
+    assert manager.calls == [("start", "low.gguf")]
+    assert status["activeProfile"] == "low"
+    assert status["activeRoutingProfile"] == "coding"
+    assert status["activeRequests"] == 0
+
+
 def test_router_management_load_preserves_failed_switch_recovery_evidence():
     manager = Manager()
     catalog_doc = catalog()

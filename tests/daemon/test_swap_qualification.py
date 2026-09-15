@@ -975,6 +975,17 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert routing_profile.replacement("profile-model") == (True, "preferred-model")
     assert routing_profile.replacement("disabled-model") == (True, None)
 
+    startup_path = tmp_path / "startup-models.toml"
+    startup_path.write_text(
+        native_router_qualifier.native_catalog_text(
+            "first.gguf", "second.gguf", startup=True
+        ),
+        encoding="utf-8",
+    )
+    startup = ModelCatalog.load(str(startup_path))
+    assert startup.settings.preload_model == "model-a"
+    assert startup.settings.startup_routing_profile == "coding"
+
 
 @pytest.mark.parametrize(
     "status,alias,prior,delta",

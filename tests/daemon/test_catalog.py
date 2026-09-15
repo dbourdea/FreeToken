@@ -401,7 +401,11 @@ unlisted = true
 def test_catalog_validates_runtime_routing_profiles_and_selector_targets(tmp_path):
     path = tmp_path / "models.toml"
     path.write_text(
-        """[models.a]
+        """[router]
+preload_model = "a:variant"
+startup_routing_profile = "coding"
+
+[models.a]
 model = "a.gguf"
 aliases = ["a:variant"]
 
@@ -425,6 +429,8 @@ disabled = ""
     assert profile.replacement("public") == (True, "available")
     assert profile.replacement("disabled") == (True, None)
     assert profile.replacement("other") == (False, None)
+    assert catalog.settings.preload_model == "a"
+    assert catalog.settings.startup_routing_profile == "coding"
     assert catalog.public_routing_profiles() == [{
         "name": "coding",
         "description": "Coding mode",
@@ -444,6 +450,17 @@ disabled = ""
 def test_catalog_rejects_invalid_runtime_routing_profiles(tmp_path, content, message):
     path = tmp_path / "models.toml"
     path.write_text('[models.a]\nmodel = "a.gguf"\n' + content, encoding="utf-8")
+    with pytest.raises(CatalogError, match=message):
+        ModelCatalog.load(str(path))
+
+
+@pytest.mark.parametrize("setting,message", [
+    ('preload_model = "missing"', "unknown model profile"),
+    ('startup_routing_profile = "missing"', "unknown profile"),
+])
+def test_catalog_rejects_unknown_startup_targets(tmp_path, setting, message):
+    path = tmp_path / "models.toml"
+    path.write_text(f"[router]\n{setting}\n[models.a]\nmodel='a.gguf'\n", encoding="utf-8")
     with pytest.raises(CatalogError, match=message):
         ModelCatalog.load(str(path))
 

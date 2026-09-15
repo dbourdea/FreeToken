@@ -986,7 +986,7 @@ def ttl_eviction_canary(
 def native_catalog_text(
     model_a: str, model_b: str, *, ttl_s: int = 0, model_a_priority: int = 0,
     invalid_model: str | None = None, persistent_a: bool = False,
-    api_key: str | None = None,
+    api_key: str | None = None, startup: bool = False,
 ) -> str:
     """Return the allowlisted, dynamic-port catalog used by the private run."""
     common_args = [
@@ -1001,6 +1001,11 @@ def native_catalog_text(
     ]
     if api_key is not None:
         catalog[2:2] = [f"api_keys = [{json.dumps(api_key)}]"]
+    if startup:
+        catalog[-1:-1] = [
+            'preload_model = "compat/model-a"',
+            'startup_routing_profile = "coding"',
+        ]
     catalog.extend((
         "[selectors.preferred-model]", 'strategy = "warm"',
         'targets = ["model-b", "model-a"]', 'name = "Preferred local model"',
@@ -1193,6 +1198,13 @@ def main() -> int:
                 raise RuntimeError("pre-restart engine identity is invalid")
             (artifacts / "re-adoption-before-engine.json").write_bytes(before_restart_raw)
             detached_engine = (old_pid, old_port)
+            catalog_path.write_text(
+                native_catalog_text(
+                    args.model_a, args.model_b, invalid_model=invalid_model,
+                    api_key=native_api_key, startup=True,
+                ),
+                encoding="utf-8",
+            )
             stop_process_group(daemon)
             daemon = None
             require_listener_open(old_port)
@@ -1201,12 +1213,16 @@ def main() -> int:
             adopted_raw, adopted_engine = request_json(base + "/engine/status")
             (artifacts / "re-adoption-after-engine.json").write_bytes(adopted_raw)
             identity = validate_re_adoption(before_restart, adopted_engine, adopted_router)
+            if adopted_router.get("activeRoutingProfile") != "coding":
+                raise RuntimeError("startup routing profile was not activated")
             readopted_raw, readopted_completion = canary(base, "model-a", direct=False)
             (artifacts / "re-adoption-restored-a.sse").write_bytes(readopted_raw)
             if request_json(base + "/router/status")[1].get("activations") != 0:
                 raise RuntimeError("routed request replaced the re-adopted engine")
             result["reAdoption"] = {
                 **identity,
+                "startupPreloadReusedResident": True,
+                "startupRoutingProfile": "coding",
                 "completionPassed": readopted_completion.get("passed") is True,
                 "passed": readopted_completion.get("passed") is True,
             }

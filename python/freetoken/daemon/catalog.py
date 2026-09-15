@@ -8,7 +8,7 @@ creates a shell injection path and the daemon remains torch-free.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import re
 from typing import Any
@@ -58,6 +58,8 @@ class RouterSettings:
     include_aliases_in_list: bool = False
     global_concurrency_limit: int = 0
     send_loading_state: bool = False
+    preload_model: str | None = None
+    startup_routing_profile: str | None = None
 
 
 @dataclass(frozen=True)
@@ -345,7 +347,17 @@ class ModelCatalog:
                     raise CatalogError(
                         f"profiles.{name}.pins.{pin} references unknown model {target!r}"
                     )
-        self.settings = settings or RouterSettings()
+        settings = settings or RouterSettings()
+        if settings.preload_model is not None:
+            if self.selector(settings.preload_model) is not None:
+                raise CatalogError("router.preload_model must name a concrete model or alias")
+            settings = replace(settings, preload_model=self.get(settings.preload_model).name)
+        if (
+            settings.startup_routing_profile is not None
+            and settings.startup_routing_profile not in self._routing_profiles
+        ):
+            raise CatalogError("router.startup_routing_profile references an unknown profile")
+        self.settings = settings
         self.path = path
 
     @classmethod
@@ -470,7 +482,7 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     allowed = {
         "api_keys", "default_ttl_s", "unload_timeout_s", "upstream_timeout_s",
         "scheduler", "groups", "include_aliases_in_list", "global_concurrency_limit",
-        "send_loading_state",
+        "send_loading_state", "preload_model", "startup_routing_profile",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -497,6 +509,14 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
     send_loading_state = value.get("send_loading_state", False)
     if not isinstance(send_loading_state, bool):
         raise CatalogError("router.send_loading_state must be a boolean")
+    preload_model = value.get("preload_model")
+    if preload_model is not None:
+        preload_model = _model_id(preload_model)
+    startup_routing_profile = value.get("startup_routing_profile")
+    if startup_routing_profile is not None:
+        startup_routing_profile = _simple_name(
+            startup_routing_profile, "router.startup_routing_profile"
+        )
     raw_groups = value.get("groups", {})
     if not isinstance(raw_groups, dict):
         raise CatalogError("router.groups must be a table")
@@ -554,6 +574,8 @@ def _router_settings(value: object, profiles: dict[str, ModelProfile]) -> Router
         include_aliases_in_list=include_aliases_in_list,
         global_concurrency_limit=global_concurrency_limit,
         send_loading_state=send_loading_state,
+        preload_model=preload_model,
+        startup_routing_profile=startup_routing_profile,
     )
 
 

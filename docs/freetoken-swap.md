@@ -41,6 +41,8 @@ The catalog is TOML and is optional. Start the daemon with `--catalog` or set `F
 ```toml
 [router]
 send_loading_state = true
+preload_model = "qwen-coder-compatible"
+startup_routing_profile = "coding"
 
 [models.qwen-coder]
 model = "/models/Qwen3-Coder-30B-A3B-Q4_K_M.gguf"
@@ -152,12 +154,21 @@ Runtime routing profiles are named, atomically selected maps under
 selectors, and target filters; an empty target disables that ID. Pins may
 target a configured canonical ID, alternate ID, or selector, allowing one
 profile switch to change several stable client names together. No routing
-profile is active at startup or after catalog reload. Active non-disabled pins
+profile is active by default; `router.startup_routing_profile` selects one
+validated profile before serving. Catalog reload still clears runtime pinning.
+Active non-disabled pins
 that do not shadow configured model/alias/selector IDs appear in the public
 model listing with `meta.freetoken.type = "profile"`; disabled pins are omitted.
 Profile pins also use longest-prefix replacement on `/upstream/` paths, but a
 pin that targets a selector remains invalid there because selectors are not
 direct-upstream IDs. Concrete load/unload management ignores active pin maps.
+
+`router.preload_model` accepts one concrete canonical or alternate ID, resolves
+aliases during catalog validation, and acquires that model through the same
+readiness/accounting/rollback path during daemon startup. The singleton limit
+matches native one-resident capacity; selectors and unknown IDs are rejected.
+Use a singleton persistent group when the preloaded model must remain resident
+until explicit unload.
 
 Selectors are inference-only virtual model IDs. `pin` always resolves to its
 first ordered target. `warm` resolves to the first readiness-gated resident
