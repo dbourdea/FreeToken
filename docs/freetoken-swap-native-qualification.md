@@ -46,6 +46,7 @@ model alias, elapsed time, first-byte time, final duration, usage-derived comple
 | Warm selector | Request the temporary warm selector while A is resident | Request is rewritten to A, completion succeeds, and activation remains unchanged |
 | Runtime profile | Activate the temporary profile, request its pin through the warm selector, then clear it | Virtual pin is listed only while active, disabled pin stays omitted, completion uses resident A with zero activation, and the profile is cleared before later trials |
 | Configured readiness target | Start and recheck temporary profiles through their configured `/ready` path | Control inventory reports `/ready`; activation and stable daemon readiness succeed without leaving the exact manager-owned port |
+| Upstream model-name rewrite | Request temporary alias `compat/model-a` while A is resident and configured with `use_model_name = "model-a"` | The streamed response reports upstream model `model-a`, routing remains resident on A, active requests return to zero, and activation count is unchanged |
 | Cold B | Request alias B after A is idle | A receives durable stop receipt, B becomes ready, completion succeeds |
 | A to B to A | Three routed requests | Each expected alias returns, no overlapping owned children, every replacement is ready |
 | SSE | Stream an alias request | First event and terminal event arrive, final lease count is zero |

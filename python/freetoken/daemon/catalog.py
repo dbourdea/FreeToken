@@ -212,6 +212,7 @@ class ModelProfile:
     set_fields_by_id: tuple[tuple[str, tuple[RequestField, ...]], ...] = ()
     check_endpoint: str = DEFAULT_CHECK_ENDPOINT
     proxy: str = DEFAULT_PROXY
+    use_model_name: str | None = None
 
     def proxy_base_url(self, port: int) -> str:
         """Resolve the validated loopback template to this owned child port."""
@@ -262,6 +263,8 @@ class ModelProfile:
             doc["checkEndpoint"] = self.check_endpoint
         if self.proxy != DEFAULT_PROXY:
             doc["proxy"] = self.proxy
+        if self.use_model_name is not None:
+            doc["useModelName"] = self.use_model_name
         return doc
 
 
@@ -571,7 +574,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         "model", "args", "port", "description", "ready_timeout_s", "ttl_s",
         "unload_timeout_s", "priority", "group", "drop_fields", "aliases", "unlisted",
         "concurrency_limit", "send_loading_state", "capabilities", "set_fields",
-        "set_fields_by_id", "check_endpoint", "proxy",
+        "set_fields_by_id", "check_endpoint", "proxy", "use_model_name",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -661,6 +664,9 @@ def _profile(name: str, value: object) -> ModelProfile:
     proxy = _proxy_template(
         value.get("proxy", DEFAULT_PROXY), f"models.{name}.proxy"
     )
+    use_model_name = _upstream_model_name(
+        value.get("use_model_name"), f"models.{name}.use_model_name"
+    )
     aliases = list(dict.fromkeys([
         *aliases,
         *(model_id for model_id, _ in set_fields_by_id if model_id != name),
@@ -670,7 +676,7 @@ def _profile(name: str, value: object) -> ModelProfile:
         ttl_s, unload_timeout_s, priority, group,
         tuple(".".join(path) for path in normalized_drop_fields), tuple(aliases), unlisted,
         concurrency_limit, send_loading_state, capabilities, set_fields, set_fields_by_id,
-        check_endpoint, proxy,
+        check_endpoint, proxy, use_model_name,
     )
 
 
@@ -703,6 +709,22 @@ def _proxy_template(value: object, field: str) -> str:
     if prefix == "/":
         prefix = ""
     return DEFAULT_PROXY + prefix
+
+
+def _upstream_model_name(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 256
+        or value != value.strip()
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise CatalogError(
+            f"{field} must be a non-empty trimmed string without control characters"
+        )
+    return value
 
 
 def _request_field_path(value: object, field: str) -> tuple[str, ...]:

@@ -71,9 +71,10 @@ def filter_request_body(
 ) -> bytes:
     """Apply safe configured JSON-field transformations in pinned order.
 
-    The default empty policy returns the original bytes exactly. This never
-    rewrites the model selector and deliberately has no expression or hook
-    language, so a catalog cannot execute code in the daemon.
+    The default empty policy returns the original bytes exactly. A requested
+    rewrite runs before drop/global/by-ID fields, matching the pinned filter
+    order. There is no expression or hook language, so a catalog cannot
+    execute code in the daemon.
     """
     by_id = dict(set_fields_by_id).get(requested_model, ())
     if rewrite_model is None and not drop_fields and not set_fields and not by_id:

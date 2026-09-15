@@ -601,10 +601,13 @@ def build_app(
                 profile.set_fields_by_id,
                 requested_model=target_model,
                 rewrite_model=(
-                    target_model
-                    if route_lease.selector_id is not None
-                    or route_lease.routing_profile_id is not None
-                    else None
+                    profile.use_model_name
+                    or (
+                        target_model
+                        if route_lease.selector_id is not None
+                        or route_lease.routing_profile_id is not None
+                        else None
+                    )
                 ),
             )
 

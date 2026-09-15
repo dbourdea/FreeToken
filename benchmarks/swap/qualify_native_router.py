@@ -114,6 +114,7 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     first_byte_s: float | None = None
     first_token_s: float | None = None
     completion_tokens: int | None = None
+    response_models: set[str] = set()
     with urllib.request.urlopen(request, timeout=660) as response:
         for chunk in response:
             observed_s: float | None = None
@@ -125,6 +126,9 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
                 raise RuntimeError("canary response exceeded private capture bound")
             if chunk.startswith(b"data: ") and chunk.strip() != b"data: [DONE]":
                 event = json.loads(chunk[6:])
+                response_model = event.get("model")
+                if isinstance(response_model, str):
+                    response_models.add(response_model)
                 usage = event.get("usage")
                 if isinstance(usage, dict) and isinstance(usage.get("completion_tokens"), int):
                     completion_tokens = usage["completion_tokens"]
@@ -147,9 +151,12 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         raise RuntimeError("stream timing did not permit token-throughput measurement")
     decode_s = duration_s - first_token_s
     completion_tokens_per_second = completion_tokens / decode_s
+    if len(response_models) > 1:
+        raise RuntimeError("SSE completion reported inconsistent upstream model names")
     return bytes(raw), {
         "route": "direct" if direct else "native_router",
         "model": model,
+        "responseModel": next(iter(response_models), None),
         "firstByteSeconds": first_byte_s,
         "firstTokenSeconds": first_token_s,
         "durationSeconds": duration_s,
@@ -157,6 +164,31 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         "completionTokens": completion_tokens,
         "completionTokensPerSecond": completion_tokens_per_second,
         "responseBytes": len(raw),
+        "passed": True,
+    }
+
+
+def upstream_model_rewrite_canary(base: str, artifacts: Path) -> dict:
+    """Prove an alias is rewritten upstream without changing routing identity."""
+    _, before = request_json(base + "/router/status")
+    prior_activations = before.get("activations")
+    if before.get("activeProfile") != "model-a" or not isinstance(prior_activations, int):
+        raise RuntimeError("upstream model rewrite canary requires resident model-a")
+    raw, completion = canary(base, "compat/model-a", direct=False)
+    _, after = request_json(base + "/router/status")
+    if (
+        completion.get("responseModel") != "model-a"
+        or after.get("activeProfile") != "model-a"
+        or after.get("activeRequests") != 0
+        or after.get("activations") != prior_activations
+    ):
+        raise RuntimeError("alias was not rewritten upstream with stable routing residency")
+    (artifacts / "upstream-model-rewrite.sse").write_bytes(raw)
+    return {
+        "requestedModel": "compat/model-a",
+        "upstreamResponseModel": "model-a",
+        "residentProfile": "model-a",
+        "activationDelta": 0,
         "passed": True,
     }
 
@@ -525,6 +557,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         }
         or not isinstance(routed_a, dict)
         or routed_a.get("checkEndpoint") != "/ready"
+        or routed_a.get("useModelName") != "model-a"
         or not isinstance(namespaced_stats, dict)
         or b"freetoken_swap_admissions_total" not in metrics_raw
     ):
@@ -562,6 +595,7 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
         "profileCount": len(profile_names),
         "routingProfileListed": True,
         "configuredReadinessTargetVerified": True,
+        "configuredUpstreamModelNameVerified": True,
         "residentProfile": "model-a",
         "modelListAliasVerified": True,
         "namespacedUpstreamVerified": True,
@@ -965,6 +999,7 @@ def native_catalog_text(
         profile_lines = [
             f"[models.{alias}]", f"model = {json.dumps(model)}", "port = 0", "ready_timeout_s = 600",
             'check_endpoint = "/ready"', 'proxy = "http://127.0.0.1:${PORT}"',
+            f"use_model_name = {json.dumps(alias)}",
             f"ttl_s = {ttl_s}", f"priority = {model_a_priority if alias == 'model-a' else 0}",
         ]
         if persistent_a and alias == "model-a":
@@ -1071,6 +1106,7 @@ def main() -> int:
                 loaded["router"], alias="model-a", prior_activations=0, expected_delta=1
             )
             result["controlPlane"] = control_plane_canary(base, artifacts)
+            result["upstreamModelRewrite"] = upstream_model_rewrite_canary(base, artifacts)
             result["selector"] = selector_canary(base, artifacts)
             result["routingProfile"] = routing_profile_canary(base, artifacts)
             direct_raw, direct_row = canary(f"http://127.0.0.1:{loaded['port']}", "model-a", direct=True)

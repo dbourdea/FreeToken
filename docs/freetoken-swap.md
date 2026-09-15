@@ -52,6 +52,7 @@ concurrency_limit = 2
 ready_timeout_s = 300
 check_endpoint = "/ready"
 proxy = "http://127.0.0.1:${PORT}"
+use_model_name = "qwen-coder"
 send_loading_state = false
 
 [models.qwen-coder.capabilities]
@@ -112,7 +113,9 @@ receipt may be incomplete when a failed engine cannot be observed.
 
 Model lifecycle entries accept allowlisted `model`, `port`, `args`, `description`, `aliases`,
 `unlisted`, readiness, TTL/unload, priority, group, and safe JSON request-filter
-fields. A nested `capabilities` table may declare `in`/`out`
+fields. Optional `use_model_name` gives the same profile a distinct model name
+for outbound JSON requests without changing its configured or requested routing
+identity. A nested `capabilities` table may declare `in`/`out`
 text modalities, `tools`, and a nonnegative `context` length for compatible
 model-list clients. This metadata does not enable model behavior: operators
 must advertise tools only when the model and chat template actually support
@@ -167,11 +170,14 @@ when that path is absent, so explicit `null`, zero, and false remain client
 choices. `set_fields_by_id` runs last and can override global assignments for a
 canonical or alternate requested ID. Its table names automatically become
 aliases of the same resident model, subject to the normal collision checks.
-Filters run in `drop_fields`, `set_fields`, then `set_fields_by_id` order and
-cannot directly configure the protected top-level `model` field. For a
-selector request, the router first replaces that field with the resolved
-target; filters then apply to the exact acquired target snapshot, including to JSON direct-upstream
-requests; non-JSON direct bodies and profiles with no filters remain byte-exact.
+When configured, `use_model_name` first rewrites the outbound top-level `model`;
+filters then run in `drop_fields`, `set_fields`, and `set_fields_by_id` order and
+cannot directly configure that protected field. The by-ID table still keys on
+the client-facing selected/requested ID rather than the upstream override. For
+a selector request without an explicit override, the router first replaces the
+field with the resolved target. All filters apply to the exact acquired target
+snapshot, including JSON direct-upstream requests; non-JSON direct bodies and
+profiles with no rewrite or filters remain byte-exact.
 An active profile cannot have its filter policy changed by catalog reload.
 There is no expression evaluator or lifecycle shell-hook language.
 

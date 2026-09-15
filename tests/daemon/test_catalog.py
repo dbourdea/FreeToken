@@ -97,6 +97,7 @@ def test_catalog_validates_request_fields_and_creates_variant_aliases(tmp_path):
     path.write_text(
         """[models.coding]
 model = "coding.gguf"
+use_model_name = "engine/coding-v1"
 drop_fields = ["metadata.private"]
 
 [models.coding.set_fields]
@@ -116,6 +117,7 @@ temperature = 0.1
 
     assert profile is catalog.get("coding")
     assert profile.aliases == ("coding:high",)
+    assert profile.use_model_name == "engine/coding-v1"
     assert profile.drop_fields == ("metadata.private",)
     assert profile.public()["setFields"] == {
         "temperature": 0.2,
@@ -128,6 +130,7 @@ temperature = 0.1
             "temperature": 0.1,
         }
     }
+    assert profile.public()["useModelName"] == "engine/coding-v1"
 
 
 def test_catalog_hard_request_field_wins_over_soft_spelling(tmp_path):
@@ -215,6 +218,8 @@ model = "two.gguf"
     ("[models.bad]\nmodel = 'm'\ncmd = 'anything'\n", "unsupported keys"),
     ("[models.bad]\nmodel = ''\n", "non-empty string"),
     ("[models.bad]\nmodel = 'm'\nport = -1\n", "0 through 65535"),
+    ("[models.bad]\nmodel = 'm'\nuse_model_name = ''\n", "non-empty trimmed"),
+    ("[models.bad]\nmodel = 'm'\nuse_model_name = ' bad'\n", "non-empty trimmed"),
 ])
 def test_catalog_rejects_ambiguous_or_shell_style_profiles(tmp_path, content, message):
     path = tmp_path / "models.toml"

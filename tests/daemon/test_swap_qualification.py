@@ -183,6 +183,7 @@ def test_native_router_benchmark_canary_records_first_byte_and_preserves_sse(nat
     assert raw.endswith(b"data: [DONE]\n\n")
     assert observation["route"] == "native_router"
     assert observation["model"] == "model-a"
+    assert observation["responseModel"] is None
     assert observation["passed"] is True
     assert observation["firstByteSeconds"] is not None
     assert observation["firstTokenSeconds"] == observation["firstByteSeconds"]
@@ -632,6 +633,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
                     {
                         "name": "model-a", "resident": True,
                         "checkEndpoint": "/ready",
+                        "useModelName": "model-a",
                     },
                     {
                         "name": "model-b", "resident": False,
@@ -688,6 +690,7 @@ def test_native_router_control_plane_canary_requires_auth_and_captures_evidence(
     assert observation["selectorListed"] is True
     assert observation["routingProfileListed"] is True
     assert observation["configuredReadinessTargetVerified"] is True
+    assert observation["configuredUpstreamModelNameVerified"] is True
     assert observation["namespacedUpstreamVerified"] is True
     assert observation["apiKeyFormsVerified"] == ["bearer", "basic", "x-api-key"]
     assert authorized_paths == [
@@ -740,6 +743,40 @@ def test_native_router_benchmark_proves_warm_selector_reuses_resident_target(
         "activationDelta": 0, "passed": True,
     }
     assert (tmp_path / "warm-selector.sse").read_bytes() == b"data: private\n\n"
+
+
+def test_native_router_benchmark_proves_alias_rewrites_upstream_without_swap(
+    native_router_qualifier, monkeypatch, tmp_path
+):
+    statuses = iter((
+        {"activeProfile": "model-a", "activeRequests": 0, "activations": 3},
+        {"activeProfile": "model-a", "activeRequests": 0, "activations": 3},
+    ))
+    monkeypatch.setattr(
+        native_router_qualifier, "request_json",
+        lambda *args, **kwargs: (b"{}", next(statuses)),
+    )
+    monkeypatch.setattr(
+        native_router_qualifier, "canary",
+        lambda base, model, direct: (b"data: private-rewrite\n\n", {
+            "model": model, "responseModel": "model-a", "passed": True,
+        }),
+    )
+
+    result = native_router_qualifier.upstream_model_rewrite_canary(
+        "http://test", tmp_path
+    )
+
+    assert result == {
+        "requestedModel": "compat/model-a",
+        "upstreamResponseModel": "model-a",
+        "residentProfile": "model-a",
+        "activationDelta": 0,
+        "passed": True,
+    }
+    assert (tmp_path / "upstream-model-rewrite.sse").read_bytes() == (
+        b"data: private-rewrite\n\n"
+    )
 
 
 def test_native_router_benchmark_proves_profile_selector_composition_and_cleanup(
@@ -899,6 +936,7 @@ def test_native_router_benchmark_generates_a_valid_dynamic_port_catalog(native_r
     assert catalog.get("model-a").ttl_s == 0
     assert catalog.get("model-a").check_endpoint == "/ready"
     assert catalog.get("model-a").proxy == "http://127.0.0.1:${PORT}"
+    assert catalog.get("model-a").use_model_name == "model-a"
     assert catalog.get("compat/model-a").name == "model-a"
     assert "model-a" in catalog.get("model-a").args
     assert catalog.get("model-b").model == "second.gguf"

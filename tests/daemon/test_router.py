@@ -1945,6 +1945,7 @@ def test_router_reload_refuses_active_scheduling_or_effective_lifecycle_changes(
         {"low": ModelProfile(
             "low", "low.gguf", (), group="g", check_endpoint="/ready",
             proxy="http://127.0.0.1:${PORT}/gateway",
+            use_model_name="engine-low",
         )},
         settings=RouterSettings(
             default_ttl_s=4,
@@ -2646,10 +2647,11 @@ def test_request_filter_applies_nested_drop_global_and_requested_id_fields_in_or
         global_fields,
         by_id,
         requested_model="low:high",
+        rewrite_model="engine-model",
     ))
 
     assert filtered == {
-        "model": "low:high",
+        "model": "engine-model",
         "metadata": {"keep": 1},
         "max_tokens": 1000,
         "stream": False,
@@ -2675,6 +2677,7 @@ def test_router_applies_variant_filters_to_inference_and_json_upstream_only(
     path.write_text(
         """[models.low]
 model = "private.gguf"
+use_model_name = "engine-model"
 drop_fields = ["user"]
 [models.low.set_fields]
 temperature = 0.5
@@ -2725,11 +2728,11 @@ temperature = 0.1
     assert malformed_json.status_code == 400
     assert malformed_json.json()["error"]["type"] == "invalid_request"
     assert json.loads(seen[0]) == {
-        "model": "low:high", "max_tokens": 7, "temperature": 0.1,
+        "model": "engine-model", "max_tokens": 7, "temperature": 0.1,
         "metadata": {"variant": "high"},
     }
     assert json.loads(seen[1]) == {
-        "model": "low:high", "temperature": 0.1, "max_tokens": 100,
+        "model": "engine-model", "temperature": 0.1, "max_tokens": 100,
         "metadata": {"variant": "high"},
     }
     assert seen[2] == b"not-json-private-body"
