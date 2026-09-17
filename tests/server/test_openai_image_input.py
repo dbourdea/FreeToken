@@ -20,6 +20,15 @@ def test_openai_images_extract_in_rendered_marker_order() -> None:
         {"url": "data:image/png;base64,AA=="},
         {"url": "data:image/png;base64,BB=="},
     ]
-    assert render_messages(messages)[0]["content"] == (
-        "first<|freetoken-image|>second<|freetoken-image|>"
-    )
+    assert render_messages(messages)[0]["content"] == [
+        {"type": "text", "text": "first"},
+        {
+            "type": "image",
+            "freetoken_ref": {"kind": "url", "data": "data:image/png;base64,AA=="},
+        },
+        {"type": "text", "text": "second"},
+        {
+            "type": "image",
+            "freetoken_ref": {"kind": "url", "data": "data:image/png;base64,BB=="},
+        },
+    ]
