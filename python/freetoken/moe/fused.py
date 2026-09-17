@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import torch
-from freetoken.moe import BaseMoeBackend
 from freetoken.utils import div_ceil, init_logger
 
 logger = init_logger(__name__)
