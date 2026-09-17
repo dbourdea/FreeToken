@@ -46,6 +46,7 @@ class Qwen3_5DecoderLayer(BaseOP):
                 layer_id=layer_id,
                 quant_config=config.quant,
                 prefix=f"{prefix}.linear_attn",
+                gguf_q8=config.attn_quant == "gguf_q8",
             )
         else:
             self.self_attn = Qwen3_5Attention(config, layer_id, prefix=f"{prefix}.self_attn")
