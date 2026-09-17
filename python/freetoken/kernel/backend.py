@@ -10,6 +10,8 @@ from __future__ import annotations
 import functools
 import importlib.util
 
+import torch
+
 
 @functools.cache
 def is_rocm_runtime() -> bool:
@@ -54,6 +56,20 @@ def is_triton_kernels_installed() -> bool:
     ``freetoken.kernel.triton`` reimplements, so its call-site carries its own fallback.
     """
     return not is_rocm_runtime() and _importable("triton_kernels")
+
+
+@functools.cache
+def is_vllm_installed() -> bool:
+    return _importable("vllm")
+
+
+@functools.cache
+def device_capability() -> tuple[int, int]:
+    """Compute capability of the current device as (major, minor); (0, 0) without CUDA."""
+    if not torch.cuda.is_available():
+        return (0, 0)
+    major, minor = torch.cuda.get_device_capability()
+    return (int(major), int(minor))
 
 
 @functools.cache

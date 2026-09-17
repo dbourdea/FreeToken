@@ -41,9 +41,8 @@ class AttentionSpec:
     sliding_window: int | None = None
     sm_scale: float | None = None
     sinks: torch.Tensor | None = None
-    # Gemma 4's sliding-attention layers make image soft-token groups
-    # bidirectional during prefill. Full-attention layers remain causal.
-    multimodal_bidirectional: bool = False
+    # rows of a multimodal span (batch.mm_block_ends) also attend to the span's later keys
+    bidirectional_mm_blocks: bool = False
 
 
 @dataclass

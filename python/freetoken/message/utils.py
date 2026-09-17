@@ -12,7 +12,6 @@ _TYPE_KEY = "__type__"
 # reading it as a serialized class -- without this, a request could crash the tokenizer worker.
 _RAW_DICT_KEY = "__raw_dict__"
 
-
 def _serialize_any(value: Any) -> Any:
     if isinstance(value, dict):
         encoded = {k: _serialize_any(v) for k, v in value.items()}
@@ -32,19 +31,16 @@ def serialize_type(self) -> Dict:
     serialized = {}
 
     if isinstance(self, torch.Tensor):
-        # Backend messages cross a ZMQ boundary as JSON plus bytes.  Image
-        # preprocessing needs 3-D patch and position tensors, while token ids
-        # remain 1-D.  Preserve arbitrary CPU shapes explicitly instead of
-        # flattening and losing the vision batch contract.
-        assert self.device.type == "cpu", "only CPU tensors can cross a process boundary"
-        tensor = self.contiguous()
+        assert not self.is_cuda, "wire tensors must live on CPU"
+        t = self.contiguous()
         serialized["__type__"] = "Tensor"
-        serialized["shape"] = list(tensor.shape)
-        serialized["dtype"] = str(tensor.dtype)
-        # NumPy has no stable bfloat16 dtype on every supported version.  Carry
-        # its bit pattern as uint16 and restore the original torch dtype below.
-        raw = tensor.view(torch.uint16) if tensor.dtype == torch.bfloat16 else tensor
-        serialized["buffer"] = raw.numpy().tobytes()
+        serialized["dtype"] = str(t.dtype)
+        # 1-D tensors omit the shape so the payload matches the legacy wire format.
+        if t.dim() != 1:
+            serialized["shape"] = list(t.shape)
+        if t.dtype == torch.bfloat16:
+            t = t.view(torch.uint16)  # numpy has no bf16; ship the raw bytes
+        serialized["buffer"] = t.numpy().tobytes()
         return serialized
 
     # normal type
@@ -76,14 +72,14 @@ def deserialize_type(cls_map: Dict[str, Type], data: Dict) -> Any:
     if type_name == "Tensor":
         buffer = data["buffer"]
         dtype_str = data["dtype"].replace("torch.", "")
-        shape = tuple(int(dim) for dim in data.get("shape", []))
         assert isinstance(buffer, bytes)
-        if dtype_str == "bfloat16":
-            raw = np.frombuffer(buffer, dtype=np.uint16).copy().reshape(shape)
-            return torch.from_numpy(raw).view(torch.bfloat16)
-        np_dtype = getattr(np, dtype_str)
-        np_tensor = np.frombuffer(buffer, dtype=np_dtype).copy().reshape(shape)
-        return torch.from_numpy(np_tensor)
+        is_bf16 = dtype_str == "bfloat16"
+        np_tensor = np.frombuffer(buffer, dtype=getattr(np, "uint16" if is_bf16 else dtype_str))
+        tensor = torch.from_numpy(np_tensor.copy())
+        if is_bf16:
+            tensor = tensor.view(torch.bfloat16)
+        shape = data.get("shape")
+        return tensor if shape is None else tensor.view(shape)
 
     cls = cls_map.get(type_name)
     if cls is None:

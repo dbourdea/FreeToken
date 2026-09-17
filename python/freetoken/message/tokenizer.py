@@ -85,6 +85,7 @@ class TokenizeMsg(BaseTokenizerMsg):
     # native shapes through the ZMQ wire and are encoded on the scheduler GPU.
     mm_pixel_values: Any | None = None
     mm_image_position_ids: Any | None = None
+    images: List[bytes] | None = None
 
 
 @dataclass

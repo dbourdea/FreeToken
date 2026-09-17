@@ -5,6 +5,7 @@ from .backend import (
     CacheRebuildBackendMsg,
     CacheStatsBackendMsg,
     ExitMsg,
+    MMItem,
     UserMsg,
 )
 from .frontend import BaseFrontendMsg, BatchFrontendMsg, CacheRebuildReply, CacheStatsReply, UserReply
@@ -30,6 +31,7 @@ __all__ = [
     "CacheRebuildBackendMsg",
     "CacheStatsBackendMsg",
     "ExitMsg",
+    "MMItem",
     "UserMsg",
     "BaseTokenizerMsg",
     "BatchTokenizerMsg",
