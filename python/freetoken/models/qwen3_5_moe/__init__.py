@@ -17,10 +17,7 @@ from .weight import (
     iter_vision_weights,
     iter_weights,
     iter_weights_parallel,
-    load_nvfp4_expert_sources,
-    load_nvfp4_expert_sources_parallel,
     nvfp4_expert_spec,
-    setup_offload_expert_banks,
 )
 
 __all__ = [
