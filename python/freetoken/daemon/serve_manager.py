@@ -40,10 +40,37 @@ class Conflict(RuntimeError):
     """A different serve (model/port/args) is already running; the client should switch()."""
 
 
+# What: define SwitchLaunchError as the owner of __init__; why: daemon callers use this class boundary so those methods share one switch launch error state invariant.
+class SwitchLaunchError(RuntimeError):
+    """Replacement failed; rollback describes launch recovery, not readiness."""
+# What: document replacement failed rollback describes launch recovery in the SwitchLaunchError docstring; why: introspection and maintainers read this exact docstring fragment to understand switch launch error behavior without executing it.
+
+    # What: define __init__ around error and rollback and accounting; why: its direct callers call __init__ for init and rely on this exact input and result contract.
+    def __init__(self, error: Exception, rollback: dict, accounting: dict | None):
+        # What: preserve the exact super init f replacement launch failed literal fragment; why: __init__ passes this fragment verbatim through super().__init__(f"replacement launch failed: {error}"), because changing it would alter a protocol payload, serialized fixture, or public message.
+        super().__init__(f"replacement launch failed: {error}")
+        # What: compute rollback from rollback; why: the enclosing return or state update later reads rollback, so __init__ must retain the computed value under that name.
+        self.rollback = rollback
+        # What: compute accounting from accounting; why: the enclosing return or state update later reads accounting, so __init__ must retain the computed value under that name.
+        self.accounting = accounting
+
+
 @dataclass
 class ExitInfo:
     code: int | None  # Popen convention: >=0 exit status, <0 == -signal; None if unknowable
     source: str  # "exited" | "signalled" | "stopped" | "adopted-vanished" | "unknown"
+
+
+# What: generate dataclass initialization and value semantics for SwitchRecovery; why: SwitchRecovery acts as a typed state record with consistent construction, comparison, and representation.
+@dataclass(frozen=True)
+# What: define SwitchRecovery as the owner of its declared state; why: daemon callers use this class boundary so those methods share one switch recovery state invariant.
+class SwitchRecovery:
+    # What: compute epoch from the named fixture input; why: superseded self lifecycle epoch ticket epoch later reads epoch, so serve_manager must retain the computed value under that name.
+    epoch: int
+    # What: compute child from the named fixture input; why: def close popen owns its child later reads child, so serve_manager must retain the computed value under that name.
+    child: object
+    # What: compute previous from the named fixture input; why: previous self model self port list self args later reads previous, so serve_manager must retain the computed value under that name.
+    previous: tuple[str, int, list[str]] | None
 
 
 # --------------------------------------------------------------------------- child abstractions
@@ -211,6 +238,8 @@ class ServeManager:
         # Serialize complete lifecycle transactions, including prepare -> durable receipt -> signal.
         # RLock lets switch() compose stop+start without opening an interleaving window.
         self._lifecycle = threading.RLock()
+        # What: compute lifecycle epoch from 0; why: the enclosing return or state update later reads lifecycle epoch, so __init__ must retain the computed value under that name.
+        self._lifecycle_epoch = 0
         self._cond = threading.Condition(threading.Lock())
         # state guarded by _cond
         self._child: object | None = None
@@ -259,6 +288,8 @@ class ServeManager:
         self, model: str, port: int, args: list[str] | None = None, *, _auto: bool = False
     ) -> dict:
         with self._lifecycle:
+            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so start must retain the computed value under that name.
+            self._lifecycle_epoch += 1
             return self._start(model, port, args, _auto=_auto)
 
     def _start(
@@ -326,6 +357,8 @@ class ServeManager:
 
     def stop(self, timeout: float | None = None, force: bool = False) -> dict:
         with self._lifecycle:
+            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so stop must retain the computed value under that name.
+            self._lifecycle_epoch += 1
             return self._stop(timeout, force)
 
     def shutdown(self, timeout: float | None = None, force: bool = False) -> dict:
@@ -336,6 +369,8 @@ class ServeManager:
         If accounting/signalling fails, the daemon remains up and normal lifecycle calls reopen.
         """
         with self._lifecycle:
+            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so shutdown must retain the computed value under that name.
+            self._lifecycle_epoch += 1
             with self._cond:
                 self._shutdown_requested = True
                 self._cond.notify_all()
@@ -409,9 +444,131 @@ class ServeManager:
         force: bool = False,
     ) -> dict:
         with self._lifecycle:
+            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so switch must retain the computed value under that name.
+            self._lifecycle_epoch += 1
+            # What: enter the cond managed context before previous self model self port list self args; why: switch releases this resource or lock after previous self model self port list self args on both success and failure paths.
+            with self._cond:
+                # What: compute previous from model and port and child and stopping; why: can restore self child is and previous is later reads previous, so switch must retain the computed value under that name.
+                previous = ((self._model, self._port, list(self._args))
+                            # What: apply the if self child is not and not portion of previous; why: switch uses this clause to evaluate previous as one grouped value.
+                            if self._child is not None and not self._stopping else None)
             stopped = self._stop(force=force)
-            started = self._start(model, port, args)
+            # What: establish the handler boundary for the protected operation; why: ServeManager.switch routes failures to exception while preserving cleanup and success flow.
+            try:
+                # What: compute started from start and model and port and args; why: return started accounting stopped accounting later reads started, so switch must retain the computed value under that name.
+                started = self._start(model, port, args)
+            # What: handle exception by rollback attempted false launched false; why: ServeManager.switch converts that failure into this concrete recovery, response, or cleanup behavior.
+            except Exception as exc:
+                # What: map the attempted field as false; why: ServeManager.switch carries attempted through rollback into rollback attempted true.
+                rollback = {"attempted": False, "launched": False}
+                # A post-spawn failure may leave an owned child. Never spawn a
+                # second engine or bypass accounting to remove that child.
+                # What: enter the cond managed context before can restore self child is and previous is; why: switch releases this resource or lock after can restore self child is and previous is on both success and failure paths.
+                with self._cond:
+                    # What: compute can restore from child and previous; why: if can restore later reads can restore, so switch must retain the computed value under that name.
+                    can_restore = self._child is None and previous is not None
+                # What: gate on can restore before rollback; why: switch admits rollback only for this predicate and excludes the opposite state.
+                if can_restore:
+                    # What: compute rollback entry from true; why: rollback update launched pid restored pid later reads rollback entry, so switch must retain the computed value under that name.
+                    rollback["attempted"] = True
+                    # What: establish the handler boundary for the protected operation; why: ServeManager.switch routes failures to exception while preserving cleanup and success flow.
+                    try:
+                        # What: compute restored from start and previous; why: rollback update launched pid restored pid later reads restored, so switch must retain the computed value under that name.
+                        restored = self._start(*previous)
+                        # What: preserve the exact rollback update launched pid restored pid literal fragment; why: switch passes this fragment verbatim through rollback.update(launched=True, pid=restored["pid"]), because changing it would alter a protocol payload, serialized fixture, or public message.
+                        rollback.update(launched=True, pid=restored["pid"])
+                        # What: preserve the exact self emit replacement launch failed previous engine literal fragment; why: switch passes this fragment verbatim through self._emit("replacement launch failed.
+                        self._emit("replacement launch failed; previous engine relaunched")
+                    # What: handle exception by rollback error str recovery exc; why: ServeManager.switch converts that failure into this concrete recovery, response, or cleanup behavior.
+                    except Exception as recovery_exc:
+                        # What: compute rollback entry from str and recovery exc; why: self emit f replacement launch rollback failed later reads rollback entry, so switch must retain the computed value under that name.
+                        rollback["error"] = str(recovery_exc)
+                        # What: preserve the exact self emit f replacement launch rollback failed literal fragment; why: switch passes this fragment verbatim through self._emit(f"replacement launch rollback failed: {recovery_exc}"), because changing it would alter a protocol payload, serialized fixture, or public mess.
+                        self._emit(f"replacement launch rollback failed: {recovery_exc}")
+                # What: raise SwitchLaunchError for the caller; why: ServeManager.switch stops this rejected path before it can mutate state, dispatch work, or report success.
+                raise SwitchLaunchError(exc, rollback, stopped["accounting"]) from exc
             return {**started, "accounting": stopped["accounting"]}
+
+    # What: define switch_for_readiness around model and port and args and force; why: its direct callers call switch_for_readiness for switch for readiness and rely on this exact input and result contract.
+    def switch_for_readiness(self, model, port, args=None, force=False):
+        """Capture a recovery ticket atomically; never hold the lock during HTTP probes."""
+        # What: document capture a recovery ticket atomically never in the switch_for_readiness docstring; why: introspection and maintainers read this exact docstring fragment to understand switch for readiness behavior without executing it.
+        # What: enter the lifecycle managed context before with self cond; why: switch_for_readiness releases this resource or lock after with self cond on both success and failure paths.
+        with self._lifecycle:
+            # What: enter the cond managed context before previous self model self port list self args; why: switch_for_readiness releases this resource or lock after previous self model self port list self args on both success and failure paths.
+            with self._cond:
+                # What: compute previous from model and port and child and stopping; why: ticket switch recovery self lifecycle epoch self child previous later reads previous, so switch_for_readiness must retain the computed value under that name.
+                previous = ((self._model, self._port, list(self._args))
+                            # What: apply the if self child is not and not portion of previous; why: switch_for_readiness uses this clause to evaluate previous as one grouped value.
+                            if self._child is not None and not self._stopping else None)
+            # What: compute result from switch and model and port and args; why: return result ticket later reads result, so switch_for_readiness must retain the computed value under that name.
+            result = self.switch(model, port, args, force)
+            # What: enter the cond managed context before ticket switch recovery self lifecycle epoch self child previous; why: switch_for_readiness releases this resource or lock after ticket switch recovery self lifecycle epoch self child previous on both success and failure paths.
+            with self._cond:
+                # What: compute ticket from switch recovery and lifecycle epoch and child and previous; why: return result ticket later reads ticket, so switch_for_readiness must retain the computed value under that name.
+                ticket = SwitchRecovery(self._lifecycle_epoch, self._child, previous)
+            # What: return result and ticket from switch_for_readiness; why: switch_for_readiness exposes result and ticket so its caller can continue with the function\'s computed outcome.
+            return result, ticket
+
+    # What: define recover_switch around ticket and force; why: its direct callers call recover_switch for recover switch and rely on this exact input and result contract.
+    def recover_switch(self, ticket: SwitchRecovery, force=False):
+        """Recover only this switch, without overriding newer lifecycle intent.
+
+        All stop/accounting safeguards still apply. A failed readiness check is
+        not permission to force-kill an engine or discard its accounting.
+        """
+        # What: document recover only this switch without overriding in the recover_switch docstring; why: introspection and maintainers read this exact docstring fragment to understand recover switch behavior without executing it.
+        # What: document all stop accounting safeguards still apply in the recover_switch docstring; why: introspection and maintainers read this exact docstring fragment to understand recover switch behavior without executing it.
+        # What: document not permission to force kill an engine in the recover_switch docstring; why: introspection and maintainers read this exact docstring fragment to understand recover switch behavior without executing it.
+        # What: preserve the paragraph boundary in the the recover_switch docstring; why: introspection and maintainers read this paragraph break to understand recover switch behavior without executing it.
+        # What: enter the lifecycle managed context before with self cond; why: recover_switch releases this resource or lock after with self cond on both success and failure paths.
+        with self._lifecycle:
+            # What: enter the cond managed context before superseded self lifecycle epoch ticket epoch; why: recover_switch releases this resource or lock after superseded self lifecycle epoch ticket epoch on both success and failure paths.
+            with self._cond:
+                # What: compute superseded from shutdown requested and lifecycle epoch and epoch and ticket; why: if superseded later reads superseded, so recover_switch must retain the computed value under that name.
+                superseded = (self._lifecycle_epoch != ticket.epoch
+                              # What: apply the or self shutdown requested portion of superseded; why: recover_switch uses this clause to evaluate superseded as one grouped value.
+                              or self._shutdown_requested
+                              # What: apply the or self child is not and self child portion of superseded; why: recover_switch uses this clause to evaluate superseded as one grouped value.
+                              or (self._child is not None and self._child is not ticket.child))
+                # What: compute reaping from child and child and ticket; why: if reaping and not ticket child reaped wait self reap wait s later reads reaping, so recover_switch must retain the computed value under that name.
+                reaping = self._child is None and ticket.child is not None
+            # What: gate on superseded before the computed value; why: recover_switch admits the computed value only for this predicate and excludes the opposite state.
+            if superseded:
+                # What: map the attempted field as false; why: ServeManager.recover_switch carries attempted into return {"attempted": False, "launched": False, "reason": "superseded"}.
+                return {"attempted": False, "launched": False, "reason": "superseded"}
+            # What: gate on previous and ticket before the computed value; why: recover_switch admits the computed value only for this predicate and excludes the opposite state.
+            if ticket.previous is None:
+                # What: map the attempted field as false; why: ServeManager.recover_switch carries attempted into return {"attempted": False, "launched": False, "reason": "no-previous-en.
+                return {"attempted": False, "launched": False, "reason": "no-previous-engine"}
+            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so recover_switch must retain the computed value under that name.
+            self._lifecycle_epoch += 1  # consume ticket before any fallible operation
+            # What: establish the handler boundary for the protected operation; why: ServeManager.recover_switch routes failures to exception while preserving cleanup and success flow.
+            try:
+                # The monitor clears _child before clearing its persisted state.
+                # Wait for that cleanup so it cannot erase the restored pidfile.
+                # What: gate on reaping and wait and reap wait s and reaped and child before runtime error; why: recover_switch admits runtime error only for this predicate and excludes the opposite state.
+                if reaping and not ticket.child.reaped.wait(self._reap_wait_s):
+                    # What: raise RuntimeError for the caller; why: ServeManager.recover_switch stops this rejected path before it can mutate state, dispatch work, or report success.
+                    raise RuntimeError("replacement exit cleanup has not completed")
+                # What: compute stopped from stop and force; why: port ticket previous accounting stopped accounting later reads stopped, so recover_switch must retain the computed value under that name.
+                stopped = self._stop(force=force)
+                # What: compute restored from start and previous and ticket; why: return attempted launched pid restored pid later reads restored, so recover_switch must retain the computed value under that name.
+                restored = self._start(*ticket.previous)
+            # What: handle exception by self emit f readiness rollback failed exc; why: ServeManager.recover_switch converts that failure into this concrete recovery, response, or cleanup behavior.
+            except Exception as exc:
+                # What: preserve the exact self emit f readiness rollback failed exc literal fragment; why: recover_switch passes this fragment verbatim through self._emit(f"readiness rollback failed: {exc}"), because changing it would alter a protocol payload, serialized fixture, or public message.
+                self._emit(f"readiness rollback failed: {exc}")
+                # What: map the attempted field as true; why: ServeManager.recover_switch carries attempted into return {"attempted": True, "launched": False, "error": str(exc).
+                return {"attempted": True, "launched": False, "error": str(exc),
+                        # What: map the engine preserved field as current pid; why: ServeManager.recover_switch carries engine preserved into "enginePreserved": self.current_pid() is not None}.
+                        "enginePreserved": self.current_pid() is not None}
+            # What: preserve the exact self emit replacement readiness failed previous engine literal fragment; why: recover_switch passes this fragment verbatim through self._emit("replacement readiness failed.
+            self._emit("replacement readiness failed; previous engine relaunched")
+            # What: map the attempted field as true; why: ServeManager.recover_switch carries attempted into return {"attempted": True, "launched": True, "pid": restored["pid"].
+            return {"attempted": True, "launched": True, "pid": restored["pid"],
+                    # What: map the port field as previous and ticket and 1; why: ServeManager.recover_switch carries port into "port": ticket.previous[1], "accounting": stopped["accounting"]}.
+                    "port": ticket.previous[1], "accounting": stopped["accounting"]}
 
     def pending_accounting(self) -> list[dict[str, Any]]:
         return self._accounting.pending()
@@ -783,6 +940,18 @@ class ServeManager:
                 with self._cond:
                     self._stop_requested = True
 
+        # What: enter the cond managed context before is current self child is child; why: _reap releases this resource or lock after is current self child is child on both success and failure paths.
+        with self._cond:
+            # What: compute is current from child and child; why: if is current later reads is current, so _reap must retain the computed value under that name.
+            is_current = self._child is child
+        # Clear durable adoption state before publishing the stopped state. Otherwise callers
+        # can observe running=false and still find a dead pidfile long enough to attempt an
+        # invalid re-adoption or a conflicting recovery.
+        # What: gate on is current before clear and store; why: _reap admits clear and store only for this predicate and excludes the opposite state.
+        if is_current:
+            # What: call self._store.clear with the declared inputs; why: _reap invokes self._store.clear while performing with self cond; the call advances that operation through its result or side effect.
+            self._store.clear()
+
         with self._cond:
             is_current = self._child is child
             if is_current:
@@ -793,11 +962,8 @@ class ServeManager:
                     info = ExitInfo(info.code, "stopped")
                 self._last_exit = info
             self._cond.notify_all()
-        # Outside the lock. Clear the persisted state BEFORE waking stop() waiters, so a caller
-        # that sees stop() return also sees an empty pidfile — no window where a racing re-adopt
-        # could latch onto the just-killed pid.
-        if is_current:
-            self._store.clear()
+        # The pidfile was cleared before publishing stopped state, so a caller that sees either
+        # status.running=false or stop() return cannot re-adopt this dead generation.
         child.reaped.set()
         if getattr(child, "tailer", None) is not None:
             try:

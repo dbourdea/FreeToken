@@ -63,6 +63,8 @@ dependencies = [
     # (2.13.0a0+rocm...) which the sglang-kernel/cu130 constraint above doesn't apply to.
     "torch>=2.11,<2.14",
     "tqdm>=4.66,<5",
+    # What: add tomli for Python versions earlier than 3.11; why: those interpreters lack tomllib, so the daemon needs this fallback to parse TOML model catalogs.
+    "tomli>=2.0,<3; python_version < '3.11'",
     "transformers>=5.5,<6",
     "triton>=3.6,<3.8; platform_system == 'Linux'",
     "uvicorn>=0.30,<1",
