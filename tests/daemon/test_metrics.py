@@ -1,10 +1,37 @@
 # What: import json for test amd smi process vram parses multi gpu json using json; why: test_amd_smi_process_vram_parses_multi_gpu_json uses json dumps, making that imported dependency available to its named operation.
 import json
+
 # What: import simple namespace for test amd smi process vram parses multi gpu json using types and simple namespace; why: test_amd_smi_process_vram_parses_multi_gpu_json uses simple namespace, making that imported dependency available to its named operation.
 from types import SimpleNamespace
 
 # What: import metrics for test vram measurement falls through to amd smi using freetoken and daemon and metrics; why: test_vram_measurement_falls_through_to_amd_smi uses the metrics annotation in test vram measurement falls through to amd smi, making that imported dependency available to its named operation.
 from freetoken.daemon import metrics
+
+
+# What: define DRM fdinfo deduplication coverage; why: AMD APU process memory must include VRAM and GTT exactly once per client even when several descriptors share it.
+def test_drm_fdinfo_process_vram_deduplicates_clients(tmp_path):
+    # What: create the representative owned PID fdinfo directory; why: the probe reads the same procfs shape exposed by Linux DRM drivers.
+    fdinfo = tmp_path / "41" / "fdinfo"
+    # What: create parent directories for the fixture; why: individual descriptor records need a concrete procfs-like location.
+    fdinfo.mkdir(parents=True)
+    # What: define one shared DRM accounting record; why: duplicate descriptors for one client must not inflate measured GPU memory.
+    shared = "drm-client-id:\t7\ndrm-pdev:\t0000:64:00.0\ndrm-memory-vram:\t2 MiB\ndrm-memory-gtt:\t3 MiB\n"
+    # What: write the first descriptor for the shared client; why: the probe must count this valid VRAM plus GTT record.
+    (fdinfo / "3").write_text(shared, encoding="utf-8")
+    # What: write a duplicate descriptor for the shared client; why: deduplication must prevent counting identical client totals twice.
+    (fdinfo / "4").write_text(shared, encoding="utf-8")
+    # What: write a second distinct DRM client; why: separate clients owned by the same PID must still be aggregated.
+    (fdinfo / "5").write_text("drm-client-id:\t8\ndrm-pdev:\t0000:64:00.0\ndrm-memory-gtt:\t1 GiB\n", encoding="utf-8")
+    # What: require the deduplicated byte total; why: the result must combine local and aperture allocations without host-wide telemetry.
+    assert metrics._drm_fdinfo_process_vram([41], tmp_path) == {41: 5 * 1024**2 + 1024**3}
+
+
+# What: define DRM probe precedence coverage; why: privacy-bounded native Linux accounting should satisfy AMD hosts before vendor command fallbacks.
+def test_vram_measurement_prefers_owned_drm_fdinfo(monkeypatch):
+    # What: provide a measured owned-process DRM mapping; why: the selector should accept authoritative fdinfo without invoking broader probes.
+    monkeypatch.setattr(metrics, "_drm_fdinfo_process_vram", lambda pids: {41: 123})
+    # What: require the DRM bytes, availability, and source label; why: API consumers need explicit provenance for the live measurement.
+    assert metrics._vram_measurement_for_pids([41]) == (123, True, "drm-fdinfo-vram-gtt")
 
 
 # What: define the test_amd_smi_process_vram_parses_multi_gpu_json test around monkeypatch; why: this test groups the arrange, act, and assertions that protect the amd smi process vram parses multi gpu json outcome.
@@ -84,10 +111,12 @@ def test_amd_smi_process_vram_distinguishes_empty_from_unavailable(monkeypatch):
 
 # What: define the test_vram_measurement_falls_through_to_amd_smi test around monkeypatch; why: this test groups the arrange, act, and assertions that protect the vram measurement falls through to amd smi outcome.
 def test_vram_measurement_falls_through_to_amd_smi(monkeypatch):
+    # What: make DRM fdinfo unavailable in this fallback scenario; why: the test specifically protects progression through the legacy probe chain.
+    monkeypatch.setattr(metrics, "_drm_fdinfo_process_vram", lambda pids: None)
     # What: arrange the exact monkeypatch setattr metrics nvml process vram lambda fixture fragment; why: the vram measurement falls through to amd smi scenario feeds this byte-preserved fragment through monkeypatch.setattr(metrics, "_nvml_process_vram", lambda: None) before asserting its protocol or parser result.
     monkeypatch.setattr(metrics, "_nvml_process_vram", lambda: None)
     # What: arrange the exact monkeypatch setattr metrics smi process vram lambda fixture fragment; why: the vram measurement falls through to amd smi scenario feeds this byte-preserved fragment through monkeypatch.setattr(metrics, "_smi_process_vram", lambda: {}) before asserting its protocol or parser result.
-    monkeypatch.setattr(metrics, "_smi_process_vram", lambda: {})
+    monkeypatch.setattr(metrics, "_smi_process_vram", dict)
     # What: arrange the 41 field as 123; why: test_vram_measurement_falls_through_to_amd_smi carries 41 into monkeypatch.setattr(metrics, "_amd_smi_process_vram", lambda: {41: 123,.
     monkeypatch.setattr(metrics, "_amd_smi_process_vram", lambda: {41: 123, 42: 456})
 

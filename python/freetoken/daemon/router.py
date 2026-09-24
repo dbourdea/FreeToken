@@ -15,24 +15,29 @@ leases, readiness, and rollback directly testable without a model runtime.
 # What: enable postponed evaluation of annotations; why: type hints in router can reference runtime types without eager imports or forward-reference failures.
 from __future__ import annotations
 
-# What: import threading for init using threading; why: __init__ uses threading condition, making that imported dependency available to its named operation.
-import threading
 # What: import socket for allocate loopback port using socket; why: allocate_loopback_port uses socket socket, making that imported dependency available to its named operation.
 import socket
+
+# What: import threading for init using threading; why: __init__ uses threading condition, making that imported dependency available to its named operation.
+import threading
+
 # What: import time for acquire using time; why: acquire uses time monotonic, making that imported dependency available to its named operation.
 import time
+
+# What: import callable for init using typing and callable; why: __init__ uses the callable annotation in init, making that imported dependency available to its named operation.
+from collections.abc import Callable
+
 # What: import dataclass and field for module initialization using dataclasses and dataclass and field; why: module initialization uses the dataclass annotation in module initialization and field, making that imported dependency available to its named operation.
 from dataclasses import dataclass, field
-# What: import callable for init using typing and callable; why: __init__ uses the callable annotation in init, making that imported dependency available to its named operation.
-from typing import Callable
 
 # What: import from catalog import DEFAULT CHECK ENDPOINT CatalogError ModelCatalog ModelProfile; why: this module calls or annotates these symbols in the branch-created operations below.
 from .catalog import DEFAULT_CHECK_ENDPOINT, CatalogError, ModelCatalog, ModelProfile
+
 # What: import wait for ready for init using readiness and wait for ready; why: __init__ uses the wait for ready annotation in init, making that imported dependency available to its named operation.
 from .readiness import wait_for_ready
+
 # What: import conflict and switch launch error for acquire using serve manager and conflict and switch launch error; why: acquire uses the conflict annotation in acquire and the switch launch error annotation in acquire, making that imported dependency available to its named operation.
 from .serve_manager import Conflict, SwitchLaunchError
-
 
 # What: compute default profile concurrency limit from 10; why: default profile concurrency limit default profile concurrency limit later reads default profile concurrency limit, so router must retain the computed value under that name.
 DEFAULT_PROFILE_CONCURRENCY_LIMIT = 10
@@ -40,13 +45,14 @@ DEFAULT_PROFILE_CONCURRENCY_LIMIT = 10
 
 # What: define allocate_loopback_port around the current object state; why: its direct callers call allocate_loopback_port for allocate loopback port and rely on this exact input and result contract.
 def allocate_loopback_port() -> int:
-    """Ask the kernel for an ephemeral loopback TCP port.
+    """Ask the kernel for an ephemeral loopback TCP port pair.
 
     The listener is intentionally closed before the child starts: FreeToken's
     serve process, not the daemon, must own the listening socket. The manager
-    serializes the immediately following launch; a hostile or unrelated local
-    process can still win that unavoidable bind race, in which case readiness
-    fails closed and the normal rollback path applies.
+    serializes the immediately following launch. FreeToken also reserves the
+    next port for its local distributed store, so both adjacent ports must be
+    available. A local process can still win the unavoidable post-check bind
+    race, in which case readiness fails closed and rollback applies.
     """
     # What: document ask the kernel for an ephemeral in the allocate_loopback_port docstring; why: introspection and maintainers read this exact docstring fragment to understand allocate loopback port behavior without executing it.
     # What: document the listener is intentionally closed before in the allocate_loopback_port docstring; why: introspection and maintainers read this exact docstring fragment to understand allocate loopback port behavior without executing it.
@@ -55,14 +61,36 @@ def allocate_loopback_port() -> int:
     # What: document process can still win that unavoidable in the allocate_loopback_port docstring; why: introspection and maintainers read this exact docstring fragment to understand allocate loopback port behavior without executing it.
     # What: document fails closed and the normal rollback in the allocate_loopback_port docstring; why: introspection and maintainers read this exact docstring fragment to understand allocate loopback port behavior without executing it.
     # What: preserve the paragraph boundary in the the allocate_loopback_port docstring; why: introspection and maintainers read this paragraph break to understand allocate loopback port behavior without executing it.
-    # What: enter the socket.socket managed context before sock setsockopt socket sol socket socket so reuseaddr; why: allocate_loopback_port releases this resource or lock after sock setsockopt socket sol socket socket so reuseaddr on both success and failure paths.
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        # What: call sock.setsockopt with sol socket and socket and so reuseaddr and socket and 0; why: allocate_loopback_port invokes sock.setsockopt while performing sock bind; the call advances that operation through its result or side effect.
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        # What: preserve the exact sock bind literal fragment; why: allocate_loopback_port passes this fragment verbatim through sock.bind(("127.0.0.1", 0)), because changing it would alter a protocol payload, serialized fixture, or public message.
-        sock.bind(("127.0.0.1", 0))
-        # What: return int and getsockname and sock and 1 from allocate_loopback_port; why: allocate_loopback_port exposes int and getsockname and sock and 1 so its caller can continue with the function\'s computed outcome.
-        return int(sock.getsockname()[1])
+    # What: bound ephemeral-pair selection attempts; why: repeated adjacent-port conflicts must fail instead of looping forever.
+    for _ in range(64):
+        # What: reserve a kernel-selected candidate service port during validation; why: concurrent allocators cannot take the base port before its companion is checked.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as service_sock:
+            # What: forbid address reuse on the candidate service socket; why: the availability check must reflect an exclusive future listener.
+            service_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            # What: ask the kernel for a loopback candidate; why: hard-coded ports would collide across parallel daemon instances.
+            service_sock.bind(("127.0.0.1", 0))
+            # What: retain the selected service port; why: its adjacent distributed-store port must be validated before launch.
+            port = int(service_sock.getsockname()[1])
+            # What: skip a terminal port with no valid successor; why: FreeToken cannot bind a distributed store above TCP port 65535.
+            if port >= 65535:
+                # What: retry with another kernel-selected port; why: only a complete adjacent pair is usable.
+                continue
+            # What: attempt to reserve the adjacent distributed-store port; why: FreeToken initializes its local process group on service port plus one.
+            try:
+                # What: hold the companion listener during validation; why: both required ports must be simultaneously available.
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as distributed_sock:
+                    # What: forbid address reuse on the companion socket; why: an existing listener must be detected as a conflict.
+                    distributed_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+                    # What: bind the exact companion port; why: a free base port alone previously produced EADDRINUSE during model switching.
+                    distributed_sock.bind(("127.0.0.1", port + 1))
+            # What: retry when the companion port is already occupied; why: the child would otherwise fail after an expensive model switch.
+            except OSError:
+                # What: continue bounded pair selection; why: another candidate may have both required listeners free.
+                continue
+            # What: return the validated base port after both temporary reservations close; why: the FreeToken child must own both real listeners.
+            return port
+    # What: fail after exhausting bounded pair-selection attempts; why: launching without a proven port pair would create a predictable lifecycle failure.
+    raise OSError("could not allocate adjacent loopback ports for FreeToken serve")
 
 
 # What: define RoutingError as the owner of __init__; why: daemon callers use this class boundary so those methods share one routing error state invariant.
@@ -90,7 +118,7 @@ class RouteLease:
 # What: document one admitted request call meth release in the RouteLease docstring; why: introspection and maintainers read this exact docstring fragment to understand route lease behavior without executing it.
 
     # What: compute router from the named fixture input; why: self router release later reads router, so router must retain the computed value under that name.
-    router: "RoutingCoordinator"
+    router: RoutingCoordinator
     # What: compute profile from the named fixture input; why: return self profile proxy base url self port later reads profile, so router must retain the computed value under that name.
     profile: ModelProfile
     # What: compute port from the named fixture input; why: return self profile proxy base url self port later reads port, so router must retain the computed value under that name.
@@ -782,9 +810,9 @@ class RoutingCoordinator:
                     # What: iterate across pins and routing profile to perform normalized and pin and startswith and source id and target; why: resolve_upstream_path repeats the body only while or for the loop header admits an iteration.
                     for pin, target in routing_profile.pins:
                         # What: gate on normalized and pin and startswith before source id and pin and target and rewritten and len; why: resolve_upstream_path admits source id and pin and target and rewritten and len only for this predicate and excludes the opposite state.
-                        if normalized == pin or normalized.startswith(pin + "/"):
-                            # What: gate on source id and len and pin before source id and pin; why: resolve_upstream_path admits source id and pin only for this predicate and excludes the opposite state.
-                            if source_id is None or len(pin) > len(source_id):
+                        if (normalized == pin or normalized.startswith(pin + "/")) and (
+                            source_id is None or len(pin) > len(source_id)
+                        ):
                                 # What: compute source id from pin; why: if source id is not and not later reads source id, so resolve_upstream_path must retain the computed value under that name.
                                 source_id = pin
                                 # What: gate on target before rewritten; why: resolve_upstream_path admits rewritten only for this predicate and excludes the opposite state.

@@ -115,3 +115,36 @@ def test_qwen35_dense_gguf_metadata_maps_to_dense_hybrid_geometry():
     assert config.moe_enabled is False
     assert config.moe_weight_format == "qwen35_dense"
     assert config.expert_quant == "none"
+
+# What: define the MTP exclusion regression; why: resident Qwopus GGUFs serialize one predictor block after 40 decoder layers.
+def test_qwen35moe_gguf_excludes_trailing_next_token_predictor_layers():
+    # What: obtain the compatible MoE fixture; why: the test should vary only serialized predictor geometry.
+    base = _qwen35moe_shim()
+    # What: copy fixture metadata; why: shared-state mutation would make unrelated tests order-dependent.
+    metadata = dict(base.metadata)
+    # What: model the real total block count; why: the artifact contains 40 decoders plus one MTP block.
+    metadata["qwen35moe.block_count"] = 41
+    # What: declare one predictor block; why: the parser needs explicit evidence to derive executable depth.
+    metadata["qwen35moe.nextn_predict_layers"] = 1
+    # What: build an isolated metadata shim; why: production geometry can be tested without loading a 22 GB file.
+    mtp = GgufConfigShim(
+        # What: preserve architecture identity; why: this regression targets only the Qwen MoE path.
+        architectures=base.architectures,
+        # What: preserve the placeholder path; why: metadata-only validation must not require a checkpoint.
+        model_path=base.model_path,
+        # What: preserve model type; why: the architecture metadata prefix must remain qwen35moe.
+        model_type=base.model_type,
+        # What: supply MTP-bearing metadata; why: this is the input that previously over-counted decoders.
+        metadata=metadata,
+        # What: preserve vocabulary size; why: unrelated tokenizer geometry must remain controlled.
+        vocab_size=base.vocab_size,
+        # What: preserve embedding tying; why: unrelated weight-layout behavior must remain controlled.
+        tie_word_embeddings=base.tie_word_embeddings,
+    # What: close shim construction; why: the complete object is the parser input under test.
+    )
+    # What: parse the MTP-bearing metadata; why: the assertion must exercise production configuration logic.
+    config = parse_gguf_config(mtp)
+    # What: require 40 executable decoders; why: the trailing predictor block must not allocate or execute.
+    assert config.num_layers == 40
+    # What: require schedules to stop at decoder 39; why: attention groups must exclude the MTP block.
+    assert max(layer for group in config.attention_groups for layer in group.layer_ids) == 39

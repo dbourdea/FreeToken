@@ -82,9 +82,10 @@ def _lm_head_quant(hf_config: Any) -> str:
     if not isinstance(layers, dict):
         return "none"
     for name, spec in layers.items():
-        if name == "lm_head" or name.endswith(".lm_head"):
-            if "fp4" in str((spec or {}).get("quant_algo", "")).lower():
-                return "nvfp4"
+        if (name == "lm_head" or name.endswith(".lm_head")) and "fp4" in str(
+            (spec or {}).get("quant_algo", "")
+        ).lower():
+            return "nvfp4"
     return "none"
 
 
@@ -101,9 +102,10 @@ def _dense_mlp_quant(hf_config: Any) -> str:
     if not isinstance(layers, dict):
         return "none"
     for name, spec in layers.items():
-        if name.endswith((".mlp.gate_proj", ".mlp.up_proj", ".mlp.down_proj")):
-            if "fp4" in str((spec or {}).get("quant_algo", "")).lower():
-                return "nvfp4"
+        if name.endswith((".mlp.gate_proj", ".mlp.up_proj", ".mlp.down_proj")) and "fp4" in str(
+            (spec or {}).get("quant_algo", "")
+        ).lower():
+            return "nvfp4"
     return "none"
 
 
@@ -263,7 +265,7 @@ def parse_config(hf_config: Any) -> ModelConfig:
     )
 
 
-def parse_gguf_config(shim: "GgufConfigShim") -> ModelConfig:
+def parse_gguf_config(shim: GgufConfigShim) -> ModelConfig:
     """Build a Qwen3.5 hybrid runtime configuration from GGUF metadata.
 
     llama.cpp records the same hybrid decoder geometry as the official Hugging Face
@@ -303,7 +305,23 @@ def parse_gguf_config(shim: "GgufConfigShim") -> ModelConfig:
         )
     linear_num_value_heads = linear_inner_size // linear_value_head_dim
 
-    num_layers = int(value("block_count"))
+    # What: read every serialized transformer block; why: GGUF block_count includes optional trailing predictor blocks.
+    total_layers = int(value("block_count"))
+    # What: read the optional next-token predictor count; why: ordinary decoder execution must exclude speculative MTP blocks.
+    nextn_predict_layers = int(metadata.get(f"{prefix}.nextn_predict_layers", 0))
+    # What: reject impossible predictor geometry; why: malformed counts must fail before weight allocation or service mutation.
+    if nextn_predict_layers < 0 or nextn_predict_layers >= total_layers:
+        # What: raise a bounded compatibility error; why: callers need an actionable failure rather than an invalid model.
+        raise ValueError(
+            # What: report the non-sensitive total count; why: maintainers need the artifact geometry that failed validation.
+            f"invalid {prefix} predictor geometry: block_count={total_layers}, "
+            # What: report the predictor count; why: the excluded quantity explains the exact rejected relationship.
+            f"nextn_predict_layers={nextn_predict_layers}"
+        # What: close the grouped exception construction; why: Python requires the call boundary before execution continues.
+        )
+    # What: derive executable decoder depth; why: FreeToken text generation does not run the trailing MTP head.
+    num_layers = total_layers - nextn_predict_layers
+    # What: read the attention cadence; why: layer groups below require the validated main-decoder depth and interval.
     full_interval = int(value("full_attention_interval"))
     if full_interval <= 0:
         raise ValueError(f"invalid qwen35moe.full_attention_interval {full_interval}")

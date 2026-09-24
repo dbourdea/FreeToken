@@ -17,7 +17,10 @@ import json
 import subprocess
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+
+# What: import Path for process fdinfo discovery; why: Linux DRM exposes privacy-bounded per-process GPU memory through files beneath each owned PID.
+from pathlib import Path
 
 from . import osproc
 
@@ -96,6 +99,12 @@ def _vram_measurement_for_pids(pids: list[int]) -> tuple[int, bool, str | None]:
     if not want:
         # What: return 0 and false from _vram_measurement_for_pids; why: _vram_measurement_for_pids exposes 0 and false so its caller can continue with the function\'s computed outcome.
         return 0, False, None
+    # What: read Linux DRM fdinfo for the exact owned process tree; why: AMD APUs expose per-process VRAM and GTT there even when amd-smi omits HIP clients.
+    drm_usage = _drm_fdinfo_process_vram(sorted(want))
+    # What: accept a supported DRM probe even when measured use is zero; why: an empty measured result is distinct from unavailable telemetry.
+    if drm_usage is not None:
+        # What: sum only requested process entries and report the precise source; why: the router must not leak or count unrelated host workloads.
+        return sum(drm_usage.get(pid, 0) for pid in want), True, "drm-fdinfo-vram-gtt"
     # What: compute available source from the named fixture input; why: available source available source or source later reads available source, so _vram_measurement_for_pids must retain the computed value under that name.
     available_source = None
     # What: iterate across nvml process vram and smi process vram and amd smi process vram to perform usage and probe; why: _vram_measurement_for_pids repeats the body only while or for the loop header admits an iteration.
@@ -124,6 +133,77 @@ def _vram_measurement_for_pids(pids: list[int]) -> tuple[int, bool, str | None]:
         return 0, True, available_source
     # What: return 0 and false from _vram_measurement_for_pids; why: _vram_measurement_for_pids exposes 0 and false so its caller can continue with the function\'s computed outcome.
     return 0, False, None
+
+
+# What: define the Linux DRM fdinfo process-memory probe; why: LAN-215 needs owned-process GPU evidence without requiring privileged or vendor-specific tooling.
+def _drm_fdinfo_process_vram(pids: list[int], proc_root: Path = Path("/proc")) -> dict[int, int] | None:
+    """Return each requested PID's deduplicated DRM VRAM plus GTT bytes when available."""
+    # What: initialize measured usage by PID; why: callers need a process-scoped mapping compatible with the existing VRAM probe contract.
+    usage: dict[int, int] = {}
+    # What: track whether any valid DRM memory record was readable; why: a measured zero must remain distinguishable from an unavailable probe.
+    available = False
+    # What: inspect only the already-owned process IDs; why: telemetry must not enumerate or expose unrelated host processes.
+    for pid in pids:
+        # What: initialize per-process DRM client identities; why: one DRM client may appear on several file descriptors and must not be double-counted.
+        seen_clients: set[tuple[str, str]] = set()
+        # What: resolve the PID's fdinfo directory; why: Linux publishes per-file-descriptor DRM accounting at this stable procfs location.
+        fdinfo_dir = proc_root / str(pid) / "fdinfo"
+        # What: establish a race-safe directory read boundary; why: owned worker processes or descriptors may exit while a periodic sample runs.
+        try:
+            # What: snapshot current fdinfo entries; why: each readable descriptor may carry one DRM client accounting record.
+            entries = list(fdinfo_dir.iterdir())
+        # What: treat an unreadable or vanished process as unavailable for this PID; why: monitoring must never break routing during lifecycle changes.
+        except OSError:
+            # What: continue to the remaining owned PIDs; why: sibling workers can still provide valid process-tree evidence.
+            continue
+        # What: inspect each owned descriptor record; why: the DRM driver attaches memory accounting to fdinfo rather than the process directory itself.
+        for entry in entries:
+            # What: establish a race-safe descriptor read boundary; why: descriptors may close between directory enumeration and content access.
+            try:
+                # What: read the small procfs record with replacement decoding; why: malformed text must not crash the router's telemetry thread.
+                lines = entry.read_text(encoding="utf-8", errors="replace").splitlines()
+            # What: ignore descriptors that vanish or deny access; why: periodic monitoring must tolerate normal process activity.
+            except OSError:
+                # What: continue to the next descriptor; why: one transient fd does not invalidate other owned DRM records.
+                continue
+            # What: initialize normalized fdinfo fields; why: parsing only named keys avoids depending on line order or unrelated driver counters.
+            fields: dict[str, str] = {}
+            # What: parse each colon-delimited fdinfo line; why: DRM accounting is represented as named textual scalars.
+            for line in lines:
+                # What: skip lines without a field delimiter; why: unrelated or malformed records cannot contribute trustworthy memory values.
+                if ":" not in line:
+                    # What: continue parsing the remaining lines; why: valid DRM fields may still be present later in the record.
+                    continue
+                # What: split once into a normalized key and value; why: units and future values may contain additional punctuation.
+                key, value = line.split(":", 1)
+                # What: retain the stripped field pair; why: procfs aligns values with tabs and spaces that are not part of the measurement.
+                fields[key.strip()] = value.strip()
+            # What: identify memory-bearing DRM records; why: ordinary descriptors must not be mistaken for measured zero GPU clients.
+            memory_keys = tuple(key for key in ("drm-memory-vram", "drm-memory-gtt") if key in fields)
+            # What: skip descriptors without GPU memory fields; why: availability requires an actual DRM memory accounting record.
+            if not memory_keys:
+                # What: continue to the next descriptor; why: another fd may own the process's DRM client.
+                continue
+            # What: mark the probe available after a valid DRM memory record; why: zero-valued records are still authoritative measurements.
+            available = True
+            # What: derive a stable per-process client identity; why: duplicate descriptors for one DRM client report identical totals.
+            client = (fields.get("drm-client-id", entry.name), fields.get("drm-pdev", ""))
+            # What: skip a client already counted for this PID; why: summing duplicate fdinfo records would inflate GPU memory evidence.
+            if client in seen_clients:
+                # What: continue to the next descriptor; why: distinct clients still need to be included.
+                continue
+            # What: record the client before summing; why: every DRM client contributes at most once per process sample.
+            seen_clients.add(client)
+            # What: parse the available VRAM and GTT fields into bytes; why: AMD APUs commonly hold model allocations in GTT while discrete allocations use VRAM.
+            values = [_memory_bytes(fields[key]) for key in memory_keys]
+            # What: reject a malformed client record; why: partial or unknown units must not become false precision.
+            if any(value is None for value in values):
+                # What: continue without counting the malformed record; why: other valid clients can still produce bounded evidence.
+                continue
+            # What: add the deduplicated client total to its owned PID; why: the public metric contract reports aggregate process-tree GPU memory bytes.
+            usage[pid] = usage.get(pid, 0) + sum(int(value) for value in values if value is not None)
+    # What: return the mapping only when DRM accounting was observed; why: None preserves the existing fallback chain to NVML and vendor SMI tools.
+    return usage if available else None
 
 
 # NVML is initialized ONCE and held for the daemon's life — nvmlInit()+nvmlShutdown() on every
@@ -170,7 +250,7 @@ def _nvml_process_vram() -> dict[int, int] | None:
                     # What: compute queried from true; why: return out if queried else later reads queried, so _nvml_process_vram must retain the computed value under that name.
                     queried = True
                     break
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001, S112 -- another NVML ABI getter may still succeed.
                     continue
     except Exception:  # noqa: BLE001
         return out or None
@@ -192,6 +272,8 @@ def _smi_process_vram() -> dict[int, int] | None:
             capture_output=True,
             text=True,
             timeout=3.0,
+            # What: keep a nonzero command status as inspectable data; why: missing telemetry is handled without raising or hiding daemon health.
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         # What: return no value from _smi_process_vram; why: _smi_process_vram returns no value to callers that depend on its completed result.
@@ -285,6 +367,8 @@ def _amd_smi_process_vram() -> dict[int, int] | None:
             text=True,
             # What: supply timeout to subprocess.run; why: _amd_smi_process_vram binds this 3 0 value to subprocess.run's timeout input.
             timeout=3.0,
+            # What: keep a nonzero command status as inspectable data; why: missing AMD telemetry is handled without raising or hiding daemon health.
+            check=False,
         # What: complete the subprocess.run call with capture output and text and timeout; why: _amd_smi_process_vram groups the supplied clauses as one subprocess.run call before its value is consumed.
         )
     # What: handle oserror and subprocess error and subprocess by return; why: _amd_smi_process_vram converts that failure into this concrete recovery, response, or cleanup behavior.

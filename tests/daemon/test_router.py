@@ -3,27 +3,42 @@ from __future__ import annotations
 
 # What: import asyncio for test cancelled queued http request cannot trigger a later swap using asyncio; why: test_cancelled_queued_http_request_cannot_trigger_a_later_swap uses asyncio run, making that imported dependency available to its named operation.
 import asyncio
+
 # What: import base64 for test activity and opt in capture apis are authenticated redacted and durable using base64; why: test_activity_and_opt_in_capture_apis_are_authenticated_redacted_and_durable uses base64 b64decode, making that imported dependency available to its named operation.
 import base64
-# What: import threading for test switch waits until an active lease finishes using threading; why: test_switch_waits_until_an_active_lease_finishes uses threading event, making that imported dependency available to its named operation.
-import threading
+
 # What: import json for test request filter applies nested drop global and requested id fields in order using json; why: test_request_filter_applies_nested_drop_global_and_requested_id_fields_in_order uses json loads, making that imported dependency available to its named operation.
 import json
+
+# What: import socket for adjacent dynamic-port allocation verification; why: the regression binds both FreeToken listeners using production IPv4 stream semantics.
+import socket
+
+# What: import threading for test switch waits until an active lease finishes using threading; why: test_switch_waits_until_an_active_lease_finishes uses threading event, making that imported dependency available to its named operation.
+import threading
+
 # What: import time for test router reload cannot race atomic profile lookup and dynamic port binding using time; why: test_router_reload_cannot_race_atomic_profile_lookup_and_dynamic_port_binding uses time sleep, making that imported dependency available to its named operation.
 import time
-# What: import bytes io for test explicit cancel while upstream connects closes result and releases lease using io and bytes io; why: test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease uses bytes io, making that imported dependency available to its named operation.
-from io import BytesIO
+
 # What: import thread pool executor for test cancelled queued http request cannot trigger a later swap using concurrent and futures and thread pool executor; why: test_cancelled_queued_http_request_cannot_trigger_a_later_swap uses thread pool executor, making that imported dependency available to its named operation.
 from concurrent.futures import ThreadPoolExecutor
+
 # What: arrange from http server import BaseHTTPRequestHandler ThreadingHTTPServer for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# What: import pytest for module initialization using pytest; why: module initialization uses pytest mark parametrize, making that imported dependency available to its named operation.
-import pytest
+# What: import bytes io for test explicit cancel while upstream connects closes result and releases lease using io and bytes io; why: test_explicit_cancel_while_upstream_connects_closes_result_and_releases_lease uses bytes io, making that imported dependency available to its named operation.
+from io import BytesIO
+
 # What: import httpx for scenario using httpx; why: scenario uses httpx asgitransport, making that imported dependency available to its named operation.
 import httpx
+
+# What: import pytest for module initialization using pytest; why: module initialization uses pytest mark parametrize, making that imported dependency available to its named operation.
+import pytest
+
 # What: import test client for test http concurrency rejection returns retry after and releases request id using fastapi and testclient and test client; why: test_http_concurrency_rejection_returns_retry_after_and_releases_request_id uses test client, making that imported dependency available to its named operation.
 from fastapi.testclient import TestClient
+
+# What: import build app for test cancelled queued http request cannot trigger a later swap using freetoken and daemon and app and build app; why: test_cancelled_queued_http_request_cannot_trigger_a_later_swap uses build app, making that imported dependency available to its named operation.
+from freetoken.daemon.app import build_app
 
 # What: arrange from freetoken daemon catalog import for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
 from freetoken.daemon.catalog import (
@@ -45,10 +60,9 @@ from freetoken.daemon.catalog import (
     RoutingGroup,
     # What: arrange RoutingProfile for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
     RoutingProfile,
-# What: arrange the enclosing predicate with from freetoken daemon catalog import catalog error model capabilities model catalog model profile model selector request; why: test_router groups the supplied clauses as one test_router expression before its value is consumed.
+    # What: arrange the enclosing predicate with from freetoken daemon catalog import catalog error model capabilities model catalog model profile model selector request; why: test_router groups the supplied clauses as one test_router expression before its value is consumed.
 )
-# What: import build app for test cancelled queued http request cannot trigger a later swap using freetoken and daemon and app and build app; why: test_cancelled_queued_http_request_cannot_trigger_a_later_swap uses build app, making that imported dependency available to its named operation.
-from freetoken.daemon.app import build_app
+
 # What: arrange from freetoken daemon inference proxy import for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
 from freetoken.daemon.inference_proxy import (
     # What: arrange UpstreamResponse for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
@@ -61,16 +75,24 @@ from freetoken.daemon.inference_proxy import (
     open_upstream,
     # What: arrange response headers for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
     response_headers,
-# What: arrange the enclosing predicate with from freetoken daemon inference proxy import upstream response filter request body forward headers open upstream respons; why: test_router groups the supplied clauses as one test_router expression before its value is consumed.
+    # What: arrange the enclosing predicate with from freetoken daemon inference proxy import upstream response filter request body forward headers open upstream respons; why: test_router groups the supplied clauses as one test_router expression before its value is consumed.
 )
+
 # What: arrange from freetoken daemon logring import LogRing for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
 from freetoken.daemon.logring import LogRing
+
 # What: import serve probe for test custom readiness path accepts real http success without json using freetoken and daemon and proxy and serve probe; why: test_custom_readiness_path_accepts_real_http_success_without_json uses serve probe, making that imported dependency available to its named operation.
 from freetoken.daemon.proxy import ServeProbe
+
 # What: import wait for ready for test custom readiness path accepts real http success without json using freetoken and daemon and readiness and wait for ready; why: test_custom_readiness_path_accepts_real_http_success_without_json uses wait for ready, making that imported dependency available to its named operation.
 from freetoken.daemon.readiness import wait_for_ready
+
 # What: arrange from freetoken daemon router import RoutingCoordinator RoutingError for the scenario; why: test router requires this concrete input or helper state before exercising the behavior under test.
-from freetoken.daemon.router import RoutingCoordinator, RoutingError
+from freetoken.daemon.router import (
+    RoutingCoordinator,
+    RoutingError,
+    allocate_loopback_port,
+)
 
 
 # What: define Manager as the owner of __init__ and status and serve_args and start and switch_for_readiness; why: daemon callers use this class boundary so those methods share one manager state invariant.
@@ -1406,6 +1428,35 @@ def test_custom_readiness_path_accepts_real_http_success_without_json():
         worker.join(2)
 
     # What: assert that result equals ready true health reachable true; why: this assertion protects the custom readiness path accepts real http success without json regression after the test's arranged inputs and exercised call.
+    assert result == {"ready": True, "health": {"reachable": True}}
+
+
+# What: define custom readiness HTTP-error retry coverage; why: a bound server that returns 503 while loading must not be admitted as inference-ready.
+def test_custom_readiness_path_retries_reachable_http_error():
+    # What: define a stable running manager; why: the readiness loop should remain focused on endpoint state rather than process replacement.
+    class RunningManager:
+        # What: report the expected owned process; why: readiness may continue only while the launched generation remains current.
+        def status(self):
+            # What: return the stable running identity; why: neither probe result should be classified as superseded.
+            return {"running": True, "pid": 44}
+
+    # What: define a two-state custom probe; why: the regression requires one reachable 503 followed by a successful readiness response.
+    class Probe:
+        # What: initialize the ordered endpoint states; why: the test must prove the first HTTP error is retried rather than accepted.
+        def __init__(self):
+            # What: retain loading then ready results; why: each fresh probe consumes the next authoritative state.
+            self.results = [{"reachable": True, "status": "error", "httpStatus": 503}, {"reachable": True}]
+
+        # What: return the next custom readiness state; why: wait_for_ready must evaluate HTTP semantics on every uncached probe.
+        def fresh_readiness(self, port, path):
+            # What: require the configured dynamic endpoint inputs; why: the helper must probe the exact owned port and catalog path.
+            assert (port, path) == (1922, "/ready")
+            # What: consume and return the next state; why: success is valid only after the initial 503 has been rejected.
+            return self.results.pop(0)
+
+    # What: execute readiness with a no-delay retry; why: deterministic unit coverage does not need wall-clock sleeping between the two states.
+    result = wait_for_ready(RunningManager(), Probe(), pid=44, port=1922, timeout_s=1, path="/ready", sleep=lambda _: None)
+    # What: require eventual readiness after the successful probe; why: the fix must retry loading errors without rejecting a later healthy endpoint.
     assert result == {"ready": True, "health": {"reachable": True}}
 
 
@@ -7060,3 +7111,78 @@ def test_catalog_watcher_applies_only_valid_idle_replacements(tmp_path):
             assert [model["name"] for model in client.get("/router/models").json()["data"]] == ["b"]
     # What: assert that app state catalog watch stop is set; why: this assertion protects the catalog watcher applies only valid idle replacements regression after the test's arranged inputs and exercised call.
     assert app.state.catalog_watch_stop.is_set()
+# What: verify that explicit upstream closure ends a blocked chunk iterator without leaking the transport's internal cancellation exception; why: production router cancellation closes Python HTTP responses from another thread.
+def test_upstream_response_chunks_suppresses_only_close_induced_read_error():
+    # What: define a raw transport that blocks until close and then raises the observed Python HTTP failure; why: the regression must reproduce the cancellation race deterministically.
+    class ClosingRaw:
+        # What: initialize synchronization signals; why: the test must close only after the iterator is actively blocked inside read.
+        def __init__(self):
+            # What: signal entry into read; why: the controlling thread needs a deterministic race boundary.
+            self.read_started = threading.Event()
+            # What: signal explicit transport closure; why: the blocked reader should wake only after cancellation.
+            self.closed = threading.Event()
+
+        # What: block a raw read until cancellation and then raise the real low-level symptom; why: concurrent HTTPResponse.close invalidates an internal file pointer in this way.
+        def read(self, size):
+            # What: announce that iteration reached the transport; why: close must not race ahead of the read call under test.
+            self.read_started.set()
+            # What: wait for explicit closure; why: the failure must be causally tied to cancellation.
+            self.closed.wait(1)
+            # What: raise the close-induced internal-state error; why: UpstreamResponse should convert it to clean end-of-stream only after explicit close.
+            raise AttributeError("closed response has no file pointer")
+
+        # What: release the blocked reader; why: this models the router cancellation path closing the upstream response.
+        def close(self):
+            # What: publish transport closure; why: the reader can now produce the expected cancellation symptom.
+            self.closed.set()
+
+    # What: create the deterministic raw transport and wrapped response; why: the production iterator and close methods must be exercised together.
+    raw = ClosingRaw()
+    # What: wrap the raw transport in the production response object; why: cancellation behavior belongs to this ownership boundary.
+    response = UpstreamResponse(200, {"Content-Type": "text/event-stream"}, raw)
+    # What: collect unexpected iterator failures; why: the test thread must report any exception back to the assertion thread.
+    failures = []
+
+    # What: consume the response iterator and capture unexpected errors; why: generator execution occurs in a separate thread during the cancellation race.
+    def consume():
+        # What: guard iterator consumption for observable test failure capture; why: thread exceptions alone may not fail the test reliably.
+        try:
+            # What: exhaust the production chunk iterator; why: a close-induced read error should appear as a normal empty completion.
+            list(response.chunks())
+        # What: capture any propagated exception; why: explicit cancellation must not escape as an ASGI-visible failure.
+        except Exception as exc:  # noqa: BLE001 -- the assertion must retain any stream failure.
+            # What: retain the unexpected exception; why: the main test thread can assert exact clean termination.
+            failures.append(exc)
+
+    # What: start iterator consumption concurrently; why: the defect requires close to interrupt an active raw read.
+    worker = threading.Thread(target=consume)
+    # What: begin the blocked read; why: cancellation cannot be tested before the iterator runs.
+    worker.start()
+    # What: require the raw read to start; why: this prevents a false pass caused by closing before iteration.
+    assert raw.read_started.wait(1)
+    # What: explicitly close the wrapped response; why: this is the production cancellation action that should suppress only its own read error.
+    response.close()
+    # What: wait for iterator termination; why: the assertion must observe the completed cancellation path.
+    worker.join(2)
+    # What: require the iterator thread to exit; why: cancellation must not leave a blocked streaming worker.
+    assert not worker.is_alive()
+    # What: require clean termination without propagated error; why: expected client cancellation must not emit an internal server traceback.
+    assert failures == []
+
+
+# What: verify dynamic allocation returns a base port whose adjacent distributed-store port is also available; why: FreeToken serve binds both ports during every model activation.
+def test_allocate_loopback_port_validates_adjacent_distributed_store_port():
+    # What: request a production dynamic port pair; why: the allocator must satisfy the real local socket contract.
+    port = allocate_loopback_port()
+    # What: require room for the companion listener; why: a terminal TCP port cannot support FreeToken's distributed store.
+    assert 1 <= port < 65535
+    # What: open temporary verification listeners for both returned ports; why: immediate exclusive binds demonstrate that neither port was occupied at selection time.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as service_sock, socket.socket(
+        # What: create the adjacent verification socket with matching IPv4 stream semantics; why: the check must mirror the child's listener family and type.
+        socket.AF_INET, socket.SOCK_STREAM
+    # What: complete the paired verification context; why: both sockets are released after the assertion path.
+    ) as distributed_sock:
+        # What: bind the returned service port; why: the base listener must be available for the HTTP server.
+        service_sock.bind(("127.0.0.1", port))
+        # What: bind the adjacent companion port; why: the distributed process-group store must not encounter EADDRINUSE.
+        distributed_sock.bind(("127.0.0.1", port + 1))

@@ -17,33 +17,45 @@ from __future__ import annotations
 
 # What: import argparse for main using argparse; why: main uses argparse argument parser, making that imported dependency available to its named operation.
 import argparse
+
 # What: import base64 for control plane canary using base64; why: control_plane_canary uses base64 b64encode, making that imported dependency available to its named operation.
 import base64
+
 # What: import json for request json using json; why: request_json uses json loads, making that imported dependency available to its named operation.
 import json
+
 # What: import os for stop process group using os; why: stop_process_group uses os killpg, making that imported dependency available to its named operation.
 import os
-# What: import path for upstream model rewrite canary using pathlib and path; why: upstream_model_rewrite_canary uses the path annotation in upstream model rewrite canary, making that imported dependency available to its named operation.
-from pathlib import Path
+
 # What: import secrets for main using secrets; why: main uses secrets token urlsafe, making that imported dependency available to its named operation.
 import secrets
+
 # What: import signal for stop process group using signal; why: stop_process_group uses signal sigterm, making that imported dependency available to its named operation.
 import signal
+
 # What: import socket for require expected hostname using socket; why: require_expected_hostname uses socket gethostname, making that imported dependency available to its named operation.
 import socket
+
 # What: import subprocess for stop process group using subprocess; why: stop_process_group uses subprocess timeout expired, making that imported dependency available to its named operation.
 import subprocess
+
 # What: import sys for main using sys; why: main uses sys platform startswith, making that imported dependency available to its named operation.
 import sys
+
 # What: import threading for concurrent canaries using threading; why: concurrent_canaries uses threading lock, making that imported dependency available to its named operation.
 import threading
+
 # What: import time for canary using time; why: canary uses time monotonic, making that imported dependency available to its named operation.
 import time
+
 # What: import urllib error for request json using urllib and error; why: request_json uses urllib request request, making that imported dependency available to its named operation.
 import urllib.error
+
 # What: import urllib request for request json using urllib and request; why: request_json uses urllib request request, making that imported dependency available to its named operation.
 import urllib.request
 
+# What: import path for upstream model rewrite canary using pathlib and path; why: upstream_model_rewrite_canary uses the path annotation in upstream model rewrite canary, making that imported dependency available to its named operation.
+from pathlib import Path
 
 # What: compute native auth base from the named fixture input; why: global native auth base native api key later reads native auth base, so qualify_native_router must retain the computed value under that name.
 _NATIVE_AUTH_BASE: str | None = None
@@ -67,6 +79,20 @@ def require_expected_hostname(expected: str, *, actual: str | None = None) -> st
         )
     # What: return actual from require_expected_hostname; why: require_expected_hostname exposes actual so its caller can continue with the function\'s computed outcome.
     return actual
+
+
+# What: define the protected service command selector; why: qualification must restore either a system or user-owned workload through its real manager.
+def protected_service_command(scope: str) -> list[str]:
+    # What: select the system service manager; why: existing qualification callers retain their passwordless sudo behavior by default.
+    if scope == "system":
+        # What: return the non-interactive systemctl prefix; why: maintenance must never block waiting for a password prompt.
+        return ["sudo", "-n", "systemctl"]
+    # What: select the invoking user's service manager; why: LAN-215 protects Nemotron with a user-scoped unit.
+    if scope == "user":
+        # What: return the user systemctl prefix; why: stopping the wrong system scope would fail restoration or touch unrelated services.
+        return ["systemctl", "--user"]
+    # What: reject unrecognized service scope; why: lifecycle ownership must be explicit before any maintenance mutation.
+    raise ValueError("protected service scope must be 'system' or 'user'")
 
 
 # What: define configure_native_auth around base and api key; why: its direct callers call configure_native_auth for configure native auth and rely on this exact input and result contract.
@@ -115,14 +141,20 @@ def request_json(
 ) -> tuple[bytes, dict]:
     # What: compute data from body and encode and dumps and json and utf 8; why: data data later reads data, so request_json must retain the computed value under that name.
     data = None if body is None else json.dumps(body).encode("utf-8")
+    # What: begin with origin-scoped authentication headers; why: read-only GET requests must not falsely declare an absent body as JSON.
+    headers = _native_headers(url)
+    # What: gate the JSON content type on an actual serialized body; why: the router correctly rejects empty requests that claim to contain JSON.
+    if data is not None:
+        # What: add the JSON media type while preserving authentication; why: body-bearing management requests still require explicit and valid content metadata.
+        headers = {"Content-Type": "application/json", **headers}
     # What: compute request from request and url and request and data; why: with urllib request urlopen request timeout timeout as later reads request, so request_json must retain the computed value under that name.
     request = urllib.request.Request(
         # What: apply the url portion of request; why: request_json uses this clause to evaluate request as one grouped value.
         url,
         # What: supply data to urllib.request.Request; why: request_json binds this data value to urllib.request.Request's data input.
         data=data,
-        # What: map the content type field as application and json; why: request_json carries content type through request into with urllib request urlopen request timeout timeout as response.
-        headers={"Content-Type": "application/json", **_native_headers(url)},
+        # What: supply the body-aware headers; why: request_json must authenticate every native request without mislabeling empty GET requests as JSON payloads.
+        headers=headers,
         # What: supply method to urllib.request.Request; why: request_json binds this method value to urllib.request.Request's method input.
         method=method,
     # What: complete the urllib.request.Request call with data and headers and method; why: request_json groups the supplied clauses as one urllib.request.Request call before its value is consumed.
@@ -179,14 +211,14 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
         "messages": [{"role": "user", "content": "What is 2 + 2? Reply with only the single digit."}],
         # What: map the temperature field as 0; why: canary carries temperature through body into data json dumps body encode utf 8.
         "temperature": 0,
-        # What: map the max tokens field as 32; why: canary carries max tokens through body into data json dumps body encode utf 8.
-        "max_tokens": 32,
+        # What: map the maximum completion budget as 128 tokens; why: always-on reasoning models need enough bounded space to emit a final deterministic answer after their private analysis.
+        "max_tokens": 128,
         # What: map the stream field as true; why: canary carries stream through body into data json dumps body encode utf 8.
         "stream": True,
         # What: map the include usage field as true; why: canary carries include usage through body into data json dumps body encode utf 8.
         "stream_options": {"include_usage": True},
-        # What: map the enable thinking field as false; why: canary carries enable thinking through body into data json dumps body encode utf 8.
-        "chat_template_kwargs": {"enable_thinking": False},
+        # What: disable optional thinking while selecting low effort for always-on Harmony models; why: one bounded payload must render correctly for both Qwen-style toggles and gpt-oss's graded reasoning template.
+        "chat_template_kwargs": {"enable_thinking": False, "reasoning_effort": "low"},
     # What: complete the body mapping with model and messages and temperature and max tokens and stream; why: canary groups the supplied clauses as one body mapping before its value is consumed.
     }
     # What: compute request from request and request and url and urllib; why: with urllib request urlopen request timeout as response later reads request, so canary must retain the computed value under that name.
@@ -213,8 +245,18 @@ def canary(url: str, model: str, *, direct: bool) -> tuple[bytes, dict]:
     completion_tokens: int | None = None
     # What: compute response models from set; why: response models add response model later reads response models, so canary must retain the computed value under that name.
     response_models: set[str] = set()
-    # What: enter the urllib.request.urlopen managed context before for chunk in response; why: canary releases this resource or lock after for chunk in response on both success and failure paths.
-    with urllib.request.urlopen(request, timeout=660) as response:
+    # What: attempt the bounded HTTP request before streaming its body; why: an error response must be captured privately instead of being reduced to an opaque status code.
+    try:
+        # What: open the candidate endpoint with the existing timeout; why: successful responses still use the same bounded network contract.
+        response_context = urllib.request.urlopen(request, timeout=660)
+    # What: catch an HTTP protocol failure from the candidate; why: qualification needs the server's precise rejection reason to choose a safe corrective action.
+    except urllib.error.HTTPError as exc:
+        # What: read and decode the bounded error payload; why: the private exception text should preserve actionable diagnostics without publishing request artifacts.
+        error_body = exc.read(64 * 1024).decode("utf-8", errors="replace")
+        # What: raise a contextual runtime failure chained to the HTTP error; why: the harness must fail closed while retaining the exact private rejection evidence.
+        raise RuntimeError(f"canary HTTP {exc.code}: {error_body}") from exc
+    # What: enter the successful response managed context before reading chunks; why: canary releases the network resource on both normal completion and parse failure.
+    with response_context as response:
         # What: iterate across response to perform observed s and float; why: canary repeats the body only while or for the loop header admits an iteration.
         for chunk in response:
             # What: compute observed s from the named fixture input; why: observed s time monotonic started later reads observed s, so canary must retain the computed value under that name.
@@ -443,7 +485,7 @@ def concurrent_canaries(base: str, model: str, *, seconds: float = 180) -> tuple
                 # What: call results.append with value; why: run_one invokes results.append while performing except base exception as exc; the call advances that operation through its result or side effect.
                 results.append(value)
         # What: handle base exception by with lock; why: run_one converts that failure into this concrete recovery, response, or cleanup behavior.
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 -- cleanup must record interrupts as qualification failures.
             # What: enter the lock managed context before errors append exc; why: run_one releases this resource or lock after errors append exc on both success and failure paths.
             with lock:
                 # What: call errors.append with exc; why: run_one invokes errors.append while performing the enclosing return; the call advances that operation through its result or side effect.
@@ -529,7 +571,7 @@ def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[
     # What: gate on isinstance and prior cancellations and int and prior terminal before runtime error; why: cancellation_canary admits runtime error only for this predicate and excludes the opposite state.
     if not isinstance(prior_cancellations, int) or not isinstance(prior_terminal, int):
         # What: raise RuntimeError for the caller; why:  cancellation_canary stops this rejected path before it can mutate state, dispatch work, or report success.
-        raise RuntimeError("router status lacks cancellation counters")
+        raise RuntimeError("router status lacks cancellation counters")  # noqa: TRY004 -- malformed remote status is an operational failure.
     # What: compute body from model and model and messages and temperature and max tokens; why: base v1 chat completions data json dumps later reads body, so cancellation_canary must retain the computed value under that name.
     body = {
         # What: map the model field as model; why: cancellation_canary sends this field through body so the router selects the canonical model or alias for upstream dispatch.
@@ -580,7 +622,7 @@ def cancellation_canary(base: str, model: str, *, seconds: float = 90) -> tuple[
                     # What: call first_chunk.set with the declared inputs; why: consume invokes first_chunk.set while performing except exception as exc cancellation may; the call advances that operation through its result or side effect.
                     first_chunk.set()
         # What: handle exception by errors append exc; why: consume converts that failure into this concrete recovery, response, or cleanup behavior.
-        except Exception as exc:  # cancellation may close a blocking HTTP read
+        except Exception as exc:  # noqa: BLE001 -- cancellation may close a blocking HTTP read
             # What: call errors.append with exc; why: consume invokes errors.append while performing finally; the call advances that operation through its result or side effect.
             errors.append(exc)
         # What: run finished set on every exit path; why: consume performs this cleanup after success, rejection, or exception so resources and accounting cannot remain stranded.
@@ -730,7 +772,7 @@ def conflicting_request_canary(
                     # What: call first_chunk.set with the declared inputs; why: consume_active invokes first_chunk.set while performing except exception as exc; the call advances that operation through its result or side effect.
                     first_chunk.set()
         # What: handle exception by active errors append exc; why: consume_active converts that failure into this concrete recovery, response, or cleanup behavior.
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- worker failures are returned to the coordinating test thread.
             # What: call active_errors.append with exc; why: consume_active invokes active_errors.append while performing finally; the call advances that operation through its result or side effect.
             active_errors.append(exc)
         # What: run active finished set on every exit path; why: consume_active performs this cleanup after success, rejection, or exception so resources and accounting cannot remain stranded.
@@ -745,7 +787,7 @@ def conflicting_request_canary(
             # What: supply direct to waiting_result.append; why: consume_waiting binds this false value to waiting_result.append's direct input.
             waiting_result.append(canary(base, waiting_model, direct=False))
         # What: handle base exception by waiting errors append exc; why: consume_waiting converts that failure into this concrete recovery, response, or cleanup behavior.
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 -- cleanup must record interrupts as qualification failures.
             # What: call waiting_errors.append with exc; why: consume_waiting invokes waiting_errors.append while performing the enclosing return; the call advances that operation through its result or side effect.
             waiting_errors.append(exc)
 
@@ -1022,12 +1064,20 @@ def control_plane_canary(base: str, artifacts: Path) -> dict:
     models_raw, models = request_json(base + "/v1/models", timeout=10)
     # What: compute and models alias from request json and base and models and 10; why: value namespaced stats request json later reads and models alias, so control_plane_canary must retain the computed value under that name.
     _, models_alias = request_json(base + "/models", timeout=10)
-    # What: compute and namespaced stats from request json and base and upstream and compat and model a; why: the enclosing return or state update later reads and namespaced stats, so control_plane_canary must retain the computed value under that name.
-    _, namespaced_stats = request_json(
-        # What: supply timeout to request_json; why: control_plane_canary binds this 10 value to request_json's timeout input.
-        base + "/upstream/compat/model-a/v1/stats", timeout=10
-    # What: complete the request_json call with timeout; why: control_plane_canary groups the supplied clauses as one request_json call before its value is consumed.
-    )
+    # What: establish a diagnostic boundary around namespaced upstream stats; why: a live proxy rejection must retain its private response body instead of collapsing to an opaque HTTP status.
+    try:
+        # What: request stats through the slash-namespaced alias; why: the control plane must prove longest-prefix alias resolution against the resident engine.
+        _, namespaced_stats = request_json(
+            # What: supply the bounded timeout to the stats request; why: qualification must not wait indefinitely on a broken upstream proxy.
+            base + "/upstream/compat/model-a/v1/stats", timeout=10
+        # What: complete the namespaced stats request; why: the returned mapping is validated with the remaining authenticated control-plane evidence.
+        )
+    # What: catch an HTTP rejection from the live proxy; why: the exact private error payload is required to distinguish path parsing, residency, and upstream failures.
+    except urllib.error.HTTPError as exc:
+        # What: read and decode the bounded rejection body; why: diagnostics must remain useful without allowing an unbounded error response into artifacts.
+        error_body = exc.read(64 * 1024).decode("utf-8", errors="replace")
+        # What: raise a contextual qualification error chained to the protocol failure; why: the harness must fail closed while preserving the actionable reason.
+        raise RuntimeError(f"namespaced stats HTTP {exc.code}: {error_body}") from exc
     # What: compute routed raw and routed from request json and base and router and models and 10; why: artifacts control router models json write bytes routed raw later reads routed raw and routed, so control_plane_canary must retain the computed value under that name.
     routed_raw, routed = request_json(base + "/router/models", timeout=10)
     # What: compute profiles raw and profiles from request json and base and router and profiles and 10; why: artifacts control router profiles json write bytes profiles raw later reads profiles raw and profiles, so control_plane_canary must retain the computed value under that name.
@@ -1437,7 +1487,7 @@ def capture_hardware(base: str, artifacts: Path, label: str) -> dict:
     # What: gate on isinstance and engine and dict and memory before runtime error; why: capture_hardware admits runtime error only for this predicate and excludes the opposite state.
     if not isinstance(engine, dict) or not isinstance(memory, dict):
         # What: raise RuntimeError for the caller; why:  capture_hardware stops this rejected path before it can mutate state, dispatch work, or report success.
-        raise RuntimeError("router hardware observation has an invalid shape")
+        raise RuntimeError("router hardware observation has an invalid shape")  # noqa: TRY004 -- malformed remote telemetry is an operational failure.
     # What: gate on get and isinstance and int and engine before runtime error; why: capture_hardware admits runtime error only for this predicate and excludes the opposite state.
     if (
         # What: call engine.get with running; why: capture_hardware invokes engine.get while performing or not isinstance engine get pid int; the call advances that operation through its result or side effect.
@@ -1602,6 +1652,26 @@ def stop_detached_engine(pid: int, port: int) -> None:
     raise RuntimeError("detached test-owned engine survived cleanup")
 
 
+# What: discover the exact engine process currently owned by the temporary daemon; why: failure cleanup must not leak a model process that consumes unified memory after the daemon exits.
+def running_engine_identity(base: str) -> tuple[int, int] | None:
+    # What: query the daemon's authoritative engine status; why: process cleanup must use the manager-recorded PID and listener rather than broad process matching.
+    try:
+        # What: retain the decoded engine status response; why: validated running state, PID, and port are all required before a process can be treated as test-owned.
+        _, engine = request_json(base + "/engine/status", timeout=10)
+    # What: treat an unavailable daemon status endpoint as no capturable engine; why: cleanup continues through existing process-group and detached-engine safeguards.
+    except (OSError, ValueError, urllib.error.HTTPError):
+        # What: return no identity when ownership cannot be proven; why: cleanup must never signal an unverified process.
+        return None
+    # What: extract the manager-recorded process identity fields; why: both values are needed to terminate the process group and verify listener closure.
+    pid, port = engine.get("pid"), engine.get("port")
+    # What: accept only a running engine with valid integer identity fields; why: malformed or idle status must not be converted into an unsafe signal target.
+    if engine.get("running") is True and isinstance(pid, int) and isinstance(port, int):
+        # What: return the exact test-owned process identity; why: the caller can perform bounded targeted cleanup on every exit path.
+        return pid, port
+    # What: return no identity for an idle or invalid engine status; why: there is no proven process for cleanup to stop.
+    return None
+
+
 # What: define reload_conflict_canary around base and catalog path and model a and model b and api key; why: its direct callers call reload_conflict_canary for reload conflict canary and rely on this exact input and result contract.
 def reload_conflict_canary(
     # What: declare the base input for reload_conflict_canary; why: reload_conflict_canary consumes base during value status request json base router status, so callers must bind it with the other signature inputs.
@@ -1665,7 +1735,7 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
     # What: gate on isinstance and receipts before and list before runtime error; why: failed_switch_canary admits runtime error only for this predicate and excludes the opposite state.
     if not isinstance(receipts_before, list):
         # What: raise RuntimeError for the caller; why:  failed_switch_canary stops this rejected path before it can mutate state, dispatch work, or report success.
-        raise RuntimeError("accounting outbox response has an invalid shape")
+        raise RuntimeError("accounting outbox response has an invalid shape")  # noqa: TRY004 -- malformed remote state is an operational failure.
     # What: compute before ids from get and receipt and receipts before and isinstance; why: new receipts after ids before ids later reads before ids, so failed_switch_canary must retain the computed value under that name.
     before_ids = {
         # What: call receipt.get with receipt id; why:  failed_switch_canary invokes receipt.get while performing if isinstance receipt dict and isinstance; the call advances that operation through its result or side effect.
@@ -1749,7 +1819,7 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
     # What: gate on isinstance and receipts after and list before runtime error; why: failed_switch_canary admits runtime error only for this predicate and excludes the opposite state.
     if not isinstance(receipts_after, list):
         # What: raise RuntimeError for the caller; why:  failed_switch_canary stops this rejected path before it can mutate state, dispatch work, or report success.
-        raise RuntimeError("post-failure accounting outbox response has an invalid shape")
+        raise RuntimeError("post-failure accounting outbox response has an invalid shape")  # noqa: TRY004 -- malformed remote state is an operational failure.
     # What: compute after ids from get and receipt and receipts after and isinstance; why: new receipts after ids before ids later reads after ids, so failed_switch_canary must retain the computed value under that name.
     after_ids = {
         # What: call receipt.get with receipt id; why:  failed_switch_canary invokes receipt.get while performing if isinstance receipt dict and isinstance; the call advances that operation through its result or side effect.
@@ -1764,6 +1834,16 @@ def failed_switch_canary(base: str, model: str, restored_model: str) -> tuple[by
     if not new_receipts:
         # What: raise RuntimeError for the caller; why:  failed_switch_canary stops this rejected path before it can mutate state, dispatch work, or report success.
         raise RuntimeError("failed switch produced no new durable accounting receipt")
+    # What: read the restored engine status after rollback launch; why: router identity can be restored before the replacement process is actually ready to serve traffic.
+    _, restored_engine = request_json(base + "/engine/status", timeout=30)
+    # What: extract the restored engine listener port; why: readiness must be proven against the concrete replacement process rather than inferred from router metadata.
+    restored_port = restored_engine.get("port")
+    # What: reject a missing or invalid restored listener; why: waiting without an exact local port could probe the wrong process and create false recovery evidence.
+    if restored_engine.get("running") is not True or not isinstance(restored_port, int):
+        # What: stop qualification when rollback has no concrete running listener; why: a metadata-only rollback is not a usable restored service.
+        raise RuntimeError("failed replacement rollback has no running engine listener")
+    # What: wait for the restored process readiness endpoint; why: a launched process may still be loading model weights when router state already names it active.
+    wait_json(f"http://127.0.0.1:{restored_port}/ready", seconds=600)
     # What: compute restored raw and restored from canary and base and restored model and false; why: return failure raw restored raw later reads restored raw and restored, so failed_switch_canary must retain the computed value under that name.
     restored_raw, restored = canary(base, restored_model, direct=False)
     # What: return failure raw and restored raw and model and restored model from failed_switch_canary; why: failed_switch_canary exposes failure raw and restored raw and model and restored model so its caller can continue with the function\'s computed outcome.
@@ -1899,7 +1979,7 @@ def persistent_capacity_canary(
 # What: define ttl_eviction_canary around base and catalog path and model a and model b and seconds and api key; why: its direct callers call ttl_eviction_canary for ttl eviction canary and rely on this exact input and result contract.
 def ttl_eviction_canary(
     # What: declare the base input for ttl_eviction_canary; why: ttl_eviction_canary consumes base during value before request json base router status, so callers must bind it with the other signature inputs.
-    base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 45,
+    base: str, catalog_path: Path, model_a: str, model_b: str, *, seconds: float = 180,
     # What: declare the api key input for ttl_eviction_canary; why: ttl_eviction_canary consumes api key during native catalog text model a model b ttl s api key api key, so callers must bind it with the other signature inputs.
     api_key: str | None = None,
 # What: complete the enclosing predicate with dict; why: ttl_eviction_canary groups the supplied clauses as one enclosing predicate expression before its value is consumed.
@@ -1913,13 +1993,21 @@ def ttl_eviction_canary(
     # What: gate on isinstance and prior evictions and int before runtime error; why: ttl_eviction_canary admits runtime error only for this predicate and excludes the opposite state.
     if not isinstance(prior_evictions, int):
         # What: raise RuntimeError for the caller; why:  ttl_eviction_canary stops this rejected path before it can mutate state, dispatch work, or report success.
-        raise RuntimeError("router status lacks eviction counter")
+        raise RuntimeError("router status lacks eviction counter")  # noqa: TRY004 -- malformed remote status is an operational failure.
     # What: compute and unloaded from request json and base and router and unload and 45; why: value reloaded request json base router reload later reads and unloaded, so ttl_eviction_canary must retain the computed value under that name.
     _, unloaded = request_json(base + "/router/unload", {}, timeout=45)
     # What: gate on get and unloaded before runtime error; why: ttl_eviction_canary admits runtime error only for this predicate and excludes the opposite state.
     if unloaded.get("unloaded") is not True:
         # What: raise RuntimeError for the caller; why:  ttl_eviction_canary stops this rejected path before it can mutate state, dispatch work, or report success.
         raise RuntimeError("could not unload the prior resident before TTL qualification")
+    # What: extract the router state returned by explicit unload; why: manual unload is itself an eviction and advances the counter before the TTL event under test.
+    unloaded_router = unloaded.get("router")
+    # What: validate and retain the post-unload eviction baseline; why: the TTL assertion must measure one additional automatic eviction rather than compare against stale pre-unload accounting.
+    if not isinstance(unloaded_router, dict) or unloaded_router.get("evictions") != prior_evictions + 1:
+        # What: reject inconsistent explicit-unload accounting; why: a missing baseline would let the later TTL counter produce ambiguous evidence.
+        raise RuntimeError("explicit unload did not advance eviction accounting exactly once")
+    # What: retain the exact post-unload counter; why: the automatic TTL event must increment this current baseline by one.
+    unloaded_evictions = unloaded_router["evictions"]
     # What: call catalog_path.write_text with native catalog text and model a and model b and api key and 2; why: ttl_eviction_canary invokes catalog_path.write_text while performing native catalog text model a model b ttl s api key api key; the call advances that operation through its result or side effect.
     catalog_path.write_text(
         # What: preserve the exact native catalog text model a model b ttl s api key api key literal fragment; why: ttl_eviction_canary passes this fragment verbatim through native_catalog_text(model_a, model_b, ttl_s=2, api_key=api_key), encodin, because changing it would alter a protocol payload, serialized fixture.
@@ -1940,6 +2028,12 @@ def ttl_eviction_canary(
     if loaded.get("profile") != "model-a" or not isinstance(port, int) or not 1 <= port <= 65535:
         # What: raise RuntimeError for the caller; why:  ttl_eviction_canary stops this rejected path before it can mutate state, dispatch work, or report success.
         raise RuntimeError("TTL qualification did not activate a concrete model-a engine")
+    # What: complete one routed request against the TTL-enabled resident; why: idle eviction is scheduled when request ownership is released, not merely when an operator preloads a model.
+    _, ttl_completion = canary(base, "model-a", direct=False)
+    # What: reject a failed TTL trigger completion; why: eviction evidence is only meaningful after the resident has served and released real inference work.
+    if ttl_completion.get("passed") is not True:
+        # What: stop the TTL gate when the trigger request fails; why: waiting for eviction without proven prior use would test the wrong lifecycle contract.
+        raise RuntimeError("TTL qualification trigger completion failed")
     # What: compute deadline from seconds and monotonic and time; why: while time monotonic deadline later reads deadline, so ttl_eviction_canary must retain the computed value under that name.
     deadline = time.monotonic() + seconds
     # What: compute status from the named fixture input; why: status request json base router status timeout later reads status, so ttl_eviction_canary must retain the computed value under that name.
@@ -1949,13 +2043,13 @@ def ttl_eviction_canary(
         # What: compute status from request json and base and 1 and router and status; why: if status get active profile is and status get later reads status, so ttl_eviction_canary must retain the computed value under that name.
         status = request_json(base + "/router/status", timeout=3)[1]
         # What: gate on get and prior evictions and status before the computed value; why: ttl_eviction_canary admits the computed value only for this predicate and excludes the opposite state.
-        if status.get("activeProfile") is None and status.get("evictions") == prior_evictions + 1:
+        if status.get("activeProfile") is None and status.get("evictions") == unloaded_evictions + 1:
             # What: apply the break portion of the enclosing predicate; why: this clause remains in ttl_eviction_canary\'s enclosing expression so its grouping and evaluation order stay intact.
             break
         # What: call time.sleep with 0 1; why: ttl_eviction_canary invokes time.sleep while performing if status is or status get active profile; the call advances that operation through its result or side effect.
         time.sleep(0.1)
     # What: gate on status and get and prior evictions before timeout error; why: ttl_eviction_canary admits timeout error only for this predicate and excludes the opposite state.
-    if status is None or status.get("activeProfile") is not None or status.get("evictions") != prior_evictions + 1:
+    if status is None or status.get("activeProfile") is not None or status.get("evictions") != unloaded_evictions + 1:
         # What: raise TimeoutError for the caller; why: ttl_eviction_canary stops this rejected path before it can mutate state, dispatch work, or report success.
         raise TimeoutError("idle TTL did not evict the temporary resident engine")
     # What: call require_listener_closed with port; why: ttl_eviction_canary invokes require_listener_closed while performing return; the call advances that operation through its result or side effect.
@@ -1994,10 +2088,10 @@ def native_catalog_text(
     common_args = [
         # What: apply the host served model name model id portion of common args; why: native_catalog_text uses this clause to evaluate common args as one grouped value.
         "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
-        # What: apply the max seq len override num tokens max prefill length portion of common args; why: native_catalog_text uses this clause to evaluate common args as one grouped value.
-        "--max-seq-len-override", "4096", "--num-tokens", "4096", "--max-prefill-length", "512",
-        # What: apply the max running requests graph memory ratio portion of common args; why: native_catalog_text uses this clause to evaluate common args as one grouped value.
-        "--max-running-requests", "1", "--graph", "1", "--memory-ratio", "0.75",
+        # What: bound sequence, cache, and prefill capacity for the 24 GiB gfx1150 host; why: both qualified checkpoints need deterministic headroom instead of an avoidable recurrent-state allocation failure.
+        "--max-seq-len-override", "1024", "--num-tokens", "1024", "--max-prefill-length", "256",
+        # What: use one captured request, the naive cache, and a measured memory ratio; why: LAN-215 must avoid unsupported hybrid-state over-allocation while preserving enough memory for both exact artifacts.
+        "--max-running-requests", "1", "--graph", "1", "--cache-type", "naive", "--memory-ratio", "0.90",
         # What: apply the attention backend triton moe backend fused disable pynccl portion of common args; why: native_catalog_text uses this clause to evaluate common args as one grouped value.
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
     # What: complete the common_args collection with host and 127 0 0 1 and served model name and model id; why: native_catalog_text groups the supplied clauses as one common_args collection before its value is consumed.
@@ -2129,6 +2223,11 @@ def main() -> int:
     # What: register the parser add argument allow maintenance action store true required True command-line option; why: main validates this operator input before starting the qualification sequence.
     parser.add_argument("--allow-maintenance", action="store_true", required=True)
     # What: preserve the exact parser add argument daemon port type int default literal fragment; why: main passes this fragment verbatim through parser.add_argument("--daemon-port", type=int, default=1964), because changing it would alter a protocol payload, serialized fixture, or public message.
+    # What: register protected-service ownership scope; why: the harness must stop and restore the exact manager that owns the workload.
+    parser.add_argument("--protected-service-scope", choices=("system", "user"), default="system")
+    # What: register an optional watchdog maintenance marker path; why: a protected-service timer must not race the harness by restarting the workload during an owned GPU window.
+    parser.add_argument("--protected-maintenance-marker")
+    # What: preserve the temporary daemon port option; why: callers still need a collision-free loopback control-plane endpoint.
     parser.add_argument("--daemon-port", type=int, default=1964)
     # What: compute args from parse args and parser; why: require expected hostname args expected hostname later reads args, so main must retain the computed value under that name.
     args = parser.parse_args()
@@ -2152,7 +2251,8 @@ def main() -> int:
         (artifacts / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     # What: compute service from sudo and n and systemctl; why: subprocess run service is active quiet args protected service check later reads service, so main must retain the computed value under that name.
-    service = ["sudo", "-n", "systemctl"]
+    # What: select the exact protected-service manager; why: maintenance and restoration must use the unit's real ownership scope.
+    service = protected_service_command(args.protected_service_scope)
     # What: execute subprocess run service is active quiet args protected service check True; why: the enclosing symbol requires this operation for its concrete qualification or routing path.
     subprocess.run(service + ["is-active", "--quiet", args.protected_service], check=True)
     # What: compute baseline raw and baseline from request json and protected url and args and health and 10; why: artifacts protected baseline health json write bytes baseline raw later reads baseline raw and baseline, so main must retain the computed value under that name.
@@ -2215,6 +2315,10 @@ def main() -> int:
     detached_engine: tuple[int, int] | None = None
     # What: compute maintenance from false; why: maintenance later reads maintenance, so main must retain the computed value under that name.
     maintenance = False
+    # What: resolve the optional watchdog marker path; why: lifecycle cleanup must track the exact marker that this harness may own.
+    maintenance_marker = Path(args.protected_maintenance_marker) if args.protected_maintenance_marker else None
+    # What: initialize marker ownership as false; why: cleanup must never remove a marker that predated this qualification run.
+    maintenance_marker_owned = False
     # What: compute final engine port from the named fixture input; why: final engine port direct row hardware engine port later reads final engine port, so main must retain the computed value under that name.
     final_engine_port: int | None = None
     # What: compute base from daemon port and args and http; why: configure native auth base native api key later reads base, so main must retain the computed value under that name.
@@ -2257,6 +2361,16 @@ def main() -> int:
             wait_json(base + "/router/status", seconds=30)
             # What: compute maintenance from true; why: if maintenance later reads maintenance, so main must retain the computed value under that name.
             maintenance = True
+            # What: gate marker creation on an explicitly configured path; why: hosts without a watchdog marker preserve their existing lifecycle behavior.
+            if maintenance_marker is not None:
+                # What: fail if the marker already exists; why: another operator or process may own maintenance and must not be overridden.
+                if maintenance_marker.exists():
+                    # What: raise a lifecycle ownership error before stopping the service; why: qualification must fail closed when exclusive maintenance cannot be proven.
+                    raise RuntimeError("protected-service maintenance marker already exists")
+                # What: create the marker with private run context; why: LAN-215's health watchdog must suppress automatic restarts for this exact maintenance window.
+                maintenance_marker.write_text("FreeToken native-router qualification owns this maintenance window.\n", encoding="utf-8")
+                # What: record marker ownership after successful creation; why: only an owned marker may be removed during restoration.
+                maintenance_marker_owned = True
             # What: execute subprocess run service stop args protected service check True timeout 90; why: the enclosing symbol requires this operation for its concrete qualification or routing path.
             subprocess.run(service + ["stop", args.protected_service], check=True, timeout=90)
 
@@ -2267,6 +2381,8 @@ def main() -> int:
             if loaded.get("profile") != "model-a" or not isinstance(loaded.get("port"), int):
                 # What: raise RuntimeError for the caller; why:  main stops this rejected path before it can mutate state, dispatch work, or report success.
                 raise RuntimeError("native management load did not return a concrete model-a target")
+            # What: wait for the router-owned engine's authoritative readiness endpoint; why: a successful lifecycle admission may precede model initialization and must not be mistaken for an inference-ready resident.
+            wait_json(f"http://127.0.0.1:{loaded['port']}/ready", seconds=600)
             # What: compute activation count from validate routed trial and loaded and router and model a and 0; why: activation count validate routed trial later reads activation count, so main must retain the computed value under that name.
             activation_count = validate_routed_trial(
                 # What: supply alias to validate_routed_trial; why: main binds this model a value to validate_routed_trial's alias input.
@@ -2522,13 +2638,15 @@ def main() -> int:
             # What: complete the result entry expression with result passed len result trials equals 4 and all; why: main groups the supplied clauses as one result entry expression before its value is consumed.
             )
     # What: handle base exception by result error repr exc; why: main converts that failure into this concrete recovery, response, or cleanup behavior.
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001 -- cleanup must record interrupts as qualification failures.
         # What: compute result entry from repr and exc; why: result cleanup error repr exc later reads result entry, so  main must retain the computed value under that name.
         result["error"] = repr(exc)
     # What: run if daemon is not on every exit path; why: main performs this cleanup after success, rejection, or exception so resources and accounting cannot remain stranded.
     finally:
         # What: gate on daemon before request json and oserror and value error and httperror and base; why: main admits request json and oserror and value error and httperror and base only for this predicate and excludes the opposite state.
         if daemon is not None:
+            # What: capture any daemon-owned engine before shutting down its control plane; why: early failures previously lost the only exact PID and leaked a memory-consuming model process.
+            cleanup_engine = running_engine_identity(base)
             # What: establish the handler boundary for the protected operation; why: main routes failures to oserror and value error and httperror and error and urllib while preserving cleanup and success flow.
             try:
                 # What: preserve the exact request json base shutdown timeout literal fragment; why: main passes this fragment verbatim through request_json(base + "/shutdown", {}, timeout=45), because changing it would alter a protocol payload, serialized fixture, or public message.
@@ -2541,6 +2659,10 @@ def main() -> int:
             try:
                 # What: call stop_process_group with daemon; why: main invokes stop_process_group while performing if daemon poll is; the call advances that operation through its result or side effect.
                 stop_process_group(daemon)
+                # What: stop the captured test-owned engine after daemon termination; why: the first daemon intentionally supports re-adoption and therefore does not automatically stop serve on every early failure.
+                if cleanup_engine is not None:
+                    # What: terminate and verify the exact captured process group and listener; why: subsequent qualification and protected-service restoration require all test-owned unified memory to be released.
+                    stop_detached_engine(*cleanup_engine)
                 # What: gate on poll and daemon before runtime error; why: main admits runtime error only for this predicate and excludes the opposite state.
                 if daemon.poll() is None:
                     # What: raise RuntimeError for the caller; why:  main stops this rejected path before it can mutate state, dispatch work, or report success.
@@ -2593,12 +2715,24 @@ def main() -> int:
                 restored_raw, _ = canary(args.protected_url, protected_model, direct=True)
                 # What: preserve the exact artifacts protected restored response sse write bytes restored raw literal fragment; why: main passes this fragment verbatim through (artifacts / "protected-restored-response.sse").write_bytes(restored_raw, because changing it would alter a protocol payload, serialized fixtur.
                 (artifacts / "protected-restored-response.sse").write_bytes(restored_raw)
+                # What: remove the owned watchdog marker after authoritative health and inference; why: normal automatic protection should resume only after restoration is proven.
+                if maintenance_marker_owned and maintenance_marker is not None:
+                    # What: unlink the exact owned marker; why: a completed maintenance window must not leave watchdog recovery disabled.
+                    maintenance_marker.unlink(missing_ok=True)
+                    # What: clear marker ownership after removal; why: later cleanup must not repeat or misreport the action.
+                    maintenance_marker_owned = False
                 # What: compute result entry from true; why: result restore error repr exc later reads result entry, so main must retain the computed value under that name.
                 result["restored"] = True
             # What: handle base exception by result restore error repr exc; why: main converts that failure into this concrete recovery, response, or cleanup behavior.
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001 -- cleanup must record interrupts as qualification failures.
                 # What: compute result entry from repr and exc; why: return if result get passed and result later reads result entry, so main must retain the computed value under that name.
                 result["restoreError"] = repr(exc)
+                # What: remove an owned marker after a failed explicit restoration attempt; why: the existing watchdog must regain permission to recover the protected service.
+                if maintenance_marker_owned and maintenance_marker is not None:
+                    # What: unlink the exact owned marker without masking the restoration error; why: recovery enablement is safer than preserving a stale maintenance lock.
+                    maintenance_marker.unlink(missing_ok=True)
+                    # What: clear marker ownership after emergency release; why: saved state must reflect that watchdog suppression no longer remains.
+                    maintenance_marker_owned = False
         # What: call save with the declared inputs; why: main invokes save while performing return if result get passed and result; the call advances that operation through its result or side effect.
         save()
     # What: return get and result and 0 and 1 and passed from main; why: main exposes get and result and 0 and 1 and passed so its caller can continue with the function\'s computed outcome.

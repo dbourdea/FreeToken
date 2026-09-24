@@ -15,14 +15,20 @@ from __future__ import annotations
 
 # What: import json for request model using json; why: request_model uses json loads, making that imported dependency available to its named operation.
 import json
+
 # What: import re for open upstream using re; why: open_upstream uses re fullmatch, making that imported dependency available to its named operation.
 import re
-# What: import dataclass for module initialization using dataclasses and dataclass; why: module initialization uses the dataclass annotation in module initialization, making that imported dependency available to its named operation.
-from dataclasses import dataclass
+
 # What: import iterator and mapping for chunks and forward headers using typing and iterator and mapping; why: chunks and forward_headers uses the iterator annotation in chunks and the mapping annotation in forward headers, making that imported dependency available to its named operation.
-from typing import Iterator, Mapping
+from collections.abc import Iterator, Mapping
+
+# What: import dataclass and field for response state using dataclasses; why: UpstreamResponse needs generated initialization plus an internal non-constructor cancellation flag.
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+
 # What: import httperror for open upstream using urllib and error and httperror; why: open_upstream uses the httperror annotation in open upstream, making that imported dependency available to its named operation.
 from urllib.error import HTTPError
+
 # What: import request and urlopen for open upstream using urllib and request and request and urlopen; why: open_upstream uses request and urlopen, making that imported dependency available to its named operation.
 from urllib.request import Request, urlopen
 
@@ -223,6 +229,8 @@ class UpstreamResponse:
     headers: dict[str, str]
     # What: compute raw from the named fixture input; why: chunk self raw read size later reads raw, so inference_proxy must retain the computed value under that name.
     raw: object
+    # What: track whether an explicit close has interrupted the response; why: a concurrent socket close may surface as a low-level read error that represents expected cancellation rather than a server failure.
+    _closed: bool = dataclass_field(default=False, init=False, repr=False)
 
     # What: define chunks around size; why: its direct callers call chunks for chunks and rely on this exact input and result contract.
     def chunks(self, size: int = 64 * 1024) -> Iterator[bytes]:
@@ -230,8 +238,18 @@ class UpstreamResponse:
         try:
             # What: iterate across the computed value to perform chunk and read and size and raw; why: chunks repeats the body only while or for the loop header admits an iteration.
             while True:
-                # What: compute chunk from read and size and raw; why: if not chunk later reads chunk, so chunks must retain the computed value under that name.
-                chunk = self.raw.read(size)
+                # What: read the next upstream block while distinguishing cancellation races; why: closing Python's HTTP response from another thread can invalidate its internal file pointer during this call.
+                try:
+                    # What: retain the next raw response block; why: non-empty data must continue through the streaming iterator unchanged.
+                    chunk = self.raw.read(size)
+                # What: handle close-induced low-level stream state errors; why: expected cancellation should terminate cleanly while unrelated transport defects still propagate.
+                except (AttributeError, ValueError):
+                    # What: re-raise when no explicit close occurred; why: only a proven cancellation race may be converted into normal end-of-stream behavior.
+                    if not self._closed:
+                        # What: propagate the unexpected read failure; why: callers must retain visibility into genuine upstream corruption or implementation defects.
+                        raise
+                    # What: end iteration after a concurrent explicit close; why: cancellation already owns cleanup and should not emit an ASGI exception traceback.
+                    return
                 # What: gate on chunk before the computed value; why: chunks admits the computed value only for this predicate and excludes the opposite state.
                 if not chunk:
                     # What: apply the break portion of the enclosing predicate; why: this clause remains in chunks\'s enclosing expression so its grouping and evaluation order stay intact.
@@ -245,6 +263,8 @@ class UpstreamResponse:
 
     # What: define close around the current object state; why: its direct callers call close for close and rely on this exact input and result contract.
     def close(self) -> None:
+        # What: mark the response closed before touching the raw transport; why: a blocked reader awakened by raw.close can observe cancellation before it raises from invalid internal state.
+        self._closed = True
         # What: compute close from getattr and raw and close; why: if close is not later reads close, so close must retain the computed value under that name.
         close = getattr(self.raw, "close", None)
         # What: gate on close before close; why: close admits close only for this predicate and excludes the opposite state.

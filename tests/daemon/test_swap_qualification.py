@@ -2,21 +2,28 @@
 # What: document cpu tests of cancellation evidence gates in the test_swap_qualification docstring; why: introspection and maintainers read this exact docstring fragment to understand test swap qualification behavior without executing it.
 
 # What: import importlib util for qualifier using importlib and util; why: qualifier uses importlib util spec from file location, making that imported dependency available to its named operation.
-import importlib.util
 # What: import base64 for do get using base64; why: do_GET uses base64 b64encode, making that imported dependency available to its named operation.
 import base64
+import importlib.util
+
 # What: import io for test cancellation requires terminal abort without restart using io; why: test_cancellation_requires_terminal_abort_without_restart uses io bytes io, making that imported dependency available to its named operation.
 import io
+
 # What: import json for test native periodic performance gate rejects unavailable or identifying rows using json; why: test_native_periodic_performance_gate_rejects_unavailable_or_identifying_rows uses json loads, making that imported dependency available to its named operation.
 import json
+
 # What: import socket for test native router benchmark requires final engine listener to close using socket; why: test_native_router_benchmark_requires_final_engine_listener_to_close uses socket socket, making that imported dependency available to its named operation.
 import socket
+
 # What: import threading for test cancellation closes real local http stream using threading; why: test_cancellation_closes_real_local_http_stream uses threading event, making that imported dependency available to its named operation.
 import threading
+
 # What: import time for fake canary using time; why: fake_canary uses time sleep, making that imported dependency available to its named operation.
 import time
+
 # What: arrange from http server import BaseHTTPRequestHandler ThreadingHTTPServer for the scenario; why: test swap qualification requires this concrete input or helper state before exercising the behavior under test.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 # What: import path for qualifier using pathlib and path; why: qualifier uses path, making that imported dependency available to its named operation.
 from pathlib import Path
 
@@ -554,6 +561,8 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
         ]},
     # What: arrange the iter call with ordered positional inputs; why: test_native_router_failed_switch_canary_requires_rollback_and_restored_completion groups the supplied clauses as one iter call before its value is consumed.
     ))
+    # What: collect readiness URLs observed by the test double; why: the regression must prove rollback waits for the concrete restored engine before routing a completion.
+    readiness_waits = []
 
     # What: define the request_json test helper around url and body; why: the native router failed switch canary requires rollback and restored completion scenario calls this helper to produce or observe the exact behavior checked by its assertions.
     def request_json(url, body=None, **kwargs):
@@ -565,6 +574,10 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
         if url.endswith("/accounting/pending"):
             # What: return next and pending from the request_json test helper; why: the native router failed switch canary requires rollback and restored completion scenario uses this helper result in its subsequent act or assertion.
             return b"{}", next(pending)
+        # What: return the concrete restored engine listener for status requests; why: failed-switch recovery now gates the routed canary on process readiness.
+        if url.endswith("/engine/status"):
+            # What: provide a running local engine with a deterministic port; why: the test can verify that readiness targets the exact replacement process.
+            return b"{}", {"running": True, "port": 49187}
         # What: assert that url endswith router load and body equals name model invalid; why: this assertion protects the native router failed switch canary requires rollback and restored completion regression after the test's arranged inputs and exercised call.
         assert url.endswith("/router/load") and body == {"name": "model-invalid"}
         # What: arrange the helper to raise raise native router qualifier urllib error HTTPError; why: test native router failed switch canary exercises the concrete failure path rather than a successful substitute.
@@ -576,6 +589,16 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
 
     # What: arrange the exact monkeypatch setattr native router qualifier request json request json fixture fragment; why: the native router failed switch canary requires rollback and restored completion scenario feeds this byte-preserved fragment through monkeypatch.setattr(native_router_qualifier, "request_json", re.
     monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
+    # What: replace readiness polling with a deterministic recorder; why: the unit test validates the target URL without opening a real listener or sleeping.
+    monkeypatch.setattr(
+        # What: bind the qualifier helper selected for replacement; why: the production wait must be intercepted at its module lookup point.
+        native_router_qualifier,
+        # What: name the readiness helper being replaced; why: only rollback readiness polling should be converted into a test observation.
+        "wait_json",
+        # What: append each requested URL and timeout to the observation list; why: exact endpoint and bounded-wait behavior are part of the recovery contract.
+        lambda url, *, seconds: readiness_waits.append((url, seconds)),
+    # What: close the monkeypatch call; why: this completes the deterministic readiness test setup.
+    )
     # What: act by calling monkeypatch.setattr with native router qualifier and canary and passed and true; why: the native router failed switch canary requires rollback and restored completion scenario observes the monkeypatch.setattr return value during native router qualifier canary.
     monkeypatch.setattr(
         # What: arrange the exact native router qualifier canary fixture fragment; why: the native router failed switch canary requires rollback and restored completion scenario feeds this byte-preserved fragment through native_router_qualifier, "canary" before asserting its protocol or parser result.
@@ -596,6 +619,8 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
     assert failure_raw == failure
     # What: assert that restored raw equals b data done n n; why: this assertion protects the native router failed switch canary requires rollback and restored completion regression after the test's arranged inputs and exercised call.
     assert restored_raw == b"data: [DONE]\n\n"
+    # What: require a bounded wait against the restored engine's direct readiness endpoint; why: router metadata alone previously allowed a premature 502 canary.
+    assert readiness_waits == [("http://127.0.0.1:49187/ready", 600)]
     # What: assert the expected observation == outcome; why: test swap qualification test native router failed switch canary requires rollback and restored completion protects its regression by requiring this observable result after the exercised behavior.
     assert observation == {
         # What: arrange failedProfile model invalid restoredProfile model a for the scenario; why: test swap qualification test native router failed switch canary requires rollback and restored completion requires this concrete input or helper state before exercising the behavior under test.
@@ -612,6 +637,35 @@ def test_native_router_failed_switch_canary_requires_rollback_and_restored_compl
     }
 
 
+# What: define a focused running-engine identity validation test; why: failure cleanup must target only a daemon-proven process and listener.
+def test_running_engine_identity_requires_exact_running_process(native_router_qualifier, monkeypatch):
+    # What: provide a valid running engine status response; why: the helper should preserve the exact process group and listener selected for bounded cleanup.
+    monkeypatch.setattr(
+        # What: bind the qualifier module under test; why: request lookup occurs in this module's global namespace.
+        native_router_qualifier,
+        # What: replace the JSON request helper; why: the test should not require a live daemon endpoint.
+        "request_json",
+        # What: return a deterministic running engine identity; why: successful ownership capture can be asserted without process side effects.
+        lambda url, **kwargs: (b"{}", {"running": True, "pid": 321, "port": 49187}),
+    # What: close the first monkeypatch call; why: this completes the valid running-engine test setup before assertions execute.
+    )
+    # What: require exact PID and port preservation; why: cleanup must not broaden or rewrite the manager-owned identity.
+    assert native_router_qualifier.running_engine_identity("http://test") == (321, 49187)
+
+    # What: replace status with an idle response that still contains stale identifiers; why: non-running metadata must never authorize a signal.
+    monkeypatch.setattr(
+        # What: bind the qualifier module for the second case; why: the same helper lookup point is exercised with rejected state.
+        native_router_qualifier,
+        # What: replace the JSON request helper again; why: this case models an idle daemon after engine exit.
+        "request_json",
+        # What: return stale identifiers with running false; why: the helper must fail closed on lifecycle state before trusting numeric fields.
+        lambda url, **kwargs: (b"{}", {"running": False, "pid": 321, "port": 49187}),
+    # What: close the second monkeypatch call; why: this completes the idle-engine rejection setup before its assertion executes.
+    )
+    # What: reject the stale idle identity; why: cleanup must not signal a process that may have been reused by the operating system.
+    assert native_router_qualifier.running_engine_identity("http://test") is None
+
+
 # What: define the test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener test around native router qualifier and monkeypatch and tmp path; why: this test groups the arrange, act, and assertions that protect the native router ttl canary reloads temporary catalog and closes listener outcome.
 def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
     # What: arrange native router qualifier monkeypatch tmp path for the scenario; why: test native router ttl canary reloads temporary requires this concrete input or helper state before exercising the behavior under test.
@@ -622,8 +676,8 @@ def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
     statuses = iter((
         # What: arrange the evictions field as 2; why: test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener carries evictions through statuses into return b next statuses.
         {"evictions": 2, "activeProfile": "model-a"},
-        # What: arrange the evictions field as 3; why: test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener carries evictions through statuses into return b next statuses.
-        {"evictions": 3, "activeProfile": None},
+        # What: arrange the eviction counter after explicit unload and automatic TTL eviction; why: the final status must include both independently accounted lifecycle events.
+        {"evictions": 4, "activeProfile": None},
     # What: arrange the iter call with ordered positional inputs; why: test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener groups the supplied clauses as one iter call before its value is consumed.
     ))
 
@@ -636,7 +690,13 @@ def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
         # What: arrange if url endswith router unload for the scenario; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener requires this concrete input or helper state before exercising the behavior under test.
         if url.endswith("/router/unload"):
             # What: arrange the helper response as b unloaded true unloaded True; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener feeds this result into the behavior whose outcome is asserted.
-            return b'{"unloaded":true}', {"unloaded": True}
+            return b'{"unloaded":true}', {
+                # What: report successful explicit unload; why: the TTL fixture must proceed to temporary catalog activation.
+                "unloaded": True,
+                # What: report the router's post-unload counter; why: explicit unload is an eviction and becomes the baseline for the later automatic TTL increment.
+                "router": {"evictions": 3},
+            # What: close the explicit-unload response mapping; why: the fixture returns one coherent management response.
+            }
         # What: arrange if url endswith router reload for the scenario; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener requires this concrete input or helper state before exercising the behavior under test.
         if url.endswith("/router/reload"):
             # What: arrange the helper response as b reloaded true reloaded True; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener feeds this result into the behavior whose outcome is asserted.
@@ -648,10 +708,22 @@ def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
 
     # What: arrange closed as the fixture input; why: the native router ttl canary reloads temporary catalog and closes listener test consumes this named precondition before exercising the behavior.
     closed = []
+    # What: collect routed canaries used to trigger TTL scheduling; why: the test must prove eviction follows a completed request rather than preload alone.
+    ttl_canaries = []
     # What: arrange the exact monkeypatch setattr native router qualifier request json request json fixture fragment; why: the native router ttl canary reloads temporary catalog and closes listener scenario feeds this byte-preserved fragment through monkeypatch.setattr(native_router_qualifier, "request_json", request_.
     monkeypatch.setattr(native_router_qualifier, "request_json", request_json)
     # What: arrange monkeypatch setattr native router qualifier require listener closed closed append for the scenario; why: test native router ttl canary reloads temporary catalog and closes listener requires this concrete input or helper state before exercising the behavior under test.
     monkeypatch.setattr(native_router_qualifier, "require_listener_closed", closed.append)
+    # What: replace the routed canary with a deterministic successful trigger; why: the unit test validates lifecycle ordering without running inference.
+    monkeypatch.setattr(
+        # What: bind the qualifier module under test; why: ttl_eviction_canary resolves its canary helper from this module.
+        native_router_qualifier,
+        # What: select the routed canary helper; why: only the request that releases TTL ownership should be intercepted.
+        "canary",
+        # What: record the exact routed request and return success; why: the assertion can prove model and route selection while allowing eviction polling to proceed.
+        lambda base, model, *, direct: (ttl_canaries.append((base, model, direct)) or b"done", {"passed": True}),
+    # What: close the canary monkeypatch call; why: this completes deterministic TTL trigger setup.
+    )
     # What: arrange catalog as tmp path and models and toml; why: the native router ttl canary reloads temporary catalog and closes listener test consumes this named precondition before exercising the behavior.
     catalog = tmp_path / "models.toml"
     # What: act by calling native_router_qualifier.ttl_eviction_canary and capture observation; why: the native router ttl canary reloads temporary catalog and closes listener test asserts the response, state, or failure produced by this call.
@@ -663,6 +735,8 @@ def test_native_router_ttl_canary_reloads_temporary_catalog_and_closes_listener(
 
     # What: assert that closed equals 24567; why: this assertion protects the native router ttl canary reloads temporary catalog and closes listener regression after the test's arranged inputs and exercised call.
     assert closed == [24567]
+    # What: require one routed model-a completion before eviction polling; why: the router schedules idle TTL only after request ownership is released.
+    assert ttl_canaries == [("http://test", "model-a", False)]
     # What: assert the expected observation == outcome; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener protects its regression by requiring this observable result after the exercised behavior.
     assert observation == {
         # What: arrange profile model a ttlSeconds 2 port 24567 for the scenario; why: test swap qualification test native router ttl canary reloads temporary catalog and closes listener requires this concrete input or helper state before exercising the behavior under test.
@@ -1067,6 +1141,8 @@ def test_native_router_credentials_are_scoped_to_the_temporary_origin(
     native_router_qualifier.request_json("http://protected.test:8000/health")
     # What: arrange the exact native router qualifier request json http native test v1 models fixture fragment; why: the native router credentials are scoped to the temporary origin scenario feeds this byte-preserved fragment through native_router_qualifier.request_json("http://native.test:24567/v1/models before asser.
     native_router_qualifier.request_json("http://native.test:24567/v1/models")
+    # What: submit one body-bearing management request; why: the helper must distinguish real JSON payloads from empty authenticated reads.
+    native_router_qualifier.request_json("http://native.test:1964/router/load", {"name": "model-a"})
 
     # What: assert that requests 0 get header authorization equals bearer private key; why: this assertion protects the native router credentials are scoped to the temporary origin regression after the test's arranged inputs and exercised call.
     assert requests[0].get_header("Authorization") == "Bearer private-key"
@@ -1074,6 +1150,10 @@ def test_native_router_credentials_are_scoped_to_the_temporary_origin(
     assert requests[1].get_header("Authorization") is None
     # What: assert that requests 2 get header authorization is group delimiter; why: this assertion protects the native router credentials are scoped to the temporary origin regression after the test's arranged inputs and exercised call.
     assert requests[2].get_header("Authorization") is None
+    # What: require no content type on the authenticated empty GET; why: claiming an absent body is JSON causes the live router to reject otherwise valid upstream reads.
+    assert requests[0].get_header("Content-type") is None
+    # What: require the JSON content type on the body-bearing request; why: management writes still need explicit payload metadata for strict validation.
+    assert requests[3].get_header("Content-type") == "application/json"
 
 
 # What: define the test_native_router_control_plane_canary_requires_auth_and_captures_evidence test around native router qualifier and tmp path; why: this test groups the arrange, act, and assertions that protect the native router control plane canary requires auth and captures evidence outcome.
@@ -1948,3 +2028,28 @@ def test_native_router_benchmark_rejects_mislabeled_routed_trials(
             status, alias=alias, prior_activations=prior, expected_delta=delta
         # What: arrange the grouped source fragment for the scenario; why: test native router benchmark rejects mislabeled routed trials requires this concrete input or helper state before exercising the behavior.
         )
+
+# What: define protected-service scope coverage; why: maintenance must target the exact manager that owns the workload.
+def test_native_router_protected_service_scope_commands_are_exact(native_router_qualifier):
+    # What: require the established system command; why: existing callers must retain non-interactive root service behavior.
+    assert native_router_qualifier.protected_service_command("system") == ["sudo", "-n", "systemctl"]
+    # What: require the user-manager command; why: LAN-215's protected Nemotron unit lives in the invoking user's scope.
+    assert native_router_qualifier.protected_service_command("user") == ["systemctl", "--user"]
+    # What: establish the invalid-scope failure boundary; why: ambiguous ownership must fail before service mutation.
+    with pytest.raises(ValueError, match="protected service scope"):
+        # What: submit an unsupported scope; why: the test proves the helper rejects rather than guessing a manager.
+        native_router_qualifier.protected_service_command("session")
+
+
+# What: define LAN-215 catalog capacity coverage; why: the shipped router must retain the exact memory-safe runtime envelope proven on gfx1150.
+def test_native_router_catalog_uses_lan215_safe_capacity(native_router_qualifier):
+    # What: render a representative two-model catalog; why: assertions must inspect the actual command arguments emitted to managed engines.
+    catalog = native_router_qualifier.native_catalog_text("first.gguf", "second-model")
+    # What: require the bounded sequence length argument; why: the 24 GiB host must not silently return to the failed 4096-token allocation profile.
+    assert '"--max-seq-len-override", "1024"' in catalog
+    # What: require the bounded cache capacity argument; why: engine startup must preserve the measured headroom used by both qualified artifacts.
+    assert '"--num-tokens", "1024"' in catalog
+    # What: require the naive cache selection; why: recurrent-state hybrid allocation previously exhausted memory for a candidate model.
+    assert '"--cache-type", "naive"' in catalog
+    # What: require the measured memory ratio argument; why: LAN-215 qualification depends on the exact successful allocation policy rather than an implicit default.
+    assert '"--memory-ratio", "0.90"' in catalog

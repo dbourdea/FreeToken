@@ -19,8 +19,10 @@ from __future__ import annotations
 
 # What: import time for wait for ready using time; why: wait_for_ready uses time monotonic, making that imported dependency available to its named operation.
 import time
+from collections.abc import Callable
+
 # What: import any and callable for wait for ready using typing and any and callable; why: wait_for_ready uses the any annotation in wait for ready and the callable annotation in wait for ready, making that imported dependency available to its named operation.
-from typing import Any, Callable
+from typing import Any
 
 
 # What: define wait_for_ready around manager and probe and pid and port and timeout s and path and now and sleep; why: its direct callers call wait_for_ready for wait for ready and rely on this exact input and result contract.
@@ -77,7 +79,8 @@ def wait_for_ready(
         # What: gate on get and last and path before last; why: wait_for_ready admits last only for this predicate and excludes the opposite state.
         if last.get("reachable") and (
             # What: apply the path health portion of the enclosing predicate; why: this clause remains in wait_for_ready\'s enclosing expression so its grouping and evaluation order stay intact.
-            path != "/health"
+            # What: accept a custom endpoint only when its HTTP status succeeded; why: a reachable 503 means the model is still loading, not ready.
+            (path != "/health" and last.get("status") != "error")
             # What: apply the or portion of the enclosing predicate; why: this clause remains in wait_for_ready\'s enclosing expression so its grouping and evaluation order stay intact.
             or (
                 # What: call last.get with status; why: wait_for_ready invokes last.get while performing and last get maintenance serving serving; the call advances that operation through its result or side effect.
@@ -91,7 +94,8 @@ def wait_for_ready(
             # What: map the ready field as true; why: wait_for_ready carries ready into return {"ready": True, "health": last}.
             return {"ready": True, "health": last}
         # What: gate on get and last before last; why: wait_for_ready admits last only for this predicate and excludes the opposite state.
-        if last.get("status") == "error":
+        # What: treat an explicit health-document error as terminal while retrying custom endpoint HTTP failures; why: `/ready` commonly returns 503 during normal model loading.
+        if path == "/health" and last.get("status") == "error":
             # What: map the ready field as false; why: wait_for_ready carries ready into return {"ready": False, "reason": "engine-error", "health": last}.
             return {"ready": False, "reason": "engine-error", "health": last}
         # What: compute remaining from deadline and now; why: if remaining later reads remaining, so wait_for_ready must retain the computed value under that name.

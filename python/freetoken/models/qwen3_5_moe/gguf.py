@@ -10,8 +10,8 @@ as bf16 or fp32, because they are stored as F32 in the GGUF.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator
 
 import torch
 
@@ -25,7 +25,6 @@ from freetoken.models.gguf.dequant import (
     dequantize,
     row_bytes,
 )
-
 
 # F32 GGUF tensors whose runtime parameter has a direct one-to-one mapping.
 # The Gated DeltaNet alpha/beta naming describes the recurrence semantics:
@@ -166,8 +165,7 @@ def iter_gguf_weights(
     rows are concatenated only on the output axis.  This is byte preserving because
     every fused member has the same input width and quantization type (Q8_0).
     """
-    from freetoken.models.gguf.reader import iter_gguf_tensors
-    from freetoken.models.gguf.reader import load_gguf_metadata
+    from freetoken.models.gguf.reader import iter_gguf_tensors, load_gguf_metadata
 
     _require_weight_tp1()
 
@@ -194,6 +192,12 @@ def iter_gguf_weights(
             f"inner_size={gdn_inner_size}, time_step_rank={gdn_num_value_heads}"
         )
     gdn_value_head_dim = gdn_inner_size // gdn_num_value_heads
+    # What: read the serialized block count; why: GGUF includes optional trailing MTP blocks in this total.
+    total_layers = int(metadata[f"{prefix}.block_count"])
+    # What: read the optional predictor count; why: older non-MTP artifacts omit it and must retain prior behavior.
+    nextn_predict_layers = int(metadata.get(f"{prefix}.nextn_predict_layers", 0))
+    # What: derive the decoder boundary; why: non-expert loading must not emit unsupported MTP tensors.
+    main_layers = total_layers - nextn_predict_layers
 
     qkv_buf: dict[int, dict[str, torch.Tensor]] = {}
     gdn_buf: dict[int, dict[str, torch.Tensor]] = {}
@@ -223,6 +227,10 @@ def iter_gguf_weights(
 
         parts = name.split(".")
         layer = int(parts[1])
+        # What: skip blocks outside executable decoder depth; why: the trailing MTP block is not part of text inference.
+        if layer >= main_layers:
+            # What: continue without yielding predictor tensors; why: runtime modules exist only for ordinary decoder layers.
+            continue
         suffix = ".".join(parts[2:])
         base = f"model.layers.{layer}"
         if suffix in _EXPERT_SUFFIXES:
@@ -513,7 +521,11 @@ def load_q4_k_q5_k_expert_sources(
     being coerced into the primary Q5_K bank.
     """
     from freetoken.models.gguf.reader import iter_gguf_tensors
-    from freetoken.moe.host_banks import LayerCompletionTracker, PinPipeline, alloc_layer_banks
+    from freetoken.moe.host_banks import (
+        LayerCompletionTracker,
+        PinPipeline,
+        alloc_layer_banks,
+    )
 
     _require_tp1()
     layers = int(config.num_layers)
@@ -546,6 +558,10 @@ def load_q4_k_q5_k_expert_sources(
                 continue
             parts = tensor.name.split(".")
             layer = int(parts[1])
+            # What: skip blocks beyond allocated decoder banks; why: trailing MTP experts are unsupported predictor weights.
+            if layer >= layers:
+                # What: continue before bank indexing; why: exclusion prevents an out-of-range write and accidental MTP loading.
+                continue
             suffix = ".".join(parts[2:])
             if suffix == "ffn_gate_exps.weight":
                 if tensor.ggml_type != GGML_Q4_K:
@@ -627,9 +643,9 @@ def dummy_q4_k_q5_k_expert_sources(config) -> QwenGGUFExpertSources:
 
 
 __all__ = [
-    "iter_gguf_weights",
-    "is_gguf_model",
     "convert_qwen3_5_to_gguf",
-    "load_q4_k_q5_k_expert_sources",
     "dummy_q4_k_q5_k_expert_sources",
+    "is_gguf_model",
+    "iter_gguf_weights",
+    "load_q4_k_q5_k_expert_sources",
 ]
