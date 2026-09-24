@@ -150,14 +150,12 @@ tests, and UI tests. Native deterministic coverage lives in `tests/daemon`:
 | --- | --- |
 | Catalog validation, routing, HTTP/auth/SSE, filters, profiles/selectors, loading state, cancellation, TTL, reload, metrics/logs, process/accounting and startup hooks | **Native deterministic evidence present.** |
 | Disposable actual-child process, process-group cleanup, re-adoption and routed SSE on Linux | **Native hosted-Linux evidence present** at the exact PR lineage recorded in the parity matrix. |
-| Combined-tree/current engine compatibility | A clean synthetic tree at the recorded current swap/AMD heads passed 377 daemon/privacy/benchmark/reproducibility tests (7 Windows skips) and 21 model tests. Current-engine and protected restoration evidence remain required. |
-| GMKtek EVO-X2 direct/warm/cold/A-B-A/concurrency/cancellation/failure/rollback/re-adoption/reload/TTL/auth/metrics/logs/restoration | **Live evidence missing; maintenance authorization required.** |
+| Combined-tree/current engine compatibility | Historical synthetic-tree suites passed as recorded. Current source commit `56e0232` then passed 183 focused tests; the complete run reported 1947 passed, 81 skipped, and 21 parent-reproduced baseline failures. |
+| GMKtek EVO-X2 direct/warm/cold/A-B-A/concurrency/cancellation/failure/rollback/re-adoption/reload/TTL/auth/metrics/logs/restoration | **Native live evidence present** for commit `56e0232`; the private result passed with clean cleanup and restoration. See the final qualification record. |
 | Bounded activity/stat and opt-in capture APIs | **Native deterministic implementation and tests present.** Body-free rows survive app reconstruction; captures remain memory-only by policy. UI fetches captures only on explicit selection. |
 | Periodic performance history | **Native deterministic implementation and tests present.** One-hour eviction, filtering, privacy, auth, disabled behavior, probe failure isolation, and sampler generation cleanup are covered. |
 
 ## Open applicable implementation gaps
 
 No protocol-agnostic implementation gap is currently identified by this pinned
-source inventory. Pending current-engine, GPU-model, combined-tree, and protected
-restoration qualification remains an evidence gap and must not be conflated with
-implementation parity.
+source inventory. The current-engine, GPU-model, protected-restoration, and unattended-startup gates are closed for the qualified GMKtek EVO-X2 configuration at commit `56e0232`. Unsupported backend modalities and explicitly deferred product expansions remain classified above rather than being presented as parity.

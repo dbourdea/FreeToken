@@ -5,6 +5,21 @@ do not establish that every lifecycle behavior is qualified on real models. It
 distinguishes historical evidence from current-branch evidence: neither is
 silently promoted to proof for a later native-router implementation.
 
+
+## Final qualification update — 2026-09-23
+
+The current native branch has now passed the private GMKtek EVO-X2 two-model
+qualification, protected-workload restoration, production migration, and a real
+unattended reboot/startup test. The exact source is commit `56e0232`, published
+only in draft PR 4. Focused verification reports 183 passing tests; the complete
+repository run reports 1947 passed, 81 skipped, and 21 failures that reproduce
+unchanged at the parent commit on the same environment. Raw operational evidence
+remains private.
+
+See [the final qualification record](freetoken-swap-final-qualification-2026-09-23.md).
+Statements below that describe current-engine evidence as missing are retained as
+historical audit snapshots and are superseded by this final record.
+
 ## Historical combined-source verification
 
 - Swap source: `64dcc683d4e767fb4af8b7088ebb58564b1b7535`.
@@ -126,9 +141,9 @@ merge, or upstream submission was performed. Long-context quality, broad model
 compatibility, direct-router automatic rollback, and long-duration endurance
 remain explicitly unclaimed limitations.
 
-## Current completion gates
+## Historical completion gates (superseded by the final qualification record)
 
-The current native router is **not complete** until an approved GMKtek EVO-X2
+At the time of this earlier audit, the native router was **not complete** until an approved GMKtek EVO-X2
 maintenance window runs the current branch's
 `benchmarks/swap/qualify_native_router.py`, retains its raw artifacts privately,
 and records sanitized direct, warm-routed, cold-routed, alternating-model,

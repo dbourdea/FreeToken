@@ -4,6 +4,16 @@ This runbook qualifies the FreeToken-owned router. It does not qualify the
 separate llama-swap integration and it does not authorize production activation
 or a merge. Use only an approved maintenance window on **GMKtek EVO-X2**.
 
+
+## Completed qualification record
+
+The approved private execution for source commit `56e0232` passed the full
+matrix with clean cleanup and restoration. A later authorized production
+migration also passed authenticated completion and real unattended reboot/startup
+proof. Raw artifacts remain private. See
+[the sanitized final record](freetoken-swap-final-qualification-2026-09-23.md).
+The remaining instructions are retained as the reproducible runbook.
+
 ## Preconditions
 
 - An approved authentication method for the qualification host is available.

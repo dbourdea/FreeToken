@@ -20,6 +20,18 @@ Status labels:
 The field- and route-level classifications behind this matrix are recorded in
 [the pinned-source inventory](freetoken-swap-source-inventory.md).
 
+## Final live-evidence status — 2026-09-23
+
+Commit `56e0232` passed the private GMKtek EVO-X2 native two-model matrix with
+clean restoration and cleanup, followed by deployment under one native service
+and a real unattended reboot/startup proof. Direct, warm, cold, A-B-A, selector,
+profile, authentication, SSE, concurrency, cancellation, failed-switch rollback,
+re-adoption, reload conflict, persistence-capacity, TTL, metrics, logs, positive
+owned-process AMD memory, and deterministic completion gates passed. See
+[the final qualification record](freetoken-swap-final-qualification-2026-09-23.md).
+Any table wording below that says this current live execution is still required
+is historical pre-gate wording and is superseded by this status section.
+
 ## Pinned-source inventory
 
 The following is a read-only source inventory, obtained with `git show` and
