@@ -13,7 +13,8 @@ from freetoken.daemon.accounting import (
 )
 from freetoken.daemon.logring import LogRing
 from freetoken.daemon.pidfile import ServeState, ServeStateStore
-from freetoken.daemon.serve_manager import Conflict, ExitInfo, ServeManager
+# What: arrange from freetoken daemon serve manager import Conflict ExitInfo ServeManager SwitchLaunchError for the scenario; why: test daemon serve manager requires this concrete input or helper state before exercising the behavior under test.
+from freetoken.daemon.serve_manager import Conflict, ExitInfo, ServeManager, SwitchLaunchError
 
 
 # --------------------------------------------------------------------------- test doubles
@@ -115,6 +116,246 @@ def make_manager(
 
 
 # --------------------------------------------------------------------------- start / idempotency
+
+
+# What: parameterize test_switch_spawn_failure_restores_exact_previous_launch with the listed cases; why: pytest reruns the same arrange, act, and assertions for each input protecting test switch spawn failure restores exact previous launch.
+@pytest.mark.parametrize("recovery_fails", [False, True])
+# What: define the test_switch_spawn_failure_restores_exact_previous_launch test around tmp path and recovery fails; why: this test groups the arrange, act, and assertions that protect the switch spawn failure restores exact previous launch outcome.
+def test_switch_spawn_failure_restores_exact_previous_launch(tmp_path, recovery_fails):
+    # What: act by calling Spawner and capture sp; why: the switch spawn failure restores exact previous launch test asserts the response, state, or failure produced by this call.
+    sp = Spawner()
+    # What: arrange calls as the fixture input; why: the switch spawn failure restores exact previous launch test consumes this named precondition before exercising the behavior.
+    calls = []
+
+    # What: define the spawn test helper around model and port and args; why: the switch spawn failure restores exact previous launch scenario calls this helper to produce or observe the exact behavior checked by its assertions.
+    def spawn(model, port, args):
+        # What: act by calling calls.append with model and port and list and args; why: the switch spawn failure restores exact previous launch scenario observes the calls.append return value during if model bad or recovery fails and.
+        calls.append((model, port, list(args)))
+        # What: act on model and recovery fails and len and calls before oserror; why: the switch spawn failure restores exact previous launch scenario admits oserror only for this predicate and excludes the opposite state.
+        if model == "bad" or (recovery_fails and len(calls) == 3):
+            # What: raise OSError for the caller; why:  spawn stops this rejected path before it can mutate state, dispatch work, or report success.
+            raise OSError("injected launch failure")
+        # What: return sp and model and port and args from the spawn test helper; why: the switch spawn failure restores exact previous launch scenario uses this helper result in its subsequent act or assertion.
+        return sp(model, port, args)
+
+    # What: act by calling make_manager and capture mgr and store and; why: the switch spawn failure restores exact previous launch test asserts the response, state, or failure produced by this call.
+    mgr, store, _ = make_manager(
+        # What: arrange the pid input for test_switch_spawn_failure_restores_exact_previous_launch; why: test_switch_spawn_failure_restores_exact_previous_launch consumes pid during signature binding, so callers must bind it with the other signature inputs.
+        tmp_path, spawn, signal_fn=lambda pid, sig: sp.by_pid(pid).die()
+    # What: arrange the make_manager call with signal fn; why: test_switch_spawn_failure_restores_exact_previous_launch groups the supplied clauses as one make_manager call before its value is consumed.
+    )
+    # What: arrange the exact mgr start previous example fixture fragment; why: the switch spawn failure restores exact previous launch scenario feeds this byte-preserved fragment through mgr.start("previous", 1922, ["--example"]) before asserting its protocol or parser result.
+    mgr.start("previous", 1922, ["--example"])
+    # What: assert the pytest.raises failure context; why: the switch spawn failure restores exact previous launch scenario rejects the unsafe input through this exact exception boundary.
+    with pytest.raises(SwitchLaunchError) as failed:
+        # What: arrange the exact mgr switch bad fixture fragment; why: the switch spawn failure restores exact previous launch scenario feeds this byte-preserved fragment through mgr.switch("bad", 1923, []) before asserting its protocol or parser result.
+        mgr.switch("bad", 1923, [])
+    # What: assert the expected calls == previous 1922 example outcome; why: test daemon serve manager test switch spawn failure restores exact previous launch protects its regression by requiring this observable result after the exercised behavior.
+    assert calls == [("previous", 1922, ["--example"]),
+                     # What: arrange bad 1923 previous 1922 example for the scenario; why: test daemon serve manager test switch spawn failure restores exact previous launch requires this concrete input or helper state before exercising the behavior under test.
+                     ("bad", 1923, []), ("previous", 1922, ["--example"])]
+    # What: assert that failed value rollback attempted is true; why: this assertion protects the switch spawn failure restores exact previous launch regression after the test's arranged inputs and exercised call.
+    assert failed.value.rollback["attempted"] is True
+    # What: assert that failed value rollback launched is not recovery fails; why: this assertion protects the switch spawn failure restores exact previous launch regression after the test's arranged inputs and exercised call.
+    assert failed.value.rollback["launched"] is (not recovery_fails)
+    # What: assert that failed value accounting is not group delimiter; why: this assertion protects the switch spawn failure restores exact previous launch regression after the test's arranged inputs and exercised call.
+    assert failed.value.accounting is not None
+    # What: assert that mgr status running is not recovery fails; why: this assertion protects the switch spawn failure restores exact previous launch regression after the test's arranged inputs and exercised call.
+    assert mgr.status()["running"] is (not recovery_fails)
+    # What: act on recovery fails before model and load and store; why: the switch spawn failure restores exact previous launch scenario admits model and load and store only for this predicate and excludes the opposite state.
+    if not recovery_fails:
+        # What: assert that store load model equals previous; why: this assertion protects the switch spawn failure restores exact previous launch regression after the test's arranged inputs and exercised call.
+        assert store.load().model == "previous"
+        # What: act by calling mgr.stop with the declared inputs; why: the switch spawn failure restores exact previous launch scenario observes the mgr.stop return value during the enclosing return.
+        mgr.stop()
+
+
+# What: define the test_switch_spawn_failure_without_previous_does_not_retry test around tmp path; why: this test groups the arrange, act, and assertions that protect the switch spawn failure without previous does not retry outcome.
+def test_switch_spawn_failure_without_previous_does_not_retry(tmp_path):
+    # What: define the spawn test helper around captured fixture state; why: the switch spawn failure without previous does not retry scenario calls this helper to produce or observe the exact behavior checked by its assertions.
+    def spawn(*args):
+        # What: raise OSError for the caller; why:  spawn stops this rejected path before it can mutate state, dispatch work, or report success.
+        raise OSError("injected launch failure")
+
+    # What: act by calling make_manager and capture mgr and and; why: the switch spawn failure without previous does not retry test asserts the response, state, or failure produced by this call.
+    mgr, _, _ = make_manager(tmp_path, spawn)
+    # What: assert the pytest.raises failure context; why: the switch spawn failure without previous does not retry scenario rejects the unsafe input through this exact exception boundary.
+    with pytest.raises(SwitchLaunchError) as failed:
+        # What: arrange the exact mgr switch bad fixture fragment; why: the switch spawn failure without previous does not retry scenario feeds this byte-preserved fragment through mgr.switch("bad", 1922) before asserting its protocol or parser result.
+        mgr.switch("bad", 1922)
+    # What: assert that failed value rollback equals attempted false launched false; why: this assertion protects the switch spawn failure without previous does not retry regression after the test's arranged inputs and exercised call.
+    assert failed.value.rollback == {"attempted": False, "launched": False}
+    # What: assert that mgr status running is false; why: this assertion protects the switch spawn failure without previous does not retry regression after the test's arranged inputs and exercised call.
+    assert not mgr.status()["running"]
+
+
+# What: parameterize test_readiness_recovery_never_overrides_newer_lifecycle with the listed cases; why: pytest reruns the same arrange, act, and assertions for each input protecting test readiness recovery never overrides newer lifecycle.
+@pytest.mark.parametrize("newer_action", [None, "stop", "switch", "shutdown", "start"])
+# What: define the test_readiness_recovery_never_overrides_newer_lifecycle test around tmp path and newer action; why: this test groups the arrange, act, and assertions that protect the readiness recovery never overrides newer lifecycle outcome.
+def test_readiness_recovery_never_overrides_newer_lifecycle(tmp_path, newer_action):
+    # What: act by calling Spawner and capture sp; why: the readiness recovery never overrides newer lifecycle test asserts the response, state, or failure produced by this call.
+    sp = Spawner()
+    # What: act by calling make_manager and capture mgr and and; why: the readiness recovery never overrides newer lifecycle test asserts the response, state, or failure produced by this call.
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            # What: arrange the pid input for test_readiness_recovery_never_overrides_newer_lifecycle; why: test_readiness_recovery_never_overrides_newer_lifecycle consumes pid during signature binding, so callers must bind it with the other signature inputs.
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    # What: arrange the exact mgr start previous original fixture fragment; why: the readiness recovery never overrides newer lifecycle scenario feeds this byte-preserved fragment through mgr.start("previous", 1922, ["--original"]) before asserting its protocol or parser result.
+    mgr.start("previous", 1922, ["--original"])
+    # What: act by calling mgr.switch_for_readiness and capture and ticket; why: the readiness recovery never overrides newer lifecycle test asserts the response, state, or failure produced by this call.
+    _, ticket = mgr.switch_for_readiness("replacement", 1923)
+    # What: act on newer action before stop and mgr; why: the readiness recovery never overrides newer lifecycle scenario admits stop and mgr only for this predicate and excludes the opposite state.
+    if newer_action == "stop":
+        # What: act by calling mgr.stop with the declared inputs; why: the readiness recovery never overrides newer lifecycle scenario observes the mgr.stop return value during elif newer action shutdown.
+        mgr.stop()
+    # What: act on newer action before shutdown and mgr; why: the readiness recovery never overrides newer lifecycle scenario admits shutdown and mgr only for this predicate and excludes the opposite state.
+    elif newer_action == "shutdown":
+        # What: act by calling mgr.shutdown with the declared inputs; why: the readiness recovery never overrides newer lifecycle scenario observes the mgr.shutdown return value during elif newer action switch.
+        mgr.shutdown()
+    # What: act on newer action before switch and mgr; why: the readiness recovery never overrides newer lifecycle scenario admits switch and mgr only for this predicate and excludes the opposite state.
+    elif newer_action == "switch":
+        # What: arrange the exact mgr switch newer fixture fragment; why: the readiness recovery never overrides newer lifecycle scenario feeds this byte-preserved fragment through mgr.switch("newer", 1924) before asserting its protocol or parser result.
+        mgr.switch("newer", 1924)
+    # What: act on newer action before start and mgr; why: the readiness recovery never overrides newer lifecycle scenario admits start and mgr only for this predicate and excludes the opposite state.
+    elif newer_action == "start":
+        # What: arrange the exact mgr start replacement even explicit idempotent intent fixture fragment; why: the readiness recovery never overrides newer lifecycle scenario feeds this byte-preserved fragment through mgr.start("replacement", 1923) # even explicit idempotent intent wins before asserting its protocol o.
+        mgr.start("replacement", 1923)  # even explicit idempotent intent wins
+    # What: act by calling mgr.recover_switch and capture result; why: the readiness recovery never overrides newer lifecycle test asserts the response, state, or failure produced by this call.
+    result = mgr.recover_switch(ticket)
+    # What: assert that result launched is newer action is; why: this assertion protects the readiness recovery never overrides newer lifecycle regression after the test's arranged inputs and exercised call.
+    assert result["launched"] is (newer_action is None)
+    # What: act on newer action before result; why: the readiness recovery never overrides newer lifecycle scenario admits result only for this predicate and excludes the opposite state.
+    if newer_action is not None:
+        # What: assert that result reason equals superseded; why: this assertion protects the readiness recovery never overrides newer lifecycle regression after the test's arranged inputs and exercised call.
+        assert result["reason"] == "superseded"
+    # What: select the remaining branch that performs assert sp calls previous original; why: test_readiness_recovery_never_overrides_newer_lifecycle covers the state excluded by the preceding predicate without conflating the two outcomes.
+    else:
+        # What: assert that sp calls 1 equals previous 1922 original; why: this assertion protects the readiness recovery never overrides newer lifecycle regression after the test's arranged inputs and exercised call.
+        assert sp.calls[-1] == ("previous", 1922, ["--original"])
+    # Recovery is single-use even when a delayed caller repeats the request.
+    # What: assert that mgr recover switch ticket reason equals superseded; why: this assertion protects the readiness recovery never overrides newer lifecycle regression after the test's arranged inputs and exercised call.
+    assert mgr.recover_switch(ticket)["reason"] == "superseded"
+    # What: act by calling mgr.stop with the declared inputs; why: the readiness recovery never overrides newer lifecycle scenario observes the mgr.stop return value during the enclosing return.
+    mgr.stop()
+
+
+# What: define the test_readiness_recovery_preserves_engine_when_accounting_fails test around tmp path; why: this test groups the arrange, act, and assertions that protect the readiness recovery preserves engine when accounting fails outcome.
+def test_readiness_recovery_preserves_engine_when_accounting_fails(tmp_path):
+    # What: act by calling Spawner and capture sp; why: the readiness recovery preserves engine when accounting fails test asserts the response, state, or failure produced by this call.
+    sp = Spawner()
+    # What: act by calling make_manager and capture mgr and and; why: the readiness recovery preserves engine when accounting fails test asserts the response, state, or failure produced by this call.
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            # What: arrange the pid input for test_readiness_recovery_preserves_engine_when_accounting_fails; why: test_readiness_recovery_preserves_engine_when_accounting_fails consumes pid during signature binding, so callers must bind it with the other signature inputs.
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    # What: arrange the exact mgr start previous fixture fragment; why: the readiness recovery preserves engine when accounting fails scenario feeds this byte-preserved fragment through mgr.start("previous", 1922) before asserting its protocol or parser result.
+    mgr.start("previous", 1922)
+    # What: act by calling mgr.switch_for_readiness and capture and ticket; why: the readiness recovery preserves engine when accounting fails test asserts the response, state, or failure produced by this call.
+    _, ticket = mgr.switch_for_readiness("replacement", 1923)
+
+    # What: define the unavailable test helper around port; why: the readiness recovery preserves engine when accounting fails scenario calls this helper to produce or observe the exact behavior checked by its assertions.
+    def unavailable(port):
+        # What: raise AccountingPrepareError for the caller; why: unavailable stops this rejected path before it can mutate state, dispatch work, or report success.
+        raise AccountingPrepareError("injected unavailable accounting")
+
+    # What: arrange prepare stop as unavailable; why: the readiness recovery preserves engine when accounting fails test consumes this named precondition before exercising the behavior.
+    mgr._prepare_stop = unavailable
+    # What: act by calling mgr.recover_switch and capture result; why: the readiness recovery preserves engine when accounting fails test asserts the response, state, or failure produced by this call.
+    result = mgr.recover_switch(ticket)
+    # What: assert that result attempted and not result launched; why: this assertion protects the readiness recovery preserves engine when accounting fails regression after the test's arranged inputs and exercised call.
+    assert result["attempted"] and not result["launched"]
+    # What: assert that result engine preserved; why: this assertion protects the readiness recovery preserves engine when accounting fails regression after the test's arranged inputs and exercised call.
+    assert result["enginePreserved"]
+    # What: assert that mgr status model equals replacement; why: this assertion protects the readiness recovery preserves engine when accounting fails regression after the test's arranged inputs and exercised call.
+    assert mgr.status()["model"] == "replacement"
+    # What: arrange prepare stop as the fixture input; why: the readiness recovery preserves engine when accounting fails test consumes this named precondition before exercising the behavior.
+    mgr._prepare_stop = None
+    # What: act by calling mgr.stop with the declared inputs; why: the readiness recovery preserves engine when accounting fails scenario observes the mgr.stop return value during the enclosing return.
+    mgr.stop()
+
+
+# What: define the test_readiness_recovery_can_restore_after_replacement_exits test around tmp path; why: this test groups the arrange, act, and assertions that protect the readiness recovery can restore after replacement exits outcome.
+def test_readiness_recovery_can_restore_after_replacement_exits(tmp_path):
+    # What: act by calling Spawner and capture sp; why: the readiness recovery can restore after replacement exits test asserts the response, state, or failure produced by this call.
+    sp = Spawner()
+    # What: act by calling make_manager and capture mgr and and; why: the readiness recovery can restore after replacement exits test asserts the response, state, or failure produced by this call.
+    mgr, _, _ = make_manager(tmp_path, sp,
+                            # What: arrange the pid input for test_readiness_recovery_can_restore_after_replacement_exits; why: test_readiness_recovery_can_restore_after_replacement_exits consumes pid during signature binding, so callers must bind it with the other signature inputs.
+                            signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    # What: arrange the exact mgr start previous fixture fragment; why: the readiness recovery can restore after replacement exits scenario feeds this byte-preserved fragment through mgr.start("previous", 1922) before asserting its protocol or parser result.
+    mgr.start("previous", 1922)
+    # What: act by calling mgr.switch_for_readiness and capture replacement and ticket; why: the readiness recovery can restore after replacement exits test asserts the response, state, or failure produced by this call.
+    replacement, ticket = mgr.switch_for_readiness("replacement", 1923)
+    # What: act by calling sp.by_pid and capture child; why: the readiness recovery can restore after replacement exits test asserts the response, state, or failure produced by this call.
+    child = sp.by_pid(replacement["pid"])
+    # What: act by calling child.die with 1; why: the readiness recovery can restore after replacement exits scenario observes the child.die return value during assert child reaped wait.
+    child.die(1)
+    # What: assert that child reaped wait 3; why: this assertion protects the readiness recovery can restore after replacement exits regression after the test's arranged inputs and exercised call.
+    assert child.reaped.wait(3)
+    # What: assert that mgr recover switch ticket launched; why: this assertion protects the readiness recovery can restore after replacement exits regression after the test's arranged inputs and exercised call.
+    assert mgr.recover_switch(ticket)["launched"]
+    # What: assert that mgr status model equals previous; why: this assertion protects the readiness recovery can restore after replacement exits regression after the test's arranged inputs and exercised call.
+    assert mgr.status()["model"] == "previous"
+    # What: act by calling mgr.stop with the declared inputs; why: the readiness recovery can restore after replacement exits scenario observes the mgr.stop return value during the enclosing return.
+    mgr.stop()
+
+
+# What: define the test_recovery_waits_for_old_pidfile_cleanup test around tmp path; why: this test groups the arrange, act, and assertions that protect the recovery waits for old pidfile cleanup outcome.
+def test_recovery_waits_for_old_pidfile_cleanup(tmp_path):
+    # What: act by calling Spawner and capture sp; why: the recovery waits for old pidfile cleanup test asserts the response, state, or failure produced by this call.
+    sp = Spawner()
+    # What: act by calling make_manager and capture mgr and store and; why: the recovery waits for old pidfile cleanup test asserts the response, state, or failure produced by this call.
+    mgr, store, _ = make_manager(tmp_path, sp,
+                                # What: arrange the pid input for test_recovery_waits_for_old_pidfile_cleanup; why: test_recovery_waits_for_old_pidfile_cleanup consumes pid during signature binding, so callers must bind it with the other signature inputs.
+                                signal_fn=lambda pid, sig: sp.by_pid(pid).die())
+    # What: arrange the exact mgr start previous fixture fragment; why: the recovery waits for old pidfile cleanup scenario feeds this byte-preserved fragment through mgr.start("previous", 1922) before asserting its protocol or parser result.
+    mgr.start("previous", 1922)
+    # What: act by calling mgr.switch_for_readiness and capture replacement and ticket; why: the recovery waits for old pidfile cleanup test asserts the response, state, or failure produced by this call.
+    replacement, ticket = mgr.switch_for_readiness("replacement", 1923)
+    # What: act by calling threading.Event and capture entered and release; why: the recovery waits for old pidfile cleanup test asserts the response, state, or failure produced by this call.
+    entered, release = threading.Event(), threading.Event()
+    # What: arrange clear as clear and store; why: the recovery waits for old pidfile cleanup test consumes this named precondition before exercising the behavior.
+    clear = store.clear
+
+    # What: define the delayed_clear test helper around captured fixture state; why: the recovery waits for old pidfile cleanup scenario calls this helper to produce or observe the exact behavior checked by its assertions.
+    def delayed_clear():
+        # What: act by calling entered.set with the declared inputs; why: the recovery waits for old pidfile cleanup scenario observes the entered.set return value during assert release wait.
+        entered.set()
+        # What: assert that release wait 5; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+        assert release.wait(5)
+        # What: act by calling clear with the declared inputs; why: the recovery waits for old pidfile cleanup scenario observes the clear return value during the enclosing return.
+        clear()
+
+    # What: arrange clear as delayed clear; why: the recovery waits for old pidfile cleanup test consumes this named precondition before exercising the behavior.
+    store.clear = delayed_clear
+    # What: arrange the exact sp by pid replacement pid die fixture fragment; why: the recovery waits for old pidfile cleanup scenario feeds this byte-preserved fragment through sp.by_pid(replacement["pid"]).die(1) before asserting its protocol or parser result.
+    sp.by_pid(replacement["pid"]).die(1)
+    # What: assert that entered wait 3; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+    assert entered.wait(3)
+    # What: arrange result as the fixture input; why: the recovery waits for old pidfile cleanup test consumes this named precondition before exercising the behavior.
+    result = {}
+    # What: act by calling threading.Thread and capture recovery; why: the recovery waits for old pidfile cleanup test asserts the response, state, or failure produced by this call.
+    recovery = threading.Thread(target=lambda: result.update(mgr.recover_switch(ticket)))
+    # What: act by calling recovery.start with the declared inputs; why: the recovery waits for old pidfile cleanup scenario observes the recovery.start return value during try.
+    recovery.start()
+    # What: establish the handler boundary for the protected operation; why: test_recovery_waits_for_old_pidfile_cleanup routes failures to the unconditional cleanup block while preserving cleanup and success flow.
+    try:
+        # What: assert that len sp calls equals 2; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+        assert len(sp.calls) == 2
+    # What: run release set on every exit path; why: test_recovery_waits_for_old_pidfile_cleanup performs this cleanup after success, rejection, or exception so resources and accounting cannot remain stranded.
+    finally:
+        # What: act by calling release.set with the declared inputs; why: the recovery waits for old pidfile cleanup scenario observes the release.set return value during recovery join.
+        release.set()
+    # What: act by calling recovery.join with 3; why: the recovery waits for old pidfile cleanup scenario observes the recovery.join return value during assert not recovery is alive.
+    recovery.join(3)
+    # What: assert that recovery is alive is false; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+    assert not recovery.is_alive()
+    # What: assert that result launched; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+    assert result["launched"]
+    # What: assert that store load model equals previous; why: this assertion protects the recovery waits for old pidfile cleanup regression after the test's arranged inputs and exercised call.
+    assert store.load().model == "previous"
+    # What: arrange clear as clear; why: the recovery waits for old pidfile cleanup test consumes this named precondition before exercising the behavior.
+    store.clear = clear
+    # What: act by calling mgr.stop with the declared inputs; why: the recovery waits for old pidfile cleanup scenario observes the mgr.stop return value during the enclosing return.
+    mgr.stop()
 
 
 def test_start_reports_running(tmp_path):

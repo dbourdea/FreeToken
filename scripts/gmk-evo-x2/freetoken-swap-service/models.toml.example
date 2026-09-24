@@ -1,0 +1,106 @@
+# What: begin global router settings; why: all model routes need one validated policy boundary.
+[router]
+# What: allow twenty minutes for a cold upstream response; why: an uncached boot load reached ten minutes on qualified GMKtek EVO-X2 and must not be misclassified as failed.
+upstream_timeout_s = 1200
+# What: require the generated bearer credential; why: LAN-exposed inference and management routes must reject anonymous callers.
+api_keys = ["REPLACE_WITH_A_GENERATED_SECRET"]
+# What: include model aliases in discovery; why: compatibility clients need to discover the identifiers they can submit.
+include_aliases_in_list = true
+# What: emit loading state while a cold model starts; why: clients should distinguish startup work from a dead connection.
+send_loading_state = true
+# What: sample performance every five seconds; why: operators need bounded live throughput evidence without excessive overhead.
+performance_every_s = 5
+# What: preload the validated GPT-OSS alias; why: this model completed cold qualification and starts reliably inside the boot readiness window.
+preload_model = "compat/model-b"
+# What: activate the coding profile at startup; why: profile aliases must be deterministic before the first request.
+startup_routing_profile = "coding"
+
+# What: define a warm-first selector; why: compatible requests should reuse residency before forcing an expensive model swap.
+[selectors.preferred-model]
+# What: choose warm routing; why: the currently ready target minimizes latency and memory churn.
+strategy = "warm"
+# What: order the two validated targets; why: GPT-OSS is preferred when already warm and Qwen remains the cold fallback.
+targets = ["model-b", "model-a"]
+# What: provide an operator-facing selector name; why: discovery output should be understandable without reading implementation IDs.
+name = "Preferred local model"
+# What: explain selector behavior; why: management clients need a concise compatibility contract.
+description = "Reuses a ready target before the ordered cold fallback"
+
+# What: define the startup routing profile; why: profile pins group stable client identifiers separately from concrete model IDs.
+[profiles.coding]
+# What: describe the profile; why: operators need to know why it is active.
+description = "qualified GMKtek EVO-X2 production routing profile"
+# What: begin profile pin mappings; why: each stable request prefix needs an explicit destination.
+[profiles.coding.pins]
+# What: map the generic profile name to the warm selector; why: clients can request a stable ID while residency changes safely.
+profile-model = "preferred-model"
+# What: reject the disabled prefix; why: explicit negative routing proves unapproved model families do not fall through.
+disabled-model = ""
+
+# What: define the primary Qwen model; why: startup preload requires one concrete, fully allowlisted model profile.
+[models.model-a]
+# What: point to the exact qualified GGUF; why: production must use the artifact that passed the live AMD matrix.
+model = "/home/USER/local_models/freetoken-swap/models/qwen36/Qwen3.6-27B-Q4_K_M.gguf"
+# What: request dynamic port allocation; why: the daemon must avoid stale or conflicting internal listeners.
+port = 0
+# What: allow fifteen minutes for readiness; why: an uncached boot load reached ten minutes and needs bounded safety margin.
+ready_timeout_s = 900
+# What: probe the engine readiness endpoint; why: accepting TCP alone does not prove inference readiness.
+check_endpoint = "/ready"
+# What: build the proxy URL from the allocated port; why: the router must forward only to the engine it owns.
+proxy = "http://127.0.0.1:${PORT}"
+# What: rewrite upstream requests to the served ID; why: aliases and profiles must converge on the engine's advertised model name.
+use_model_name = "model-a"
+# What: keep the upstream timeout below the router timeout; why: the router needs time to translate or clean up an upstream failure.
+upstream_timeout_s = 1190
+# What: disable idle eviction for the default model; why: startup residency should persist until an explicit model switch.
+ttl_s = 0
+# What: assign normal queue priority; why: neither validated model should silently bypass FIFO ordering.
+priority = 0
+# What: provide a readable model label; why: management output should identify the production default clearly.
+name = "Qwen 3.6 27B Q4_K_M"
+# What: preserve the qualified compatibility alias; why: startup preload and existing canaries use this stable external ID.
+aliases = ["compat/model-a"]
+# What: pass only qualified engine arguments; why: allowlisted argv avoids shell injection and reproduces the validated AMD envelope.
+args = ["--host", "127.0.0.1", "--served-model-name", "model-a", "--max-seq-len-override", "1024", "--num-tokens", "1024", "--max-prefill-length", "256", "--max-running-requests", "1", "--graph", "1", "--cache-type", "naive", "--memory-ratio", "0.90", "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl"]
+
+# What: begin primary metadata; why: operators need to distinguish production policy from transient qualification settings.
+[models.model-a.metadata]
+# What: mark the deployment tier; why: API consumers can audit that this is the selected production profile.
+tier = "production"
+# What: mark the profile owner; why: provenance distinguishes operator policy from model-supplied metadata.
+type = "operator"
+
+# What: define the alternate GPT-OSS model; why: live swapping requires a second concrete, fully qualified target.
+[models.model-b]
+# What: point to the exact qualified checkpoint; why: production must use the model directory that passed the live AMD matrix.
+model = "/home/USER/local_models/freetoken-swap/models/gpt-oss-20b"
+# What: request dynamic port allocation; why: the daemon must reserve both the engine and distributed-store listeners safely.
+port = 0
+# What: allow fifteen minutes for readiness; why: uncached AMD model loading needs a bounded margin above observed startup time.
+ready_timeout_s = 900
+# What: probe the engine readiness endpoint; why: accepting TCP alone does not prove inference readiness.
+check_endpoint = "/ready"
+# What: build the proxy URL from the allocated port; why: the router must forward only to the engine it owns.
+proxy = "http://127.0.0.1:${PORT}"
+# What: rewrite upstream requests to the served ID; why: aliases and selectors must converge on the engine's advertised model name.
+use_model_name = "model-b"
+# What: keep the upstream timeout below the router timeout; why: the router needs time to translate or clean up an upstream failure.
+upstream_timeout_s = 1190
+# What: disable idle eviction; why: the selected alternate should remain warm until an explicit switch or service stop.
+ttl_s = 0
+# What: assign normal queue priority; why: neither validated model should silently bypass FIFO ordering.
+priority = 0
+# What: provide a readable model label; why: management output should identify the alternate clearly.
+name = "GPT-OSS 20B"
+# What: preserve the qualified compatibility alias; why: existing canaries and clients can address the alternate consistently.
+aliases = ["compat/model-b"]
+# What: pass only qualified engine arguments; why: allowlisted argv avoids shell injection and reproduces the validated AMD envelope.
+args = ["--host", "127.0.0.1", "--served-model-name", "model-b", "--max-seq-len-override", "1024", "--num-tokens", "1024", "--max-prefill-length", "256", "--max-running-requests", "1", "--graph", "1", "--cache-type", "naive", "--memory-ratio", "0.90", "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl"]
+
+# What: begin alternate metadata; why: operators need to distinguish production policy from transient qualification settings.
+[models.model-b.metadata]
+# What: mark the deployment tier; why: API consumers can audit that this is an approved production profile.
+tier = "production"
+# What: mark the profile owner; why: provenance distinguishes operator policy from model-supplied metadata.
+type = "operator"

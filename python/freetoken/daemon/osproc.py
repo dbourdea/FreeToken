@@ -156,6 +156,39 @@ def read_pss_bytes(pid: int) -> int:
     return 0
 
 
+# What: define read_pss_bytes_if_available around pid; why: its direct callers call read_pss_bytes_if_available for read pss bytes if available and rely on this exact input and result contract.
+def read_pss_bytes_if_available(pid: int) -> int | None:
+    """PSS in bytes, or ``None`` when this host/process cannot provide it.
+
+    Unlike :func:`read_pss_bytes`, this preserves the distinction between an
+    actual zero and an unavailable ``/proc`` measurement for observability
+    callers that must not present a safe default as measured data.
+    """
+    # What: document pss in bytes or when this in the read_pss_bytes_if_available docstring; why: introspection and maintainers read this exact docstring fragment to understand read pss bytes if available behavior without executing it.
+    # What: document unlike func read pss bytes this preserves the in the read_pss_bytes_if_available docstring; why: introspection and maintainers read this exact docstring fragment to understand read pss bytes if available behavior without executing it.
+    # What: document actual zero and an unavailable proc in the read_pss_bytes_if_available docstring; why: introspection and maintainers read this exact docstring fragment to understand read pss bytes if available behavior without executing it.
+    # What: document callers that must not present a in the read_pss_bytes_if_available docstring; why: introspection and maintainers read this exact docstring fragment to understand read pss bytes if available behavior without executing it.
+    # What: preserve the paragraph boundary in the the read_pss_bytes_if_available docstring; why: introspection and maintainers read this paragraph break to understand read pss bytes if available behavior without executing it.
+    # What: compute raw from read proc and pid and smaps rollup; why: if not raw later reads raw, so read_pss_bytes_if_available must retain the computed value under that name.
+    raw = _read_proc(pid, "smaps_rollup")
+    # What: gate on raw before the computed value; why: read_pss_bytes_if_available admits the computed value only for this predicate and excludes the opposite state.
+    if not raw:
+        # What: return no value from read_pss_bytes_if_available; why: read_pss_bytes_if_available returns no value to callers that depend on its completed result.
+        return None
+    # What: iterate across splitlines and raw to perform startswith and parts and line and split and isdigit; why: read_pss_bytes_if_available repeats the body only while or for the loop header admits an iteration.
+    for line in raw.splitlines():
+        # What: gate on startswith and line before parts and split and line; why: read_pss_bytes_if_available admits parts and split and line only for this predicate and excludes the opposite state.
+        if line.startswith("Pss:"):
+            # What: compute parts from split and line; why: if len parts and parts isdigit later reads parts, so read_pss_bytes_if_available must retain the computed value under that name.
+            parts = line.split()
+            # What: gate on isdigit and len and parts before int and parts; why: read_pss_bytes_if_available admits int and parts only for this predicate and excludes the opposite state.
+            if len(parts) >= 2 and parts[1].isdigit():
+                # What: return int and parts and 1024 and 1 from read_pss_bytes_if_available; why: read_pss_bytes_if_available exposes int and parts and 1024 and 1 so its caller can continue with the function\'s computed outcome.
+                return int(parts[1]) * 1024
+    # What: return no value from read_pss_bytes_if_available; why: read_pss_bytes_if_available returns no value to callers that depend on its completed result.
+    return None
+
+
 def is_ft_serve_on_port(pid: int, port: int, *, starttime: int | None = None) -> bool:
     """Verify ``pid`` is (still) an ``ft serve`` bound to ``port`` — the re-adoption / liveness
     identity check. Requires: alive, unchanged start time (PID-reuse

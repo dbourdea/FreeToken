@@ -10,6 +10,7 @@ from freetoken.utils import div_ceil, init_logger
 
 logger = init_logger(__name__)
 
+# The guarded ROCm fallback logs once per process rather than once per MoE layer.
 _warned_torch_topk = False
 
 
@@ -19,7 +20,7 @@ def _torch_fused_topk(
     renormalize: bool,
     num_token_non_padded: torch.Tensor | None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Pure-torch softmax router matching triton_kernels.topk (Windows fallback).
+    """Pure-torch reference for the fused softmax router; tests compare the kernel against it.
 
     Softmax over all experts, select the top-k, and (when ``renormalize``) rescale the
     selected weights to sum to 1 -- the standard fused-MoE routing convention.
@@ -44,45 +45,34 @@ def fused_topk(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert hidden_states.shape[0] == gating_output.shape[0], "Number of tokens mismatch"
 
-    from freetoken.kernel.backend import is_triton_kernels_installed
+    from freetoken.kernel.backend import is_rocm_runtime
 
-    # triton_kernels ships no Windows wheel, and unlike flashinfer/sgl_kernel it is not one
-    # of the six ops the in-repo triton kernels cover -- so this router needs its own fallback.
-    if not is_triton_kernels_installed():
+    # Upstream's in-tree Triton router is the default everywhere other than HIP.
+    # On ROCm the independently tested PyTorch implementation remains the default
+    # until a full end-to-end quality gate demonstrates an identical result. Set
+    # this explicit experiment flag to ``1`` only when validating that candidate;
+    # this leaves model weights and server configuration unchanged.
+    use_rocm_triton_router = is_rocm_runtime() and os.environ.get(
+        "FREETOKEN_ROCM_TRITON_ROUTER", "0"
+    ) == "1"
+    if use_rocm_triton_router:
+        from freetoken.kernel.triton.moe_router import fused_topk_softmax
+
+        return fused_topk_softmax(gating_output, topk, renormalize, num_token_non_padded)
+
+    if is_rocm_runtime():
         global _warned_torch_topk
         if not _warned_torch_topk:
             _warned_torch_topk = True
-            # Once, not per call: this runs every MoE forward. On Linux a missing
-            # triton_kernels used to fail fast with ImportError; keep the misconfiguration
-            # visible without giving up the fallback that Windows needs.
             logger.warning_rank0(
-                "fused_topk: triton_kernels is not installed -> pure-torch router fallback "
-                "(numerically equivalent, slower). Expected on Windows (no wheel); on Linux "
-                "install triton_kernels to restore the fused router."
+                "fused_topk: ROCm keeps the quality-proven pure-torch router; "
+                "set FREETOKEN_ROCM_TRITON_ROUTER=1 only for a guarded experiment."
             )
         return _torch_fused_topk(gating_output, topk, renormalize, num_token_non_padded)
 
-    from triton_kernels.topk import topk as triton_kernels_topk
+    from freetoken.kernel.triton.moe_router import fused_topk_softmax
 
-    logits = gating_output.float()
-    softmax_first = not renormalize
-    if softmax_first:
-        logits = torch.softmax(logits, dim=-1)
-    sparse_topk = triton_kernels_topk(
-        logits,
-        topk,
-        apply_softmax=not softmax_first,
-    )
-    if hasattr(sparse_topk, "vals"):
-        topk_weights = sparse_topk.vals
-        topk_ids = sparse_topk.indx
-    else:
-        topk_weights, topk_ids = sparse_topk[:2]
-    topk_ids = topk_ids.to(torch.int32)
-    if num_token_non_padded is not None:
-        indices = torch.arange(0, topk_ids.shape[0], device=topk_ids.device)
-        topk_ids[indices >= num_token_non_padded, :] = -1
-    return topk_weights, topk_ids
+    return fused_topk_softmax(gating_output, topk, renormalize, num_token_non_padded)
 
 
 def moe_align_block_size(
@@ -125,7 +115,19 @@ def moe_align_block_size(
     - The padding ensures that the total number of tokens is now divisible
         by block_size for proper block matrix operations.
     """
-    from freetoken.kernel.backend import is_sgl_kernel_installed
+    from freetoken.kernel.backend import is_rocm_runtime, is_sgl_kernel_installed
+
+    # The compact in-tree alignment kernel is tuned around NVIDIA execution
+    # assumptions.  On gfx1151 it can leave the expert-block array at its
+    # initializer value even when token IDs are correctly scattered, sending
+    # every grouped GEMM block to expert zero.  Use the repository's staged
+    # alignment implementation on ROCm instead: it produced the correct block
+    # ownership for the isolated 4-token, 37-expert reproducer and avoids that
+    # unsafe small-kernel path.
+    if is_rocm_runtime():
+        from freetoken.kernel import moe_align_block_size_triton
+
+        return moe_align_block_size_triton(topk_ids, block_size, num_experts)
 
     if not is_sgl_kernel_installed():
         from freetoken.kernel.triton.moe_align import (
@@ -318,7 +320,13 @@ def fused_experts_impl(
     fused_moe_kernel_triton(
         intermediate_cache2,
         w2,
-        (intermediate_cache3),
+        # The second projection consumes one flattened row for every routed
+        # token.  Present the output with the matching [M * top_k, 1, N]
+        # layout so ``fused_moe_kernel`` advances by one routed row when it
+        # receives ``top_k=1``.  Passing the original [M, top_k, N] view
+        # makes its flattened routing indices use the larger M stride, which
+        # can address past the allocated output buffer on ROCm.
+        intermediate_cache3.view(M * topk_ids.shape[1], 1, w2.shape[1]),
         curr_topk_weights,
         curr_topk_ids,
         sorted_token_ids,
