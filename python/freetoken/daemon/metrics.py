@@ -135,7 +135,7 @@ def _vram_measurement_for_pids(pids: list[int]) -> tuple[int, bool, str | None]:
     return 0, False, None
 
 
-# What: define the Linux DRM fdinfo process-memory probe; why: LAN-215 needs owned-process GPU evidence without requiring privileged or vendor-specific tooling.
+# What: define the Linux DRM fdinfo process-memory probe; why: the target AMD host needs owned-process GPU evidence without requiring privileged or vendor-specific tooling.
 def _drm_fdinfo_process_vram(pids: list[int], proc_root: Path = Path("/proc")) -> dict[int, int] | None:
     """Return each requested PID's deduplicated DRM VRAM plus GTT bytes when available."""
     # What: initialize measured usage by PID; why: callers need a process-scoped mapping compatible with the existing VRAM probe contract.

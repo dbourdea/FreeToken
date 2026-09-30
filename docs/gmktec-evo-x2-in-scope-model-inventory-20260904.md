@@ -67,16 +67,16 @@ remain candidates for a deliberate FreeToken qualification decision:
 
 | Model identifier | Modality | FreeToken qualification status |
 | --- | --- | --- |
-| `lan223-qwen38-27b` | Text and image input, text output | Not yet qualified through the current standardized FreeToken matrix |
-| `lan223-qwen36-27b-control` | Text and image input, text output | Qwen family control exists, but this specific routed artifact needs an explicit matrix record |
-| `lan223-glm47-flash` | Text | Not yet qualified through the current standardized FreeToken matrix |
+| `remote-qwen38-27b` | Text and image input, text output | Not yet qualified through the current standardized FreeToken matrix |
+| `remote-qwen36-27b-control` | Text and image input, text output | Qwen family control exists, but this specific routed artifact needs an explicit matrix record |
+| `remote-glm47-flash` | Text | Not yet qualified through the current standardized FreeToken matrix |
 | `KAT-Coder-V2.5-Dev-Q8_0` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
-| `lan223-laguna-xs21` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
-| `lan223-ornith15-9b` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
-| `lan223-ornith15-35b-a3b` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
-| `lan223-glm47-ggml-q4k` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
-| `lan223-glm47-unsloth-q4km` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
-| `lan223-glm47-bartowski-q4km` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
+| `remote-laguna-xs21` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
+| `remote-ornith15-9b` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
+| `remote-ornith15-35b-a3b` | Text and tools | Not yet qualified through the current standardized FreeToken matrix |
+| `remote-glm47-ggml-q4k` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
+| `remote-glm47-unsloth-q4km` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
+| `remote-glm47-bartowski-q4km` | Text and tools | Archived llama-swap artifact-comparison entry; no FreeToken AMD matrix record |
 
 The existing Qwen3.6 35B-A3B NVFP4 result is not a substitute for these rows.
 Each row requires its own exact checkpoint, tokenizer, quantization, prompt
@@ -89,10 +89,10 @@ serving targets and therefore require a separate backend-admission decision:
 
 | Model identifier | Function | Current decision |
 | --- | --- | --- |
-| `lan223-whisper-large-v3-turbo` | Audio transcription | No native FreeToken text-generation qualification claim |
-| `lan223-qwen3-tts-0.6b-base` | Text-to-speech | No native FreeToken text-generation qualification claim |
-| `lan223-qwen-image-2512-gguf` | Image generation or editing | No native FreeToken text-generation qualification claim |
-| `lan223-flux2-klein-4b` | Image generation or editing | No native FreeToken text-generation qualification claim |
+| `remote-whisper-large-v3-turbo` | Audio transcription | No native FreeToken text-generation qualification claim |
+| `remote-qwen3-tts-0.6b-base` | Text-to-speech | No native FreeToken text-generation qualification claim |
+| `remote-qwen-image-2512-gguf` | Image generation or editing | No native FreeToken text-generation qualification claim |
+| `remote-flux2-klein-4b` | Image generation or editing | No native FreeToken text-generation qualification claim |
 
 These models must not be counted as missing FreeToken tests until their
 backend, input and output contract, and AMD implementation scope are defined.

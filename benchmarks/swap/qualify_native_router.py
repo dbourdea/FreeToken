@@ -87,7 +87,7 @@ def protected_service_command(scope: str) -> list[str]:
     if scope == "system":
         # What: return the non-interactive systemctl prefix; why: maintenance must never block waiting for a password prompt.
         return ["sudo", "-n", "systemctl"]
-    # What: select the invoking user's service manager; why: LAN-215 protects Nemotron with a user-scoped unit.
+    # What: select the invoking user's service manager; why: the target AMD host protects Nemotron with a user-scoped unit.
     if scope == "user":
         # What: return the user systemctl prefix; why: stopping the wrong system scope would fail restoration or touch unrelated services.
         return ["systemctl", "--user"]
@@ -2090,7 +2090,7 @@ def native_catalog_text(
         "--host", "127.0.0.1", "--served-model-name", "${MODEL_ID}",
         # What: bound sequence, cache, and prefill capacity for the 24 GiB gfx1150 host; why: both qualified checkpoints need deterministic headroom instead of an avoidable recurrent-state allocation failure.
         "--max-seq-len-override", "1024", "--num-tokens", "1024", "--max-prefill-length", "256",
-        # What: use one captured request, the naive cache, and a measured memory ratio; why: LAN-215 must avoid unsupported hybrid-state over-allocation while preserving enough memory for both exact artifacts.
+        # What: use one captured request, the naive cache, and a measured memory ratio; why: the target AMD host must avoid unsupported hybrid-state over-allocation while preserving enough memory for both exact artifacts.
         "--max-running-requests", "1", "--graph", "1", "--cache-type", "naive", "--memory-ratio", "0.90",
         # What: apply the attention backend triton moe backend fused disable pynccl portion of common args; why: native_catalog_text uses this clause to evaluate common args as one grouped value.
         "--attention-backend", "triton", "--moe-backend", "fused", "--disable-pynccl",
@@ -2367,7 +2367,7 @@ def main() -> int:
                 if maintenance_marker.exists():
                     # What: raise a lifecycle ownership error before stopping the service; why: qualification must fail closed when exclusive maintenance cannot be proven.
                     raise RuntimeError("protected-service maintenance marker already exists")
-                # What: create the marker with private run context; why: LAN-215's health watchdog must suppress automatic restarts for this exact maintenance window.
+                # What: create the marker with private run context; why: the target AMD host's health watchdog must suppress automatic restarts for this exact maintenance window.
                 maintenance_marker.write_text("FreeToken native-router qualification owns this maintenance window.\n", encoding="utf-8")
                 # What: record marker ownership after successful creation; why: only an owned marker may be removed during restoration.
                 maintenance_marker_owned = True

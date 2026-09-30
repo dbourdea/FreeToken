@@ -22,7 +22,7 @@ args = parser.parse_args()
 # What: resolve the reviewed qualifier; why: protocol parsing must match the router campaign.
 module_path = Path(args.source) / "benchmarks/swap/qualify_native_router.py"
 # What: create an import specification; why: exact source can be loaded without package ambiguity.
-spec = importlib.util.spec_from_file_location("lan215_direct_qualifier", module_path)
+spec = importlib.util.spec_from_file_location("amd_direct_qualifier", module_path)
 # What: create an isolated module; why: global qualifier state must not leak between runs.
 module = importlib.util.module_from_spec(spec)
 # What: execute the module; why: its reviewed canary must be callable below.

@@ -34,7 +34,7 @@ class RequireExpectedHostTests(unittest.TestCase):
     def test_rejects_other_hosts(self) -> None:
         """The harness prevents accidental benchmark traffic to any other LAN machine."""
 
-        with patch("socket.gethostname", return_value="lan-199"):
+        with patch("socket.gethostname", return_value="amd-host"):
             with self.assertRaisesRegex(RuntimeError, "refusing benchmark"):
                 require_expected_host("test-machine-1")
 

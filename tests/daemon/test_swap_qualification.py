@@ -2033,7 +2033,7 @@ def test_native_router_benchmark_rejects_mislabeled_routed_trials(
 def test_native_router_protected_service_scope_commands_are_exact(native_router_qualifier):
     # What: require the established system command; why: existing callers must retain non-interactive root service behavior.
     assert native_router_qualifier.protected_service_command("system") == ["sudo", "-n", "systemctl"]
-    # What: require the user-manager command; why: LAN-215's protected Nemotron unit lives in the invoking user's scope.
+    # What: require the user-manager command; why: the target AMD host's protected Nemotron unit lives in the invoking user's scope.
     assert native_router_qualifier.protected_service_command("user") == ["systemctl", "--user"]
     # What: establish the invalid-scope failure boundary; why: ambiguous ownership must fail before service mutation.
     with pytest.raises(ValueError, match="protected service scope"):
@@ -2041,8 +2041,8 @@ def test_native_router_protected_service_scope_commands_are_exact(native_router_
         native_router_qualifier.protected_service_command("session")
 
 
-# What: define LAN-215 catalog capacity coverage; why: the shipped router must retain the exact memory-safe runtime envelope proven on gfx1150.
-def test_native_router_catalog_uses_lan215_safe_capacity(native_router_qualifier):
+# What: define the target AMD host catalog capacity coverage; why: the shipped router must retain the exact memory-safe runtime envelope proven on gfx1150.
+def test_native_router_catalog_uses_amd_host_safe_capacity(native_router_qualifier):
     # What: render a representative two-model catalog; why: assertions must inspect the actual command arguments emitted to managed engines.
     catalog = native_router_qualifier.native_catalog_text("first.gguf", "second-model")
     # What: require the bounded sequence length argument; why: the 24 GiB host must not silently return to the failed 4096-token allocation profile.
@@ -2051,5 +2051,5 @@ def test_native_router_catalog_uses_lan215_safe_capacity(native_router_qualifier
     assert '"--num-tokens", "1024"' in catalog
     # What: require the naive cache selection; why: recurrent-state hybrid allocation previously exhausted memory for a candidate model.
     assert '"--cache-type", "naive"' in catalog
-    # What: require the measured memory ratio argument; why: LAN-215 qualification depends on the exact successful allocation policy rather than an implicit default.
+    # What: require the measured memory ratio argument; why: the target AMD host qualification depends on the exact successful allocation policy rather than an implicit default.
     assert '"--memory-ratio", "0.90"' in catalog
