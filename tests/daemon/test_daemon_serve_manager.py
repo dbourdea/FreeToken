@@ -1002,3 +1002,40 @@ def test_no_thread_leak_over_many_cycles(tmp_path):
         assert wait_until(lambda: mgr.status()["running"] is False)
     # monitor threads must all have exited (daemon threads terminate after _reap)
     assert wait_until(lambda: threading.active_count() <= baseline + 2)
+
+# What: verify shutdown bounds lifecycle ownership waits; why: systemd cleanup must not hang behind a stuck start or switch.
+def test_shutdown_timeout_bounds_lifecycle_lock_acquisition(tmp_path) -> None:
+    # Create an idle fake manager so only lifecycle-lock contention controls this test.
+    manager, _store, _ring = make_manager(tmp_path, Spawner())
+    # Signal when the background owner holds the lock so the timeout test is deterministic.
+    locked = threading.Event()
+    # Hold the competing lifecycle owner until the main test has observed the timeout.
+    release = threading.Event()
+
+    # Define the competing lifecycle operation; why: an in-flight start or switch owns this same lock.
+    def hold_lifecycle() -> None:
+        # Acquire the private lock exactly as production lifecycle methods do.
+        with manager._lifecycle:
+            # Announce ownership only after shutdown is guaranteed to contend.
+            locked.set()
+            # Wait for test cleanup so ownership persists beyond the short shutdown deadline.
+            release.wait(timeout=2.0)
+
+    # Start the competing owner in another thread because the lifecycle lock is reentrant per thread.
+    holder = threading.Thread(target=hold_lifecycle)
+    # Launch the owner before invoking shutdown so lock acquisition must wait.
+    holder.start()
+    # Require the ownership signal so scheduler timing cannot make the test flaky.
+    assert locked.wait(timeout=1.0)
+    try:
+        # Require shutdown to return a concrete timeout rather than blocking indefinitely.
+        with pytest.raises(TimeoutError, match="lifecycle ownership"):
+            # Use a bounded deadline that is much shorter than the background hold.
+            manager.shutdown(timeout=0.01, force=True)
+    finally:
+        # Release the background owner on success or failure so the test cannot strand a thread.
+        release.set()
+        # Join the owner to prove cleanup completed before the test returns.
+        holder.join(timeout=1.0)
+    # Confirm the competing lifecycle thread exited after cleanup.
+    assert not holder.is_alive()

@@ -1535,69 +1535,110 @@ class RoutingCoordinator:
             # What: return owner from begin_shutdown; why: begin_shutdown exposes owner so its caller can continue with the function\'s computed outcome.
             return owner
 
-    # What: define finish_shutdown around owner and timeout and force; why: its direct callers call finish_shutdown for finish shutdown and rely on this exact input and result contract.
     def finish_shutdown(
-        # What: declare the self input for finish_shutdown; why: finish_shutdown consumes self during return self finish exit owner lambda self manager shutdown timeout, so callers must bind it with the other signature inputs.
-        self, owner: object, timeout: float | None = None, force: bool = False
-    # What: complete the enclosing predicate with dict; why: RoutingCoordinator.finish_shutdown groups the supplied clauses as one enclosing predicate expression before its value is consumed.
+        self,
+        owner: object,
+        timeout: float | None = None,
+        force: bool = False,
+        drain_timeout: float | None = None,
     ) -> dict:
-        """Drain existing ownership and permanently stop the sole managed child."""
-        # What: document drain existing ownership and permanently stop in the finish_shutdown docstring; why: introspection and maintainers read this exact docstring fragment to understand finish shutdown behavior without executing it.
-        # What: return finish exit and owner and shutdown and timeout from finish_shutdown; why: finish_shutdown exposes finish exit and owner and shutdown and timeout so its caller can continue with the function\'s computed outcome.
-        return self._finish_exit(owner, lambda: self._manager.shutdown(timeout, force))
+        """Drain ownership within a bound, then permanently stop the managed child."""
+        # Use the manager timeout as the default drain bound so one caller setting controls the transaction.
+        effective_drain_timeout = timeout if drain_timeout is None else drain_timeout
+        # Stop the child only after leases drain or an explicitly forced deadline expires.
+        return self._finish_exit(
+            owner,
+            lambda: self._manager.shutdown(timeout, force),
+            drain_timeout=effective_drain_timeout,
+            force_drain=force,
+        )
 
-    # What: define finish_detach around owner; why: its direct callers call finish_detach for finish detach and rely on this exact input and result contract.
-    def finish_detach(self, owner: object) -> None:
-        """Drain existing ownership, then leave the child persisted for re-adoption."""
-        # What: document drain existing ownership then leave the in the finish_detach docstring; why: introspection and maintainers read this exact docstring fragment to understand finish detach behavior without executing it.
-        # What: call self._finish_exit with owner and detach and manager; why: finish_detach invokes self._finish_exit while performing the enclosing return; the call advances that operation through its result or side effect.
-        self._finish_exit(owner, self._manager.detach)
+    def finish_detach(
+        self,
+        owner: object,
+        drain_timeout: float | None = None,
+        force_drain: bool = False,
+    ) -> None:
+        """Drain ownership within a bound, then persist the child for re-adoption."""
+        # Detach only after ownership drains unless an OS-exit caller explicitly requests deadline forcing.
+        self._finish_exit(
+            owner,
+            self._manager.detach,
+            drain_timeout=drain_timeout,
+            force_drain=force_drain,
+        )
 
-    # What: define _finish_exit around owner and action; why: its direct callers call _finish_exit for finish exit and rely on this exact input and result contract.
-    def _finish_exit(self, owner: object, action: Callable[[], object]):
-        # What: enter the cond managed context before if self shutdown owner is not owner; why: _finish_exit releases this resource or lock after if self shutdown owner is not owner on both success and failure paths.
+    def _finish_exit(
+        self,
+        owner: object,
+        action: Callable[[], object],
+        *,
+        drain_timeout: float | None = None,
+        force_drain: bool = False,
+    ):
+        # Convert the relative limit once so spurious condition wakeups cannot extend shutdown forever.
+        deadline = None if drain_timeout is None else time.monotonic() + max(0.0, drain_timeout)
+        # Hold the router condition while checking ownership and waiting for active lifecycle users.
         with self._cond:
-            # What: gate on shutdown owner and owner before value error; why: _finish_exit admits value error only for this predicate and excludes the opposite state.
+            # Reject callers that do not own the reservation to preserve single-owner lifecycle safety.
             if self._shutdown_owner is not owner:
-                # What: raise ValueError for the caller; why: RoutingCoordinator._finish_exit stops this rejected path before it can mutate state, dispatch work, or report success.
                 raise ValueError("shutdown reservation is not owned by caller")
-            # What: iterate across leases and switching and manual lifecycle tokens to perform wait and cond; why: _finish_exit repeats the body only while or for the loop header admits an iteration.
+            # Wait until leases, switches, and manual tokens release or the bounded drain expires.
             while self._leases or self._switching or self._manual_lifecycle_tokens:
-                # What: call self._cond.wait with the declared inputs; why: _finish_exit invokes self._cond.wait while performing self switching; the call advances that operation through its result or side effect.
-                self._cond.wait()
-            # What: compute switching from true; why: self switching later reads switching, so _finish_exit must retain the computed value under that name.
+                # Wait without a limit only for legacy callers that intentionally omitted a timeout.
+                if deadline is None:
+                    self._cond.wait()
+                    continue
+                # Recompute remaining time after every wakeup so total wait stays bounded.
+                remaining = deadline - time.monotonic()
+                # Handle an expired drain according to the caller's explicit force policy.
+                if remaining <= 0:
+                    # Continue only when the caller authorized forced operating-system-exit cleanup.
+                    if force_drain:
+                        break
+                    # Roll back the shutdown latch because a non-forced timeout leaves the router operational.
+                    self._shutdown_requested = False
+                    # Release the reservation so another lifecycle request can retry after leases complete.
+                    self._shutdown_owner = None
+                    # Restore idle eviction because the aborted shutdown no longer owns lifecycle.
+                    self._schedule_idle_eviction()
+                    # Wake blocked threads so they can observe the restored state.
+                    self._cond.notify_all()
+                    # Surface a concrete timeout instead of hanging beyond the requested deadline.
+                    raise TimeoutError("timed out waiting for router ownership to drain")
+                # Sleep only for the remaining bound so repeated wakeups cannot reset the deadline.
+                self._cond.wait(remaining)
+            # Reserve the transition while the terminal manager action runs outside the condition lock.
             self._switching = True
-        # What: establish the handler boundary for the protected operation; why: RoutingCoordinator._finish_exit routes failures to exception while preserving cleanup and success flow.
+        # Run the child stop or detach action while preserving rollback on manager failure.
         try:
-            # What: compute result from action; why: return result later reads result, so _finish_exit must retain the computed value under that name.
             result = action()
-        # What: handle exception by with self cond; why: RoutingCoordinator._finish_exit converts that failure into this concrete recovery, response, or cleanup behavior.
         except Exception:
-            # What: enter the cond managed context before self shutdown requested; why: _finish_exit releases this resource or lock after self shutdown requested on both success and failure paths.
+            # Restore routing state because the manager action did not complete its terminal transition.
             with self._cond:
-                # What: compute shutdown requested from false; why: the enclosing return or state update later reads shutdown requested, so _finish_exit must retain the computed value under that name.
+                # Clear the shutdown latch so callers can retry or use the surviving child.
                 self._shutdown_requested = False
-                # What: compute shutdown owner from the named fixture input; why: self shutdown owner later reads shutdown owner, so _finish_exit must retain the computed value under that name.
+                # Release the failed action's ownership reservation.
                 self._shutdown_owner = None
-                # What: compute switching from false; why: self switching later reads switching, so _finish_exit must retain the computed value under that name.
+                # Clear the transition flag so future routing work is not permanently blocked.
                 self._switching = False
-                # What: call self._schedule_idle_eviction with the declared inputs; why: _finish_exit invokes self._schedule_idle_eviction while performing self cond notify all; the call advances that operation through its result or side effect.
+                # Restore the idle policy that was suspended when shutdown began.
                 self._schedule_idle_eviction()
-                # What: call self._cond.notify_all with the declared inputs; why: _finish_exit invokes self._cond.notify_all while performing raise; the call advances that operation through its result or side effect.
+                # Wake all blocked participants so they observe the rolled-back state.
                 self._cond.notify_all()
-            # What: re-propagate the active failure to the caller; why: RoutingCoordinator._finish_exit stops this rejected path before it can mutate state, dispatch work, or report success.
+            # Preserve the manager exception because it carries the actionable lifecycle failure.
             raise
-        # What: enter the cond managed context before self active name; why: _finish_exit releases this resource or lock after self active name on both success and failure paths.
+        # Commit the terminal router state after the child action succeeds.
         with self._cond:
-            # What: compute active name from the named fixture input; why: the enclosing return or state update later reads active name, so _finish_exit must retain the computed value under that name.
+            # Clear active identity because the daemon no longer owns a routable child lifecycle.
             self._active_name = None
-            # What: compute shutdown owner from the named fixture input; why: the enclosing return or state update later reads shutdown owner, so _finish_exit must retain the computed value under that name.
+            # Release the shutdown reservation because its terminal action completed.
             self._shutdown_owner = None
-            # What: compute switching from false; why: the enclosing return or state update later reads switching, so _finish_exit must retain the computed value under that name.
+            # Clear the transition flag so status accurately reports the completed exit.
             self._switching = False
-            # What: call self._cond.notify_all with the declared inputs; why: _finish_exit invokes self._cond.notify_all while performing return result; the call advances that operation through its result or side effect.
+            # Wake blocked participants so repeated exit hooks can return idempotently.
             self._cond.notify_all()
-        # What: return result from _finish_exit; why: _finish_exit exposes result so its caller can continue with the function\'s computed outcome.
+        # Return the manager result to preserve the public shutdown response contract.
         return result
 
     # What: define shutdown around timeout and force; why: its direct callers call shutdown for shutdown and rely on this exact input and result contract.
@@ -1634,9 +1675,11 @@ class RoutingCoordinator:
         # What: gate on stop child before finish shutdown and owner; why: coordinated_exit admits finish shutdown and owner only for this predicate and excludes the opposite state.
         if stop_child:
             # What: return finish shutdown and owner from coordinated_exit; why: coordinated_exit exposes finish shutdown and owner so its caller can continue with the function\'s computed outcome.
-            return self.finish_shutdown(owner)
+            # Bound lease drain to 30 seconds and child termination to 120 seconds before systemd escalates.
+            return self.finish_shutdown(owner, timeout=120.0, force=True, drain_timeout=30.0)
         # What: return finish detach and owner from coordinated_exit; why: coordinated_exit exposes finish detach and owner so its caller can continue with the function\'s computed outcome.
-        return self.finish_detach(owner)
+        # Force detach after a bounded drain because operating-system exit cannot wait indefinitely.
+        return self.finish_detach(owner, drain_timeout=30.0, force_drain=True)
 
     # What: apply staticmethod behavior to _new_timer; why: Python attaches this named decorator's registration or descriptor semantics to _new_timer.
     @staticmethod

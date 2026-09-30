@@ -7186,3 +7186,30 @@ def test_allocate_loopback_port_validates_adjacent_distributed_store_port():
         service_sock.bind(("127.0.0.1", port))
         # What: bind the adjacent companion port; why: the distributed process-group store must not encounter EADDRINUSE.
         distributed_sock.bind(("127.0.0.1", port + 1))
+
+def test_finish_detach_honors_drain_timeout_and_rolls_back_shutdown() -> None:
+    # Define a detach-capable fake because finish_detach resolves the manager method before draining.
+    class DetachingManager(Manager):
+        # Record detach without touching a real child so the regression stays CPU-only.
+        def detach(self) -> None:
+            # Preserve the active fake model in the call log so an unexpected detach is observable.
+            self.calls.append(("detach", self.model))
+
+    # Create the fake manager that records lifecycle calls without launching a model.
+    manager = DetachingManager()
+    # Build the coordinator with existing CPU-only catalog and readiness fixtures.
+    router = RoutingCoordinator(manager, catalog(), object(), ready_fn=ready)
+    # Acquire one lease so the shutdown drain has an intentionally blocked owner.
+    lease = router.acquire("low")
+    # Reserve shutdown exactly as the public lifecycle endpoint does before finishing.
+    owner = router.begin_shutdown()
+    # Require the bounded non-forced drain to fail rather than waiting forever.
+    with pytest.raises(TimeoutError, match="ownership to drain"):
+        # Use a short deterministic bound because no other thread releases the lease here.
+        router.finish_detach(owner, drain_timeout=0.01)
+    # Confirm timeout rollback reopened routing instead of leaving a shutdown latch.
+    assert router.status()["shuttingDown"] is False
+    # Confirm no detach occurred because the active lease never drained.
+    assert ("detach", "low.gguf") not in manager.calls
+    # Release the arranged lease so the test leaves no ownership behind.
+    lease.release()

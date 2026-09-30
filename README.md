@@ -59,8 +59,11 @@ For More details:
 
 ### AMD ROCm/HIP port
 
-The `amd-rocm-gfx1151` branch contains the native AMD ROCm/HIP port and
-`gfx1151` validation work. Read [AMD ROCm on Radeon 8060S](docs/amd-rocm-gfx1151.md)
+This release includes the native AMD ROCm/HIP port. The Radeon 8060S work is
+qualified as `gfx1151` in [AMD ROCm on Radeon 8060S](docs/amd-rocm-gfx1151.md);
+the separate native model-swap qualification records `gfx1150` evidence in
+[the final swap report](docs/freetoken-swap-final-qualification-2026-09-23.md).
+These architecture labels are not interchangeable.
 for scope and platform-specific boundaries, and [Reproducibility and independent
 extension](docs/reproducibility.md) for the portable public evidence workflow.
 

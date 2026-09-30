@@ -17,9 +17,27 @@ import statistics
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def require_loopback_url(value: str) -> str:
+    """Reject non-loopback targets before benchmark prompts can leave the selected host."""
+    # Parse the complete URL so host validation cannot be bypassed with user-info or path text.
+    parsed = urllib.parse.urlparse(value)
+    # Require an absolute HTTP endpoint because relative and non-HTTP targets are never valid APIs here.
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("--base-url must be an absolute http(s) URL")
+    # Restrict this host-qualified harness to loopback so prompts cannot leak through a mistyped URL.
+    if parsed.hostname.lower() not in LOOPBACK_HOSTS:
+        raise ValueError("--base-url must target a loopback host: localhost, 127.0.0.1, or ::1")
+    # Remove a trailing slash once so every request path is assembled deterministically.
+    return value.rstrip("/")
 
 
 MARKER = "azure-17"
@@ -79,6 +97,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-tokens", type=int, default=16)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args(argv)
+    # Validate the destination before any benchmark request can disclose prompt content.
+    try:
+        # Normalize one approved loopback endpoint for deterministic request assembly.
+        args.base_url = require_loopback_url(args.base_url)
+    except ValueError as error:
+        # Route validation through argparse so callers receive a standard configuration failure.
+        parser.error(str(error))
     if args.samples < 1:
         parser.error("--samples must be positive")
     if args.max_tokens < 1:
@@ -166,7 +191,7 @@ def stream_sample(args: argparse.Namespace, prompt: str) -> dict[str, Any]:
         "usage": usage,
         "errors": errors,
         "ttft_seconds": events[0]["offset_seconds"] if events else None,
-        "token_gap_seconds": gaps,
+        "content_event_gap_seconds": gaps,
         "quality_passed": text.strip() == MARKER and not errors,
     }
 
@@ -192,10 +217,10 @@ def main(argv: list[str] | None = None) -> int:
         sample["prompt_character_count"] = len(prompt)
         samples.append(sample)
     ttft = [sample["ttft_seconds"] for sample in samples if sample["ttft_seconds"] is not None]
-    gaps = [gap for sample in samples for gap in sample["token_gap_seconds"]]
+    gaps = [gap for sample in samples for gap in sample["content_event_gap_seconds"]]
     prompt_token_counts = [sample["usage"].get("prompt_tokens") for sample in samples if sample["usage"]]
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "host": host,
         "classification": "GMKtek EVO-X2 long-context control, not paper replication",
         "request": {
@@ -226,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
                 "p99": nearest_rank(ttft, 0.99),
                 "max": max(ttft) if ttft else None,
             },
-            "token_gap_seconds": {
+            "content_event_gap_seconds": {
                 "p50": nearest_rank(gaps, 0.50),
                 "p95": nearest_rank(gaps, 0.95),
                 "p99": nearest_rank(gaps, 0.99),

@@ -138,11 +138,32 @@ fi
 } >"${ARTIFACT_DIR}/system.txt"
 
 {
-    git -C "${SOURCE_DIR}" rev-parse HEAD
-    git -C "${SOURCE_DIR}" branch --show-current || true
-    git -C "${SOURCE_DIR}" status --short
-    git -C "${SOURCE_DIR}" diff --stat
-    git -C "${SOURCE_DIR}" remote get-url origin 2>/dev/null || true
+    # Record the immutable source revision because reviewers need exact code provenance.
+    printf 'commit=%s
+' "$(git -C "${SOURCE_DIR}" rev-parse HEAD)"
+    # Record the branch label because it identifies the tested line without exposing local paths.
+    printf 'branch=%s
+' "$(git -C "${SOURCE_DIR}" branch --show-current || true)"
+    # Capture porcelain once because only aggregate counts, never private filenames, belong in public evidence.
+    SOURCE_STATUS="$(git -C "${SOURCE_DIR}" status --porcelain=v1)"
+    # Report whether tracked content differs so a nominal commit is not mistaken for a clean checkout.
+    printf 'tracked_changes=%s
+' "$(printf '%s
+' "${SOURCE_STATUS}" | awk 'NF && substr($0, 1, 2) != "??" { count++ } END { print count + 0 }')"
+    # Report the untracked count without publishing names that may contain private model or artifact details.
+    printf 'untracked_entries=%s
+' "$(printf '%s
+' "${SOURCE_STATUS}" | awk 'substr($0, 1, 2) == "??" { count++ } END { print count + 0 }')"
+    # Report only whether an origin exists because a raw remote URL can embed credentials or private hosts.
+    if git -C "${SOURCE_DIR}" remote get-url origin >/dev/null 2>&1; then
+        # Emit a boolean marker so provenance tooling knows the checkout has an upstream without learning its URL.
+        printf 'origin_configured=yes
+'
+    else
+        # Emit the negative marker so missing-upstream evidence is explicit rather than silently omitted.
+        printf 'origin_configured=no
+'
+    fi
 } >"${ARTIFACT_DIR}/source-state.txt"
 
 printf '%s\n' "${GPU_PROBE}" >"${ARTIFACT_DIR}/python-hip.json"

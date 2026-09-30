@@ -362,25 +362,44 @@ class ServeManager:
             return self._stop(timeout, force)
 
     def shutdown(self, timeout: float | None = None, force: bool = False) -> dict:
-        """Permanently close admission to new serves, then stop the current child.
-
-        The latch and stop share one lifecycle transaction. A start already ahead of us is
-        included in the stop; every start queued behind us observes the latch and is rejected.
-        If accounting/signalling fails, the daemon remains up and normal lifecycle calls reopen.
-        """
-        with self._lifecycle:
-            # What: compute lifecycle epoch from 1; why: the enclosing return or state update later reads lifecycle epoch, so shutdown must retain the computed value under that name.
+        """Permanently close admission and stop the child within one bounded deadline."""
+        # Convert the relative timeout once so lifecycle-lock waiting cannot extend the total stop bound.
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        # Block indefinitely only for legacy callers that intentionally omitted a timeout.
+        if deadline is None:
+            acquired = self._lifecycle.acquire()
+        else:
+            # Bound lock acquisition because an in-flight start or switch can otherwise stall system shutdown forever.
+            acquired = self._lifecycle.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        # Fail explicitly when another lifecycle operation consumed the complete shutdown deadline.
+        if not acquired:
+            raise TimeoutError("timed out waiting for serve lifecycle ownership during shutdown")
+        try:
+            # Advance the lifecycle generation so queued recovery tickets cannot revive the departing child.
             self._lifecycle_epoch += 1
+            # Latch manager shutdown before signalling so starts queued behind this transaction fail closed.
             with self._cond:
+                # Mark shutdown requested while the same lifecycle owner still controls the child transition.
                 self._shutdown_requested = True
+                # Wake waiters so they can observe and reject against the terminal latch.
                 self._cond.notify_all()
             try:
-                return self._stop(timeout, force)
+                # Pass only the remaining total budget to child accounting, signalling, and reap waiting.
+                remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                # Stop the exact managed child without allowing lock wait and stop wait to each consume a full timeout.
+                return self._stop(remaining, force)
             except Exception:
+                # Reopen admission only when the terminal child action failed and the daemon remains alive.
                 with self._cond:
+                    # Clear the manager shutdown latch so a later explicit retry can own lifecycle safely.
                     self._shutdown_requested = False
+                    # Wake blocked callers so they observe the rollback immediately.
                     self._cond.notify_all()
+                # Preserve the actionable accounting, signal, or timeout failure for the caller.
                 raise
+        finally:
+            # Release lifecycle ownership on every path so a failed shutdown cannot deadlock later cleanup.
+            self._lifecycle.release()
 
     def _stop(self, timeout: float | None = None, force: bool = False) -> dict:
         grace = self._grace_s if timeout is None else timeout

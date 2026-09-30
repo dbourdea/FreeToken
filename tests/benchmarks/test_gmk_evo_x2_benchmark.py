@@ -14,6 +14,7 @@ from benchmarks.gmk_evo_x2.run_api_benchmark import (
     numeric_summary,
     parse_args,
     require_expected_host,
+    require_loopback_url,
 )
 from benchmarks.gmk_evo_x2.run_quality_suite import evaluate_check
 from benchmarks.gmk_evo_x2.run_multiturn_state_suite import nearest_rank
@@ -37,6 +38,14 @@ class RequireExpectedHostTests(unittest.TestCase):
         with patch("socket.gethostname", return_value="amd-host"):
             with self.assertRaisesRegex(RuntimeError, "refusing benchmark"):
                 require_expected_host("test-machine-1")
+
+    def test_loopback_url_guard_rejects_remote_targets(self) -> None:
+        """The benchmark refuses to send private prompts to a non-loopback API by mistake."""
+
+        # Require a documentation-only remote address to fail before any socket is opened.
+        with self.assertRaisesRegex(ValueError, "loopback"):
+            # Exercise the shared policy helper directly so the failure is independent from argparse output.
+            require_loopback_url("http://192.0.2.10:1919/v1")
 
     def test_throughput_mode_requires_two_requested_tokens(self) -> None:
         """The TPS mode rejects a one-token interval before it can produce nonsense."""

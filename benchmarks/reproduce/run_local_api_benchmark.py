@@ -129,7 +129,7 @@ def stream_request(args: argparse.Namespace) -> tuple[list[StreamObservation], s
                         usage = event["usage"]
                     continue
                 delta = event["choices"][0].get("delta", {})
-                content = delta.get("reasoning_content") or delta.get("content")
+                content = delta.get("content")  # Score visible answer text only; reasoning is not output.
                 if content:
                     observations.append(StreamObservation(offset, str(content)))
     except urllib.error.HTTPError as error:
@@ -161,7 +161,7 @@ def run_sample(args: argparse.Namespace, tokenizer: Any, sample_index: int) -> d
         errors.append("throughput run produced fewer than two generated tokens")
     gaps = [observations[index].offset_seconds - observations[index - 1].offset_seconds for index in range(1, len(observations))]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "sample_index": sample_index,
         "status": "passed" if not errors else "failed",
         "request": {
@@ -183,8 +183,8 @@ def run_sample(args: argparse.Namespace, tokenizer: Any, sample_index: int) -> d
             "warm_ttft_seconds": first,
             "decode_seconds": decode_seconds,
             "decode_tps": decode_tps,
-            "token_gap_seconds": gaps,
-            "token_gap_summary_seconds": numeric_summary(gaps),
+            "content_event_gap_seconds": gaps,
+            "content_event_gap_summary_seconds": numeric_summary(gaps),
         },
         "usage": usage,
         "response": {
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     args.artifact_dir.mkdir(parents=True)
     tokenizer = load_tokenizer(args.tokenizer)
     write_json(args.artifact_dir / "manifest.json", {
-        "schema_version": 1,
+        "schema_version": 2,
         "arguments": {name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()},
         "collection": "loopback-only client; does not start, stop, or configure a server",
     })
@@ -218,14 +218,14 @@ def main(argv: list[str] | None = None) -> int:
     tps = [sample["timing"]["decode_tps"] for sample in samples if sample["status"] == "passed" and sample["timing"]["decode_tps"] is not None]
     ttft = [sample["timing"]["warm_ttft_seconds"] for sample in samples if sample["status"] == "passed" and sample["timing"]["warm_ttft_seconds"] is not None]
     write_json(args.artifact_dir / "summary.json", {
-        "schema_version": 1,
+        "schema_version": 2,
         "requested_samples": args.samples,
-        "successful_samples": len(tps),
+        "successful_samples": len([sample for sample in samples if sample["status"] == "passed"]),
         "decode_tps": {"samples": tps, **numeric_summary(tps)},
         "warm_ttft_seconds": {"samples": ttft, **numeric_summary(ttft)},
         "failed_samples": [sample["sample_index"] for sample in samples if sample["status"] != "passed"],
     })
-    return 0 if len(tps) == args.samples else 2
+    return 0 if all(sample["status"] == "passed" for sample in samples) else 2
 
 
 if __name__ == "__main__":

@@ -56,8 +56,8 @@ body:
     id: gpu
     attributes:
       label: GPU and driver
-      description: "GPU model, VRAM, driver version (`nvidia-smi`). Mention other GPUs in the machine. Only NVIDIA GPUs are supported today; AMD support is on the [Roadmap](https://github.com/FlashML-org/FreeToken/issues/79), please do not open an issue for it."
-      placeholder: RTX 4060 Laptop 8GB, driver 580.xx
+      description: "GPU model, memory, driver/runtime version, and architecture from `nvidia-smi` or `rocminfo`. Mention other GPUs in the machine and whether the run used CUDA or ROCm/HIP."
+      placeholder: Radeon 8060S gfx1151, ROCm 10.x; or RTX 4060 Laptop 8GB, driver 580.xx
     validations:
       required: true
   - type: input

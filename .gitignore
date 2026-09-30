@@ -6,12 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
-# torch.utils.cpp_extension's ROCm auto-hipify writes translated copies next to the
-# CUDA sources it translates (kernel/csrc/gguf/*.cu -> *.hip, *.cuh -> *_hip.cuh);
-# regenerated on every build, never hand-edited.
-*.hip
-*_hip.cuh
-*_hip.h
+# torch.utils.cpp_extension's ROCm auto-hipify writes translated GGUF copies next to their CUDA sources.
+# Scope ignores to this generated directory so future hand-written HIP sources remain visible to Git.
+python/freetoken/kernel/csrc/gguf/*.hip
+python/freetoken/kernel/csrc/gguf/*_hip.cuh
+python/freetoken/kernel/csrc/gguf/*_hip.h
 
 # Distribution / packaging
 .Python

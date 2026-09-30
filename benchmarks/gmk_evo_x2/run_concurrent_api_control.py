@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -29,6 +30,23 @@ DEFAULT_PROMPT = (
     "The scheduler manages incoming inference requests by prioritizing, batching, "
     "and assigning them to available compute resources to optimize throughput and latency. "
 ) * 48
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def require_loopback_url(value: str) -> str:
+    """Reject non-loopback targets before benchmark prompts can leave the selected host."""
+    # Parse the complete URL so host validation cannot be bypassed with user-info or path text.
+    parsed = urllib.parse.urlparse(value)
+    # Require an absolute HTTP endpoint because relative and non-HTTP targets are never valid APIs here.
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("--base-url must be an absolute http(s) URL")
+    # Restrict this host-qualified harness to loopback so prompts cannot leak through a mistyped URL.
+    if parsed.hostname.lower() not in LOOPBACK_HOSTS:
+        raise ValueError("--base-url must target a loopback host: localhost, 127.0.0.1, or ::1")
+    # Remove a trailing slash once so every request path is assembled deterministically.
+    return value.rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -126,7 +144,7 @@ def stream_completion(args: argparse.Namespace) -> tuple[list[StreamObservation]
                     usage = event["usage"]
                 for choice in event.get("choices", []):
                     delta = choice.get("delta", {})
-                    content = delta.get("reasoning_content") or delta.get("content")
+                    content = delta.get("content")  # Score visible answer text only; reasoning is not output.
                     if content:
                         observations.append(StreamObservation(offset, str(content)))
     except urllib.error.HTTPError as error:
@@ -154,6 +172,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args(argv)
+    # Validate the destination before any benchmark request can disclose prompt content.
+    try:
+        # Normalize one approved loopback endpoint for deterministic request assembly.
+        args.base_url = require_loopback_url(args.base_url)
+    except ValueError as error:
+        # Route validation through argparse so callers receive a standard configuration failure.
+        parser.error(str(error))
     if args.concurrency < 1:
         parser.error("--concurrency must be positive")
     if args.rounds < 1:
@@ -234,8 +259,8 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
                 {"offset_seconds": item.offset_seconds, "content": item.content}
                 for item in observations
             ],
-            "token_gap_seconds": gaps,
-            "token_gap_summary_seconds": numeric_summary(gaps),
+            "content_event_gap_seconds": gaps,
+            "content_event_gap_summary_seconds": numeric_summary(gaps),
             "errors": errors,
             "status": "passed" if not errors else "failed",
         }
@@ -260,7 +285,7 @@ def run_round(args: argparse.Namespace, tokenizer: Any, round_index: int) -> dic
             "aggregate_tps": aggregate_tokens / span if span and span > 0 else None,
             "decode_tps": numeric_summary([request["decode_tps"] for request in successful if request["decode_tps"] is not None]),
             "ttft_seconds": numeric_summary([request["ttft_seconds"] for request in successful if request["ttft_seconds"] is not None]),
-            "token_gap_seconds": numeric_summary([gap for request in successful for gap in request["token_gap_seconds"]]),
+            "content_event_gap_seconds": numeric_summary([gap for request in successful for gap in request["content_event_gap_seconds"]]),
         },
         "status": "passed" if len(successful) == args.concurrency else "failed",
     }
@@ -277,9 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     rounds = [run_round(args, tokenizer, index) for index in range(1, args.rounds + 1)]
     aggregate_tps = [item["summary"]["aggregate_tps"] for item in rounds if item["summary"]["aggregate_tps"] is not None]
     all_ttft = [request["ttft_seconds"] for item in rounds for request in item["requests"] if request["ttft_seconds"] is not None]
-    all_gaps = [gap for item in rounds for request in item["requests"] for gap in request["token_gap_seconds"]]
+    all_gaps = [gap for item in rounds for request in item["requests"] for gap in request["content_event_gap_seconds"]]
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "classification": "GMKtek EVO-X2 concurrent API control, not paper replication",
         "host": host,
         "request": {
@@ -301,9 +326,9 @@ def main(argv: list[str] | None = None) -> int:
             "requested_rounds": args.rounds,
             "aggregate_tps": numeric_summary(aggregate_tps),
             "ttft_seconds": numeric_summary(all_ttft),
-            "token_gap_seconds": numeric_summary(all_gaps),
+            "content_event_gap_seconds": numeric_summary(all_gaps),
             "p99_ttft_seconds": nearest_rank_percentile(all_ttft, 0.99),
-            "p99_token_gap_seconds": nearest_rank_percentile(all_gaps, 0.99),
+            "p99_content_event_gap_seconds": nearest_rank_percentile(all_gaps, 0.99),
         },
         "status": "passed" if all(item["status"] == "passed" for item in rounds) else "failed",
     }

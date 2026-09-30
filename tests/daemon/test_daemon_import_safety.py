@@ -114,3 +114,32 @@ def test_daemon_package_imports_without_torch():
         f"daemon import-safety child exited {proc.returncode}\n"
         f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
     )
+
+def test_non_loopback_authentication_policy_rejects_empty_and_template_keys() -> None:
+    # Import helpers directly so this safety gate remains independent of uvicorn and GPU dependencies.
+    from freetoken.daemon.server import _catalog_has_release_authentication, _is_loopback_host
+
+    # Build the smallest catalog-shaped object needed to exercise the startup authentication decision.
+    catalog = type("Catalog", (), {"settings": type("Settings", (), {"api_keys": ()})()})()
+    # Confirm loopback spellings stay available for local development without mandatory credentials.
+    assert _is_loopback_host("127.0.0.1") and _is_loopback_host("::1") and _is_loopback_host("localhost")
+    # Confirm wildcard and ordinary interface binds are treated as network exposure.
+    assert not _is_loopback_host("0.0.0.0") and not _is_loopback_host("192.0.2.10")
+    # Confirm an empty catalog cannot satisfy the release authentication requirement.
+    assert not _catalog_has_release_authentication(catalog, None)
+    # Replace the key list with an empty value to prove presence alone cannot authorize a public bind.
+    catalog.settings.api_keys = ("",)
+    # Confirm an empty credential is rejected even when the tuple itself is non-empty.
+    assert not _catalog_has_release_authentication(catalog, None)
+    # Replace the key list with the shipped marker to prove an unedited example still fails closed.
+    catalog.settings.api_keys = ("REPLACE_WITH_A_GENERATED_SECRET",)
+    # Confirm the public template value is never accepted as a real secret.
+    assert not _catalog_has_release_authentication(catalog, None)
+    # Replace the marker with a generated-looking test secret to prove configured authentication is accepted.
+    catalog.settings.api_keys = ("test-only-generated-secret",)
+    # Confirm a configured inference key satisfies the startup gate.
+    assert _catalog_has_release_authentication(catalog, None)
+    # Remove inference keys so the management-only token cannot accidentally authorize public proxy routes.
+    catalog.settings.api_keys = ()
+    # Confirm the dedicated daemon token alone is insufficient for a non-loopback inference bind.
+    assert not _catalog_has_release_authentication(catalog, "test-only-daemon-token")

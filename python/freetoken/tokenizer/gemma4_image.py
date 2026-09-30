@@ -91,6 +91,13 @@ def gemma4_image_inputs(image: Image.Image) -> Gemma4ImageInputs:
     unit = _PATCH_SIZE * _POOLING_KERNEL_SIZE
     target_height = max(unit, int(math.floor(source_height * scale / unit)) * unit)
     target_width = max(unit, int(math.floor(source_width * scale / unit)) * unit)
+    # Count aligned patches before resizing because the one-unit floor can inflate extreme aspect ratios.
+    target_patch_count = (target_height // _PATCH_SIZE) * (target_width // _PATCH_SIZE)
+    # Reject shapes beyond the fixed vision budget before Pillow allocates an unexpectedly large image.
+    if target_patch_count > max_patches:
+        # Report the unsupported geometry without exposing image content or attempting the dangerous allocation.
+        raise ValueError("image aspect ratio exceeds Gemma4's fixed patch budget")
+    # Resize only after the target is proven to fit the model's fixed patch and memory envelope.
     resized = image.resize((target_width, target_height), Image.Resampling.BICUBIC)
 
     # HWC RGB -> [grid_y, grid_x, channels, patch_y, patch_x] -> flattened.

@@ -18,6 +18,7 @@ import statistics
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -27,6 +28,23 @@ from typing import Any, Iterable
 # This prompt tests transport and deterministic response handling. It is not
 # claimed to reproduce FreeToken's paper workload or to provide a TPS result.
 CANARY_PROMPT = "Return exactly the word GMK_EVO_X2 and nothing else. Do not add punctuation."
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def require_loopback_url(value: str) -> str:
+    """Reject non-loopback targets before benchmark prompts can leave the selected host."""
+    # Parse the complete URL so host validation cannot be bypassed with user-info or path text.
+    parsed = urllib.parse.urlparse(value)
+    # Require an absolute HTTP endpoint because relative and non-HTTP targets are never valid APIs here.
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("--base-url must be an absolute http(s) URL")
+    # Restrict this host-qualified harness to loopback so prompts cannot leak through a mistyped URL.
+    if parsed.hostname.lower() not in LOOPBACK_HOSTS:
+        raise ValueError("--base-url must target a loopback host: localhost, 127.0.0.1, or ::1")
+    # Remove a trailing slash once so every request path is assembled deterministically.
+    return value.rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -114,6 +132,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument("--warmup", action="store_true")
     args = parser.parse_args(argv)
+    # Validate the destination before any benchmark request can disclose prompt content.
+    try:
+        # Normalize one approved loopback endpoint for deterministic request assembly.
+        args.base_url = require_loopback_url(args.base_url)
+    except ValueError as error:
+        # Route validation through argparse so callers receive a standard configuration failure.
+        parser.error(str(error))
     if args.samples < 1:
         parser.error("--samples must be at least one")
     if args.mode == "throughput" and args.max_tokens < 2:
@@ -199,7 +224,7 @@ def stream_completion(
                     continue
                 delta = choices[0].get("delta", {})
                 # Reasoning models may emit their decode tokens in this field.
-                content = delta.get("reasoning_content") or delta.get("content")
+                content = delta.get("content")  # Score visible answer text only; reasoning is not output.
                 # OpenAI streaming commonly sends an empty role-only delta
                 # before the first generated text. It is not model output and
                 # must not become the client-observed TTFT timestamp.
@@ -255,12 +280,12 @@ def make_sample_artifact(args: argparse.Namespace, tokenizer: Any, sample_index:
         )
     if args.mode == "throughput" and decode_tps is None:
         protocol_errors.append("throughput run produced fewer than two generated tokens")
-    token_gaps = [
+    content_event_gaps = [
         observations[index].offset_seconds - observations[index - 1].offset_seconds
         for index in range(1, len(observations))
     ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "sample_index": sample_index,
         "status": "passed" if not protocol_errors else "failed",
         "request": {
@@ -284,8 +309,8 @@ def make_sample_artifact(args: argparse.Namespace, tokenizer: Any, sample_index:
             "decode_tps": decode_tps,
             "client_prefill_tps": observed_prefill_tps,
             "input_tps": observed_prefill_tps,
-            "token_gap_seconds": token_gaps,
-            "token_gap_summary_seconds": numeric_summary(token_gaps),
+            "content_event_gap_seconds": content_event_gaps,
+            "content_event_gap_summary_seconds": numeric_summary(content_event_gaps),
         },
         "usage": usage,
         "response": {
@@ -312,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     args.artifact_dir.mkdir(parents=True, exist_ok=False)
     tokenizer = load_tokenizer(args.tokenizer)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "host": actual_host,
         "expected_host": args.expected_host,
         "python": sys.version,
@@ -350,16 +375,16 @@ def main(argv: list[str] | None = None) -> int:
         gap
         for sample in samples
         if sample["status"] == "passed"
-        for gap in sample["timing"]["token_gap_seconds"]
+        for gap in sample["timing"]["content_event_gap_seconds"]
     ]
     summary = {
-        "schema_version": 1,
-        "successful_samples": len(successful_tps),
+        "schema_version": 2,
+        "successful_samples": len([sample for sample in samples if sample["status"] == "passed"]),
         "requested_samples": args.samples,
         "decode_tps": {"samples": successful_tps, **numeric_summary(successful_tps)},
         "client_prefill_tps": {"samples": successful_prefill_tps, **numeric_summary(successful_prefill_tps)},
         "warm_ttft_seconds": {"samples": successful_ttft, **numeric_summary(successful_ttft)},
-        "token_gap_seconds": {"samples": successful_gaps, **numeric_summary(successful_gaps)},
+        "content_event_gap_seconds": {"samples": successful_gaps, **numeric_summary(successful_gaps)},
         "failed_samples": [sample["sample_index"] for sample in samples if sample["status"] != "passed"],
     }
     write_json(args.artifact_dir / "summary.json", summary)

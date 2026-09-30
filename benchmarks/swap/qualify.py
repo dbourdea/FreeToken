@@ -61,6 +61,14 @@ def require_expected_hostname(expected: str, *, actual: str | None = None) -> st
     return actual
 
 
+# What: define an explicit qualification gate; why: validation must remain active under Python optimization.
+def require(condition: bool, message: str) -> None:
+    # What: reject a failed gate with a runtime error; why: qualification evidence must never continue from an invalid state.
+    if not condition:
+        # What: raise the supplied diagnostic; why: operators need the exact failed gate in the private artifact.
+        raise RuntimeError(message)
+
+
 # What: define http around url and body and timeout; why: its direct callers call http for http and rely on this exact input and result contract.
 def http(url, body=None, timeout=30):
     # What: compute data from body and encode and dumps and json; why: request urllib request request url data data headers later reads data, so http must retain the computed value under that name.
@@ -122,7 +130,7 @@ def canary(url, model, stream=False):
         # What: initialize parts as an empty runtime accumulator; why: canary appends or maps entries into it during parts append choice get delta get content or before consuming the aggregate.
         parts = []
         # What: assert that b data done is present in raw; why: canary requires b data done is present in raw to be true, so a false result stops the invalid state.
-        assert b"data: [DONE]" in raw, "SSE completion marker missing"
+        require(b"data: [DONE]" in raw, "SSE completion marker missing")
         # What: iterate across splitlines and decode and raw to perform doc and choice and startswith and line and loads; why: canary repeats the body only while or for the loop header admits an iteration.
         for line in raw.decode().splitlines():
             # What: gate on startswith and line before doc and loads and json and line; why: canary admits doc and loads and json and line only for this predicate and excludes the opposite state.
@@ -163,9 +171,9 @@ def cancellation_canary(url, model, *, seconds=30):
     # What: compute instance from get and before and instance id; why: assert instance backend instance identity missing later reads instance, so cancellation_canary must retain the computed value under that name.
     instance = before.get("instance_id")
     # What: assert that instance; why: cancellation_canary requires instance to be true, so a false result stops the invalid state.
-    assert instance, "backend instance identity missing"
+    require(bool(instance), "backend instance identity missing")
     # What: assert that before requests active equals 0; why: cancellation_canary requires before requests active equals 0 to be true, so a false result stops the invalid state.
-    assert before["requests"]["active"] == 0, "cancellation test requires an idle backend"
+    require(before["requests"]["active"] == 0, "cancellation test requires an idle backend")
     # What: map the model field as model; why: cancellation_canary sends this field through body so the router selects the canonical model or alias for upstream dispatch.
     body = {"model": model, "stream": True, "max_tokens": 1024, "temperature": 0,
             # What: map the role field as user; why: cancellation_canary carries role through body into data json dumps body encode.
@@ -214,9 +222,9 @@ def cancellation_canary(url, model, *, seconds=30):
                 # What: compute observed from loads and json and http and stats url; why: assert observed instance id instance backend restarted later reads observed, so cancellation_canary must retain the computed value under that name.
                 observed = json.loads(http(stats_url))
                 # What: assert that observed instance id equals instance; why: cancellation_canary requires observed instance id equals instance to be true, so a false result stops the invalid state.
-                assert observed["instance_id"] == instance, "backend restarted before disconnect"
+                require(observed["instance_id"] == instance, "backend restarted before disconnect")
                 # What: assert that observed requests active exceeds 0; why: cancellation_canary requires observed requests active exceeds 0 to be true, so a false result stops the invalid state.
-                assert observed["requests"]["active"] > 0, "generation already finished before disconnect"
+                require(observed["requests"]["active"] > 0, "generation already finished before disconnect")
                 # What: leave the stream loop after enough response bytes arrive; why: cancellation can now be triggered against a live partial response.
                 break
         # What: select the remaining branch that performs raise runtime error stream ended without a; why: cancellation_canary covers the state excluded by the preceding predicate without conflating the two outcomes.
@@ -232,13 +240,15 @@ def cancellation_canary(url, model, *, seconds=30):
         # What: compute after from loads and json and http and stats url; why: assert after instance id instance backend restart later reads after, so cancellation_canary must retain the computed value under that name.
         after = json.loads(http(stats_url))
         # What: assert that after instance id equals instance; why: cancellation_canary requires after instance id equals instance to be true, so a false result stops the invalid state.
-        assert after["instance_id"] == instance, "backend restart cannot count as cancellation"
+        require(after["instance_id"] == instance, "backend restart cannot count as cancellation")
         # What: gate on after before after and before; why: cancellation_canary admits after and before only for this predicate and excludes the opposite state.
         if after["requests"]["active"] == 0:
             # What: require after requests completed == before requests completed; why: the qualifier stops immediately when this protected invariant is false.
             # What: require after requests completed == before requests completed; why: the qualifier stops immediately when this protected invariant is false.
-            assert after["requests"]["completed"] == before["requests"]["completed"], \
-                "normal completion cannot count as cancellation"
+            require(
+                after["requests"]["completed"] == before["requests"]["completed"],
+                "normal completion cannot count as cancellation",
+            )
             # What: map the passed field as true; why: cancellation_canary carries passed into return bytes(raw), {"passed": True, "before": before, "during": observed.
             return bytes(raw), {"passed": True, "before": before, "during": observed,
                                 # What: map the after field as after; why: cancellation_canary carries after into "after": after, "firstContentSeconds": first_content - started.
@@ -398,7 +408,7 @@ def main():
                     # What: compute listing from loads and json and http and base and v1; why: assert item id for item in later reads listing, so main must retain the computed value under that name.
                     listing = json.loads(http(base + "/v1/models", timeout=2))
                     # What: assert that item id for item in listing equals model a model b; why: main requires item id for item in listing equals model a model b to be true, so a false result stops the invalid state.
-                    assert {item["id"] for item in listing["data"]} == {"model-a", "model-b"}
+                    require({item["id"] for item in listing["data"]} == {"model-a", "model-b"}, "model listing did not contain both qualification targets")
                     # What: leave the readiness loop after a valid listing; why: both expected models are visible and qualification can begin.
                     break
                 # What: handle oserror and value error by if time monotonic at least deadline or proc poll; why: main converts that failure into this concrete recovery, response, or cleanup behavior.
@@ -448,7 +458,7 @@ def main():
                     # What: preserve the exact artifacts f after cancel index alias sse literal fragment; why: main passes this fragment verbatim through (artifacts / f"after-cancel-{index}-{alias}.sse").write_bytes(raw), because changing it would alter a protocol payload, serialized fixture, or public message.
                     (artifacts / f"after-cancel-{index}-{alias}.sse").write_bytes(raw)
                     # What: assert that content equals 4; why:  main requires content equals 4 to be true, so a false result stops the invalid state.
-                    assert content == "4", "post-cancellation routing failed"
+                    require(content == "4", "post-cancellation routing failed")
                 # What: compute status entry from true; why: status concurrent passed later reads status entry, so main must retain the computed value under that name.
                 status["cancellationRecoveryPassed"] = True
                 # What: preserve the exact print cancellation recovery ok flush literal fragment; why: main passes this fragment verbatim through print("CANCELLATION_RECOVERY_OK", flush=True), because changing it would alter a protocol payload, serialized fixture, or public message.
@@ -468,9 +478,9 @@ def main():
                             # What: preserve the exact artifacts f concurrent join names index literal fragment; why: main passes this fragment verbatim through (artifacts / f"concurrent-{'-'.join(names)}-{index}.sse").write_bytes(ra, because changing it would alter a protocol payload, serialized fixture, or public me.
                             (artifacts / f"concurrent-{'-'.join(names)}-{index}.sse").write_bytes(raw)
                             # What: assert that content equals 4; why:  main requires content equals 4 to be true, so a false result stops the invalid state.
-                            assert content == "4", "concurrent quality gate failed"
+                            require(content == "4", "concurrent quality gate failed")
                             # What: assert that b usage is present in raw; why: main requires b usage is present in raw to be true, so a false result stops the invalid state.
-                            assert b'"usage"' in raw, "streamed usage block missing"
+                            require(b'"usage"' in raw, "streamed usage block missing")
                     # What: preserve the exact print concurrent ok join names flush literal fragment; why: main passes this fragment verbatim through print("CONCURRENT_OK " + ",".join(names), flush=True), because changing it would alter a protocol payload, serialized fixture, or public message.
                     print("CONCURRENT_OK " + ",".join(names), flush=True)
                 # What: compute status entry from true; why: status idle eviction passed later reads status entry, so main must retain the computed value under that name.
@@ -490,7 +500,7 @@ def main():
                     # What: pause one second before checking idle eviction again; why: the qualifier gives asynchronous unload work time to complete without busy-waiting.
                     time.sleep(1)
                 # What: assert that status get idle eviction passed; why: main requires status get idle eviction passed to be true, so a false result stops the invalid state.
-                assert status.get("idleEvictionPassed"), "idle TTL did not unload the models"
+                require(bool(status.get("idleEvictionPassed")), "idle TTL did not unload the models")
                 # What: preserve the exact print idle eviction ok flush literal fragment; why: main passes this fragment verbatim through print("IDLE_EVICTION_OK", flush=True), because changing it would alter a protocol payload, serialized fixture, or public message.
                 print("IDLE_EVICTION_OK", flush=True)
     # What: handle base exception by status error repr exc; why: main converts that failure into this concrete recovery, response, or cleanup behavior.

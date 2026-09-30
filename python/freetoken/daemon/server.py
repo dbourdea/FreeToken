@@ -24,6 +24,22 @@ DEFAULT_PORT = 1900  # distinct from the serve default (1919)
 DEFAULT_SERVE_PORT = 1919
 
 
+def _is_loopback_host(host: str) -> bool:
+    # Normalize the bind name so capitalization and surrounding whitespace do not alter policy.
+    normalized = host.strip().lower()
+    # Accept only explicit loopback spellings because wildcard and interface addresses expose the API.
+    return normalized in {"127.0.0.1", "::1", "localhost"}
+
+
+def _catalog_has_release_authentication(catalog, token: str | None) -> bool:
+    # Ignore the management-only token here because it does not protect proxied inference routes.
+    _ = token
+    # Snapshot inference API keys so startup validates one consistent catalog state.
+    keys = tuple(catalog.settings.api_keys)
+    # Reject empty and shipped-template credentials because neither safely protects a network bind.
+    return bool(keys) and all(key.strip() and key != "REPLACE_WITH_A_GENERATED_SECRET" for key in keys)
+
+
 def _default_state_dir() -> str:
     env = os.environ.get("FREETOKEN_DAEMON_DIR")
     if env:
@@ -145,6 +161,16 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "ft daemon") -> int:
         # What: preserve the exact print f ft daemon invalid model literal fragment; why: main passes this fragment verbatim through print(f"ft daemon: invalid model catalog: {exc}", file=sys.stderr), because changing it would alter a protocol payload, serialized fixture, or public message.
         print(f"ft daemon: invalid model catalog: {exc}", file=sys.stderr)
         # What: return 2 from main; why: main exposes 2 so its caller can continue with the function\'s computed outcome.
+        return 2
+
+    # Require real authentication before listening beyond loopback so a catalog mistake cannot expose management APIs.
+    if not _is_loopback_host(args.host) and not _catalog_has_release_authentication(catalog, args.token):
+        # Explain the refusal so operators can repair the bind or credential without inspecting source.
+        print(
+            "ft daemon: non-loopback --host requires non-placeholder router.api_keys",
+            file=sys.stderr,
+        )
+        # Return argparse's configuration-error status because the daemon intentionally did not start.
         return 2
 
     # The ONE hard refusal: two daemons cannot co-own one engine. Everything else degrades.

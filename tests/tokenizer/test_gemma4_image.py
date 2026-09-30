@@ -86,3 +86,16 @@ def test_preflight_expansion_uses_the_same_single_marker_pass_as_worker() -> Non
     assert prompt == "before<|image>" + "<|image|>" * 256 + "<image|>after"
     assert msg.mm_pixel_values is not None
     assert msg.mm_image_position_ids is not None
+
+def test_extreme_aspect_ratio_is_rejected_before_large_resize() -> None:
+    # Create a narrow image with modest source pixels but a resize target that would exceed the patch budget.
+    image = Image.new("RGB", (1, 100_000), (0, 0, 0))
+    # Capture the expected validation error so the test proves the allocation guard is active.
+    try:
+        gemma4_image_inputs(image)
+    except ValueError as exc:
+        # Require the public error to identify aspect geometry rather than an incidental Pillow memory failure.
+        assert "aspect ratio" in str(exc)
+    else:
+        # Fail loudly if the dangerous resize path becomes reachable again.
+        raise AssertionError("extreme-aspect image unexpectedly passed the fixed patch budget")

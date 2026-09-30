@@ -205,10 +205,10 @@ def test_cancellation_requires_terminal_abort_without_restart(qualifier, monkeyp
         with pytest.raises(TimeoutError, match="terminal abort"):
             # What: arrange the exact qualifier cancellation canary http test model a seconds fixture fragment; why: the cancellation requires terminal abort without restart scenario feeds this byte-preserved fragment through qualifier.cancellation_canary("http://test", "model-a", seconds=0) before asserting its proto.
             qualifier.cancellation_canary("http://test", "model-a", seconds=0)
-    # What: select the remaining branch that performs with pytest raises assertion error; why: test_cancellation_requires_terminal_abort_without_restart covers the state excluded by the preceding predicate without conflating the two outcomes.
+    # What: select the remaining branch that performs with pytest raises runtime error; why: test_cancellation_requires_terminal_abort_without_restart covers the state excluded by the preceding predicate without conflating the two outcomes.
     else:
-        # What: arrange with pytest raises AssertionError for the scenario; why: test raises assertion error requires this concrete input or helper state before exercising the behavior under test.
-        with pytest.raises(AssertionError):
+        # What: arrange with pytest raises RuntimeError for the scenario; why: test raises assertion error requires this concrete input or helper state before exercising the behavior under test.
+        with pytest.raises(RuntimeError):
             # What: arrange the exact qualifier cancellation canary http test model a seconds fixture fragment; why: the cancellation requires terminal abort without restart scenario feeds this byte-preserved fragment through qualifier.cancellation_canary("http://test", "model-a", seconds=0) before asserting its proto.
             qualifier.cancellation_canary("http://test", "model-a", seconds=0)
     # What: assert that stream closed; why: this assertion protects the cancellation requires terminal abort without restart regression after the test's arranged inputs and exercised call.
