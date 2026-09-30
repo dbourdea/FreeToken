@@ -24,6 +24,10 @@ class AttnType(str, Enum):
     # GQA block-sparse (MiniMax-M3): paged GQA K/V + a per-sparse-layer index-key
     # slab; the indexer picks top-k 128-token blocks per query -> BSAKVCache
     BSA = "bsa"
+    # QSA compressed-block sparse (Qwen3.8-Flash-Next): paged GQA K/V + a compressed
+    # index-key slab (one row per index_ratio tokens, row = slot // index_ratio) +
+    # a per-request pending ring for unclosed groups -> QSAKVCache
+    QSA = "qsa"
 
     @property
     def backend_driven(self) -> bool:
@@ -37,6 +41,9 @@ class AttentionSpec:
     sliding_window: int | None = None
     sm_scale: float | None = None
     sinks: torch.Tensor | None = None
+    # Gemma 4's sliding-attention layers make image soft-token groups
+    # bidirectional during prefill. Full-attention layers remain causal.
+    multimodal_bidirectional: bool = False
 
 
 @dataclass

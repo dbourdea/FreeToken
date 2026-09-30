@@ -1,0 +1,44 @@
+# What: begin unit metadata; why: systemd needs ordering and dependency declarations before starting inference.
+[Unit]
+# What: describe the service; why: operators must distinguish native FreeToken routing from the retired llama runner.
+Description=FreeToken native AMD model router
+# What: start after online networking; why: LAN binding must be ordered without creating a cycle through the watchdog default-target ordering.
+After=network-online.target
+# What: request networking and thermal supervision; why: startup should activate both while allowing their independent boot ordering.
+Wants=network-online.target nemotron-thermal-watchdog.service
+
+# What: begin process configuration; why: systemd needs one authoritative lifecycle for the daemon and its engine child.
+[Service]
+# What: keep the process in the foreground; why: systemd must track the real daemon PID rather than a wrapper.
+Type=simple
+# What: run from the reviewed source checkout; why: relative resources and provenance must resolve to the reviewed deployment commit.
+WorkingDirectory=%h/freetoken-swap/source
+# What: expose the source package; why: the private qualification environment intentionally uses the reviewed checkout without an editable install.
+Environment=PYTHONPATH=%h/freetoken-swap/source/python
+# What: keep Python logs unbuffered; why: journal evidence must appear promptly during long model loads.
+Environment=PYTHONUNBUFFERED=1
+# What: isolate compiled kernels in durable excluded storage; why: concurrent services must not share an untrusted extension cache.
+Environment=TORCH_EXTENSIONS_DIR=%h/local_models/freetoken-swap/runtime/torch-extensions
+# What: bound extension compilation parallelism; why: qualified GMKtek EVO-X2 must retain enough memory for model preload and system services.
+Environment=MAX_JOBS=2
+# What: apply the validated power profile before every launch; why: firmware or reboot state can otherwise drift outside the tested envelope.
+ExecStartPre=%h/.local/bin/freetoken-power-profile.sh
+# What: launch the native daemon, router, and owned engine lifecycle; why: one service must own routing, cleanup, and startup preload without double supervision.
+ExecStart=%h/local_models/freetoken-swap/runtime/venv/bin/python -m freetoken.cli daemon --host 0.0.0.0 --port 1964 --state-dir %h/.local/state/freetoken-swap/daemon --catalog %h/.config/freetoken-swap/models.toml --catalog-watch-interval 5 --serve-python %h/local_models/freetoken-swap/runtime/venv/bin/python --no-oom --stop-serve-on-exit --log-capacity 10000 --log-level info
+# What: restart only after failures; why: transient crashes should recover while intentional stops remain stopped.
+Restart=on-failure
+# What: delay restart attempts; why: GPU memory and sockets need time to settle after a failed process tree.
+RestartSec=15
+# What: terminate with SIGTERM first; why: the daemon must drain and clean up its exact engine process before escalation.
+KillSignal=SIGTERM
+# What: keep daemon and engine in one control group; why: systemd must not leave an orphaned model runner after service stop.
+KillMode=control-group
+# What: allow three minutes for graceful shutdown; why: large GPU allocations and accounting cleanup can take longer than the default.
+TimeoutStopSec=180
+# What: remove the memlock ceiling; why: GPU and pinned-memory paths may require locking qualified buffers.
+LimitMEMLOCK=infinity
+
+# What: begin installation settings; why: enabling the unit must connect it to the persistent user startup target.
+[Install]
+# What: start at the user's default target; why: linger is enabled and the requested model must preload after boot without login.
+WantedBy=default.target

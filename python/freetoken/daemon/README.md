@@ -45,9 +45,15 @@ ft daemon start MODEL --port 1919 -- --moe-cache-auto   # args after -- go to ft
 ft daemon status
 ft daemon logs                                 # stream engine logs (SSE)
 ft daemon health                               # proxied serve /health (camelCased)
-ft daemon metrics                              # engine-only RAM(PSS)+VRAM footprint
+ft daemon metrics                              # engine-only RAM(PSS)+process GPU-memory footprint
 ft daemon switch OTHER_MODEL                    # stop old + start new
+ft daemon models                                # list freetoken-swap named profiles
+ft daemon routing-profiles                       # list runtime model-ID pin profiles
+ft daemon activate-routing-profile coding        # atomically activate a pin map
+ft daemon clear-routing-profile                  # return to direct model IDs
+ft daemon switch-profile coding                 # atomic switch via the local TOML catalog
 ft daemon stop
+ft daemon shutdown                             # stop the serve and then the control plane
 # Recovery only: permit a degraded receipt if the failed engine cannot seal final totals.
 ft daemon stop --force
 ```
@@ -55,17 +61,31 @@ ft daemon stop --force
 Target a non-default daemon with `--url http://host:1900` (or `$FREETOKEN_DAEMON_URL`) and
 `--token`/`$FREETOKEN_DAEMON_TOKEN`.
 
+For named model catalogs and the `start-profile` / `switch-profile` controls, see
+[`docs/freetoken-swap.md`](../../../docs/freetoken-swap.md). Catalog profiles are argument
+vectors for `ft serve`, never shell commands. Optional readiness paths and proxy
+path prefixes remain restricted to the exact manager-owned loopback `${PORT}` target.
+
 ## HTTP API (camelCase JSON, loopback by default)
 
 | Method / path | Notes |
 | --- | --- |
 | `GET /health` | Daemon self-health; always answers, never gated by `--token`. |
+| `GET /v1/models`, `GET /models` | Identical catalog-key-protected public canonical/optional alternate IDs with atomic loaded/unloaded status and no model paths or launch arguments. |
 | `POST /engine/start` `{model,port,args[]}` | Idempotent on the full `(model,port,args)`; a differing config on the same port → `409`. |
 | `POST /engine/stop` `{force?:false}` | Close admission, drain/abort, durably enqueue the final-accounting receipt, then `SIGTERM`→grace→`SIGKILL`. A prepare/outbox failure preserves the engine. |
 | `POST /engine/switch` `{model,port,args[],force?:false}` | One serialized stop-accounting-start transaction. |
+| `GET /router/profiles` | Lists local freetoken-swap named lifecycle profiles for authenticated control clients. |
+| `PUT /router/profiles/active` `{name:string\|null}` | Atomically activates or clears a runtime model-ID pin profile. |
+| `POST /engine/start-profile\|switch-profile` `{name,force?:false}` | Starts or atomically replaces the engine using a validated local profile. |
 | `GET /engine/status` | `{running,pid,model,port,uptimeS,lastExitCode,…}`; outlives any single serve. |
 | `GET /engine/logs?since=` | SSE, ANSI-stripped, tqdm-`\r` collapsed, ring replay, `id:<seq>`, `Last-Event-ID` resume. |
-| `GET /engine/metrics` | `{ramBytes,vramBytes}` — the serve tree's own footprint only. |
+| `GET /router/logs?since=` | SSE, bounded native router admission/proxy/cancellation events. It is separate from engine stdout and records route templates only—never concrete paths, request bodies, headers, query strings, model paths, or keys. |
+| `GET /router/activity`, `/router/activity/stats` | Authenticated bounded body-free inference history and aggregates. Real daemon runs fsync and compact rows under `--state-dir`; persistence health is explicit. |
+| `GET /api/performance`, `/router/performance` | Authenticated, memory-only one-hour history of owned engine process-tree RAM/VRAM; strict RFC3339 `after` filtering. |
+| `GET /router/captures/{id}` | Authenticated opt-in, memory-bounded request/response capture. Credential headers are redacted and binary bodies are Base64. |
+| `/upstream/{model-id}/...` | Guarded direct passthrough with longest-prefix slash-namespaced ID resolution and escaped suffix preservation. Safe configured static suffixes return 409 instead of cold-loading and proxy normally when the exact model is resident. |
+| `GET /engine/metrics` | The serve tree's own `{ramBytes,vramBytes,pids}` footprint only. `ramAvailable`/`vramAvailable` and source fields distinguish a measured zero from an unavailable probe; Linux PSS, NVIDIA NVML/SMI, and AMD SMI process memory are supported. |
 | `GET /engine/health` | Proxied serve `/health` + daemon reachability. |
 | `GET /engine/stats` | Proxied serve `/v1/stats`. |
 | `GET /accounting/pending` | Unacknowledged durable final-accounting receipts, replayable after a Desktop/client crash. |
